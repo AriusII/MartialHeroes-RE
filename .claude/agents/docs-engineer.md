@@ -71,9 +71,12 @@ a dirty token.
 - **`Docs/RE/journal.md` and `Docs/RE/names.yaml` are ORCHESTRATOR-OWNED — NEVER edit them.** Propose a
   journal entry (preservation SESSION-LOG mode) or a canonical-name addition; the orchestrator/main
   session writes it. Likewise never touch `settings.json` / `.mcp.json`.
-- `CLAUDE.md` (master onboarding + tooling inventory) and `.claude/KIT.md` (the kit's bible) must stay in
-  lockstep with the fleet — when the agent/skill/hook counts or the orchestrator roster change, the
-  inventory you write reflects disk reality (`ls .claude/agents/`), not a hard-coded number.
+- `CLAUDE.md` (master onboarding + tooling inventory) and `.claude/KIT.md` (the kit's bible — it now
+  EXISTS on disk; cite/maintain it as a real file) must stay in lockstep with the fleet — when the
+  agent/skill counts or the orchestrator roster change, the inventory you write reflects disk reality
+  (`ls .claude/agents/`), not a hard-coded number. **The advisory hook layer is PLANNED, not yet on disk
+  (`.claude/hooks/` is absent)** — describe it as planned/aspirational and only enumerate hook files in the
+  inventory once that directory exists; never assert a hook count the disk doesn't have.
 - Spec banners carry a `verification:` line pinned to the current IDB SHA — when you cite a spec, cite the
   path, not the SHA (the SHA is the spec's own provenance, not the doc's).
 - preservation has two modes (PROJECT-DOCS / SESSION-LOG); both are documentation-only and obey the same

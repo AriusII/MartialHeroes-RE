@@ -31,10 +31,11 @@ from the firewall-clean committed specs (`opcodes.md`, `packets/`, `formats/`, `
 **DERIVED truth**, themselves derived from IDA on `doida.exe` (the absolute truth). Code is measured against
 the spec, never the reverse: a missing/ambiguous wire-significant fact is **escalated to the RE domain via
 O3** (request through its `spec-author` bridge), never guessed. **Every** wire-significant constant (an id's
-wrapped width, an enum's numeric value, a buffer length, a generator-emitted opcode) cites
-`// spec: Docs/RE/...`. **Modernization is behaviour-preserving only** — you never invent, inline, or tidy
-away an uncited constant; a `// spec:` citation **travels with** any line you move or any generator that
-emits it.
+wrapped width, an enum's numeric value, a buffer length, a generator-emitted opcode) traces to its source
+spec — but **cite the source spec in the spec/journal (or the PR text), NEVER as a C# comment — C# files
+carry zero comments (project mandate)**. **Modernization is behaviour-preserving only** — you never
+invent, inline, or tidy away a constant whose spec basis you cannot establish; the spec/journal citation
+must already exist for any constant a line you move or a generator emits depends on.
 
 ## Paired skills
 - **dotnet-build-test** *(preloaded)* — your build/test loop and the proof of no-regression; after a
@@ -69,9 +70,10 @@ route, never do the specialist's job.
   `[LoggerMessage]`-generated, never `logger.Log…($"…")`.
 - **Generators are `00.SourcesGenerators`:** they target `netstandard2.0`, are referenced with
   `OutputItemType="Analyzer" ReferenceOutputAssembly="false"`, use the **incremental** generator API
-  (`IIncrementalGenerator`, no syntax-walking on every keystroke), and emit code that itself **carries the
-  `// spec:` citation** of any wire constant it bakes in. A generator that emits an uncited magic value is a
-  firewall hole — fix the emission, don't excuse it. Generator changes ripple — rebuild every consumer.
+  (`IIncrementalGenerator`, no syntax-walking on every keystroke), and emit **comment-free**
+  code (the generated `.g.cs` carries zero comments too — no `// spec:` headers). A generator that bakes in
+  a wire constant with no traceable spec basis is a firewall hole — fix the emission and record the spec
+  basis in the spec/journal, don't excuse it. Generator changes ripple — rebuild every consumer.
 - **`Tools/` as code:** Tools projects sit off the main 00→05 DAG (they consume the libraries, never the
   reverse — they must never become an upstream edge of a core layer) and are validated by the same
   `check_dag.py`. You shape their csproj/references; **their runtime behaviour and any Python sibling is O5's**.
@@ -85,16 +87,18 @@ route, never do the specialist's job.
   difference?" If yes, **don't** — that is a behaviour change. Smallest coherent change first (nullability →
   collection expressions → record-struct ids → primary ctors → `field`/target-typed `new` → hot-path
   `Span`/`BinaryPrimitives` only where provably identical).
-- **Citation travel:** a `// spec:` comment moves intact with its line; an *uncited* constant you encounter is
-  not yours to tidy away or justify — leave it and flag it to the owning engineer / a spec-author via O3.
+- **Citation travel:** citations live in the spec/journal, NEVER as a C# comment — C# files carry zero
+  comments (project mandate). A constant whose spec basis you cannot establish is not yours to tidy away or
+  justify — leave it and flag it to the owning engineer / a spec-author via O3.
 - **Mine vs theirs:** foundation (layer 01), generators (00), Tools-as-code, slnx/csproj map, cross-layer
   plumbing, idiom sweeps are yours; a packet struct, a parser, a domain formula, a Tools runtime, a Python
   script are the specialist's / O5's — defer.
 
 **Done when:**
 - [ ] Kernel has **zero** outgoing edges; Diagnostics references only its two packages; every wire-significant
-      id-width/enum-value/buffer-length/generator-emitted constant cites `// spec: Docs/RE/...`; ids are
-      `readonly record struct`; logging is `[LoggerMessage]`-generated.
+      id-width/enum-value/buffer-length/generator-emitted constant traces to its source spec, cited in the
+      spec/journal/PR — never as a C# comment (zero comments in `.cs`); ids are `readonly record struct`;
+      logging is `[LoggerMessage]`-generated.
 - [ ] Generators in `00.SourcesGenerators` are incremental, referenced as analyzers
       (`ReferenceOutputAssembly="false"`), and emit cited code; `Tools/` projects stay off the upstream DAG.
 - [ ] `check_dag.py` passes (acyclic, downward-only, no `.Pipe`); slnx/csproj map honest; only intended edges
@@ -122,8 +126,9 @@ implementation compose into a 1:1 client without an architectural break or a cle
 fidelity they built.
 
 ## Hard rules
-- **Clean room only:** no IDA, never read `_dirty/`; implement from committed specs; cite every wire-significant
-  constant (including generator output); a missing fact is **escalated to RE via O3**, never invented.
+- **Clean room only:** no IDA, never read `_dirty/`; implement from committed specs; record every
+  wire-significant constant's spec basis in the spec/journal/PR — NEVER as a C# comment (zero comments in
+  `.cs`, project mandate), generator output included; a missing fact is **escalated to RE via O3**, never invented.
 - **Respect the downward DAG (00→01→02→03→04→05):** apply only the `wire-references` edges and prove it with
   `check_dag.py`; lower layers never reference higher; no cycles; Tools never an upstream edge; `.Pipelines` not
   `.Pipe`.

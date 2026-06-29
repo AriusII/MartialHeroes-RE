@@ -1,7 +1,7 @@
 ---
 name: ida-mcp-connect
-description: Use before any IDA reverse-engineering session, or when mcp__ida__* tools are unavailable / failing. Probes the local IDA Pro 9.3 MCP server (127.0.0.1:13337), reports UP/DOWN, enumerates the live mcp__ida__* toolset, and refuses to let analysis proceed until the server is reachable with a database open.
-allowed-tools: Bash(python *) Bash(claude *) Read
+description: Use proactively before ANY IDA work and whenever mcp__ida__* tools fail; verifies server liveness, that the correct IDB SHA is loaded, and which endpoint (base vs ?ext=dbg) is active. Probes the local IDA Pro 9.3 MCP server (127.0.0.1:13337), reports UP/DOWN, enumerates the live mcp__ida__* toolset, and refuses to let analysis proceed until the server is reachable with the correct database open.
+allowed-tools: Bash(python *), Bash(claude *), Read, mcp__ida__server_health, mcp__ida__domain_database_info
 model: sonnet
 effort: medium
 ---
@@ -15,9 +15,10 @@ which exposes an MCP server at `http://127.0.0.1:13337/mcp`. All RE skills/agent
 recon, decompilation, opcode mapping, or crypto tracing without a green check here.
 
 The exact `mcp__ida__*` tool names depend on the running IDA build, so this skill discovers them at
-runtime rather than assuming a fixed set. The prized capability is an arbitrary-IDAPython execution
-tool (often named like `execute_script` / `run_python` / `eval`); typed tools
-(`decompile` / `rename` / `xrefs` / `list_strings`) are the fallback.
+runtime rather than assuming a fixed set. The prized capability is arbitrary-IDAPython execution via
+`mcp__ida__py_eval` (one-liner) / `mcp__ida__py_exec_file` (multi-statement harness) /
+`mcp__ida__run_script` (with `save_script` / `read_script` / `list_scripts` to persist reusable
+probes in the DB); typed tools (`decompile` / `rename` / `xrefs` / `list_strings`) are the fallback.
 
 **This is the ground-truth gate.** IDA / `doida.exe` is the single absolute truth for the original's
 behavior, data, and layout — everything downstream confirms its hypotheses *in the binary*, never from
@@ -50,36 +51,33 @@ from one connection).
    **Do NOT proceed to any analysis while DOWN.** Reverse engineering with a dead server produces
    silent garbage. Hand back to the user with the exact fix.
 
-3. **If UP — enumerate the live toolset.** List the `mcp__ida__*` tools currently exposed to this
-   session (from the tool manifest / system reminders). Classify them:
-   - **Script-exec** (preferred): any tool that runs arbitrary IDAPython — look for names containing
-     `execute`, `script`, `run`, `python`, or `eval`. Bundled IDAPython snippets from other RE
-     skills are meant to run through this.
-   - **Debugger** (`mcp__ida__dbg_*`): present only on the `?ext=dbg` endpoint. *Decision: if the
-     `dbg_*` tools are ABSENT, the session is on the base endpoint — re-register on `?ext=dbg`
-     (`claude mcp add --transport http ida "http://127.0.0.1:13337/mcp?ext=dbg"`) and restart, so
-     ground-truth confirmation is available. The `?ext=dbg` endpoint is a superset; prefer it always.*
-   - **Typed fallbacks**: `decompile`, `rename`/`set_name`, `xrefs`, `list_strings`,
-     `get_function`, etc. Use these when no script-exec tool is present.
-   Report which category is available so downstream skills know how to call IDA.
-
-4. **Confirm a database is actually loaded.** A reachable socket is not the same as a loaded IDB.
-   If a script-exec tool exists, run a one-liner sanity check (e.g. read `idaapi.get_root_filename()`
-   / count functions via `idautils.Functions`) to confirm the open database is the Martial Heroes
-   client and not an empty/other IDA instance. If a typed tool exists instead, call the cheapest one
-   (e.g. list a few strings) to confirm responses are real. If the database looks wrong or empty,
-   warn the user before continuing.
-
-5. **`server_health` — the structured UP report.** When a `server_health` tool exists, call it: it
-   returns `idb_path` / `module` / `imagebase` / `auto_analysis_ready` / `hexrays_ready` /
-   `strings_cache`. This is the authoritative confirmation that the **correct, non-empty** Martial
-   Heroes IDB is loaded (`module`/`idb_path` is the `doida.exe` client) and that analysis is ready.
+3. **If UP — call `server_health`.** Run `mcp__ida__server_health`: it reports whether the server is
+   up and Hex-Rays/analysis are ready (`auto_analysis_ready` / `hexrays_ready` / `strings_cache`).
    If `auto_analysis_ready` is false, recovery results are unreliable — wait/warn. If `hexrays_ready`
-   is false, decompile calls will fail until warm-up.
+   is false, decompile calls will fail until warm-up. A reachable socket alone is NOT a loaded IDB.
 
-6. **`server_warmup` (optional, recommended).** If the report shows Hex-Rays uninitialized or caches
-   cold, call `server_warmup` (init Hex-Rays / build caches) once so the first heavy
-   decompile/xref/string query in the session is not paying cold-start cost. Skip if already warm.
+4. **Confirm the CORRECT IDB via `domain_database_info`.** Run `mcp__ida__domain_database_info`: it
+   returns the open database's `idb_path` / `module` / `imagebase` and — critically — the input file
+   **SHA-256**. Confirm `module`/`idb_path` is the `doida.exe` client (not `Main.exe`, an empty, or
+   another instance) and **capture the SHA-256 to pin** — every downstream spec/journal cites this one
+   build. If it looks wrong or empty, STOP and warn before any analysis.
+
+5. **Detect the endpoint (base vs `?ext=dbg`).** Enumerate the live `mcp__ida__*` toolset and check
+   for the debugger tools `mcp__ida__dbg_status` / `mcp__ida__dbg_threads`:
+   - **Present** ⇒ the session is on the `?ext=dbg` superset (static + dynamic from one connection) —
+     the preferred state.
+   - **Absent** ⇒ the session is on the base (static-only) endpoint. Re-register on `?ext=dbg` and
+     restart so ground-truth debugger confirmation is available:
+     ```
+     claude mcp add --transport http ida "http://127.0.0.1:13337/mcp?ext=dbg"
+     ```
+   Also classify the rest of the toolset so downstream skills know how to call IDA:
+   - **Script-exec** (`mcp__ida__py_eval` / `py_exec_file` / `run_script` + `save_script` /
+     `read_script` / `list_scripts`) — bundled IDAPython snippets run through these.
+   - **Typed** (`decompile`, `rename`, `xrefs_to`, `domain_strings`, `func_query`, …) — the fallback.
+
+6. **Warm the DB.** Call `mcp__ida__refresh_strings_cache` once so the first string-driven query in
+   the session (recon / opcode / crypto hunts all lean on strings) is not paying a cold-cache cost.
 
 7. **Point the analyst at the CAPABILITY MAP.** Before any recovery call, read the bundled toolbox
    reference so the right tool is chosen for the task (and the firewall lanes are respected):

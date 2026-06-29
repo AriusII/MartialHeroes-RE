@@ -6,7 +6,7 @@ verification: confirmed (re-confirmed against IDB SHA 263bd994, actor-world audi
 ida_reverified: 2026-06-27
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
-conflicts: Renderer object (§4) and 16-slot render pointer-cache (§4.1) not re-walked this pass (static-hypothesis); NetClient inner field offsets (§3.3) and ActorManager inner fields (§3.7) carried from prior dirty note (static-hypothesis); keepalive interval UNIT (ms vs s) and several MainWindow service-slot identities (§3.10) static-hypothesis. 2026-06-17 Campaign-17 re-confront (263bd994): the MainWindow +0x500 write is now CODE-CONFIRMED, and its occupant is a distinct ~0xC8-byte state-5 command handler (NOT the 16-byte MainHandler hub) — §3.10 / §3.10a / §6 corrected. 2026-06-20 CYCLE 7: display FRAMERATE config inertness RESOLVED — statically exhaustive (the only two references to the config field are both stores, no reader), so the 60 FPS cap is confirmed hardcoded/inert (§16); the Diamond base-object layout (§3.0) is added
+conflicts: Renderer object (§4) and 16-slot render pointer-cache (§4.1) not re-walked this pass (static-hypothesis); NetClient inner field offsets (§3.3) and ActorManager inner fields (§3.7) carried from prior dirty note (static-hypothesis); keepalive interval UNIT (ms vs s) and several MainWindow service-slot identities (§3.10) static-hypothesis. 2026-06-17 Campaign-17 re-confront (263bd994): the MainWindow +0x500 write is now CODE-CONFIRMED, and its occupant is a distinct ~0xC8-byte state-5 command handler (NOT the 16-byte MainHandler hub) — §3.10 / §3.10a / §6 corrected. 2026-06-20 CYCLE 7: display FRAMERATE config inertness RESOLVED — statically exhaustive (the only two references to the config field are both stores, no reader), so the 60 FPS cap is confirmed hardcoded/inert (§16); the Diamond base-object layout (§3.0) is added. 2026-06-28 wave-5 reconciliation: §4 camera-region corrected — the single view_matrix row at +0x2B974 (64 B) is superseded by a two-field camera-basis cache (camera_world_pos +0x2B974 12 B, camera_orientation +0x2B980 64 B); authoritative layout in renderer_device.md §2/§6.
 status: code-confirmed
 sample_verified: false   # layout recovered from binary analysis; no live capture
 subsystems: [scene_lifecycle, render_pipeline, network, actor, sound, vfs, ui_system, effects, game_loop, input, scripting]
@@ -122,7 +122,7 @@ object; the pointed-to type is named but its layout is in its own spec section o
 
 ### 3.0 Diamond base object — shared head of every engine class (CODE-CONFIRMED)
 
-Cross-reference: `specs/client_architecture.md §1A` for the object-model / RTTI-lifecycle behaviour.
+Cross-reference: `specs/client_workflow.md §1A` for the object-model / RTTI-lifecycle behaviour.
 
 The 3D layer is the **"Diamond" scene-graph engine** (an OpenSceneGraph-style Direct3D 9 scene
 graph; ~90 engine RTTI classes). A single abstract refcounted base, `GObject`, anchors the
@@ -164,7 +164,7 @@ share the same +0x00 / +0x04 / +0x08 head as above.
 > **Allocator note.** All Diamond and gameplay objects are allocated via plain CRT
 > `operator new → malloc → HeapAlloc` on the process heap — there is **no** custom game pool /
 > arena / free-list; placement-`new` appears only as STL in-place construction. (See
-> `specs/client_architecture.md §1A.6`.)
+> `specs/client_workflow.md §1A.6`.)
 
 ### 3.1 GameState — 16 bytes (CODE-CONFIRMED)
 
@@ -511,8 +511,11 @@ Cross-reference: `specs/client_runtime.md §3` for the render-pipeline behaviour
 | +0x2B6D0 | 1 | uint8 | `windowed` | 1 = windowed mode, 0 = fullscreen. |
 | +0x2B734 | 4 | ptr | `d3d9_interface` | `IDirect3D9*`; used for device reset. |
 | +0x2B738 | 4 | ptr | `d3d9_device` | `IDirect3DDevice9*`; the primary D3D device. This is the most-referenced pointer in the binary: every per-frame D3D draw call routes through it. CODE-CONFIRMED. |
-| +0x2B974 | 64 | float[16] | `view_matrix` | Saved 4×4 VIEW matrix (column-major, IEEE-754 float). |
-| +0x2B9C0 | 1 | uint8 | `view_dirty` | Flag set when the view matrix has changed and needs to be re-uploaded to D3D. |
+| +0x2B974 | 12 | float[3] | `camera_world_pos` | **Camera-basis cache (corrected):** current camera world position (X, Y, Z); written per-frame by `Renderer_SetupCameraAndFrustum`. Authoritative layout: `Docs/RE/structs/renderer_device.md §2/§6`. |
+| +0x2B980 | 64 | D3DMATRIX | `camera_orientation` | Current camera orientation matrix (translation cleared; rotation/scale only); written per-frame. Read by billboard and effect systems as the engine-wide current-camera basis. Authoritative layout: `Docs/RE/structs/renderer_device.md §2/§6`. |
+| +0x2B9C0 | 1 | uint8 | `view_dirty` | Flag set when the view transform has changed and needs to be re-uploaded to D3D. |
+
+> **Camera-region correction (2026-06-28, reconciled against `Docs/RE/structs/renderer_device.md §2/§6`).** The earlier label "`view_matrix` (64 bytes, float[16])" at +0x2B974 is superseded. The correct layout is a **camera-basis cache** comprising two distinct fields: `camera_world_pos` (12 bytes, float[3]) at +0x2B974 and `camera_orientation` (64 bytes, D3DMATRIX) at +0x2B980, both written per-frame by `Renderer_SetupCameraAndFrustum` and read by billboard and effect systems. `Docs/RE/structs/renderer_device.md §2/§6` is authoritative for this region.
 
 > **Note on object size.** The size figure (~177 860 bytes = 0x2B6C4) is the span to the display
 > width field; the true object end may be slightly larger. An engineer implementing a C# mirror
@@ -805,6 +808,7 @@ at nearly every level of the call graph; they are infrastructure, not domain log
 | SoundManager runtime behaviour | `specs/client_runtime.md §1` |
 | GHTexManager / Effects runtime | `formats/effects.md`, `specs/client_runtime.md §3` |
 | Renderer pipeline (toon/bloom) | `specs/client_runtime.md §3` |
+| `GHRenderer` full field layout (camera-basis cache, D3D9 device, present params, glow chain) | `structs/renderer_device.md` |
 | VFS on-disk archive format | `formats/pak.md` |
 | FrameTickScheduler dispatch | `specs/game_loop.md` |
 | MainWindow / GU widget tree | `specs/ui_system.md`, `specs/client_runtime.md §2` |
@@ -861,6 +865,7 @@ The following information is **new** with respect to the currently committed spe
   inventory, and address-space ordering — not previously captured in any committed spec.
 - `BillingState` full field map (§3.5) — `names.yaml` has only a one-line note.
 - `GHTexManager` / EffectManager dual-name note and hardcoded effect identifiers (§3.9).
+- **(2026-06-28, reconciled)** §4 camera-region corrected: the single `view_matrix` row at +0x2B974 is superseded by the **camera-basis cache** layout (`camera_world_pos` 12 B at +0x2B974, `camera_orientation` 64 B at +0x2B980); authoritative spec: `structs/renderer_device.md §2/§6`.
 
 ---
 

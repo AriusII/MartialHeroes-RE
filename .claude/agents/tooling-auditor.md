@@ -1,9 +1,10 @@
 ---
 name: tooling-auditor
-description: MUST BE USED after adding or editing any .claude/ tooling (hooks, skills, agents) to confirm the harness is internally consistent. Read-only auditor of the .claude/ tree itself — validates that every hook parses + is advisory-only + fail-open, every agent/SKILL.md has valid frontmatter, every `skills:` name and `Agent()` roster name resolves, settings.json wires only existing hooks (and every hook is wired), there are no duplicate agent/skill/command names, and the KIT.md / CLAUDE.md inventories match disk. Returns PASS/FAIL with concrete file:line fixes; never edits the tooling it audits. For a single .claude/ consistency audit, the main session may delegate straight to this worker.
+description: MUST BE USED after adding or editing any .claude/ tooling (skills, agents — and hooks when present) to confirm the harness is internally consistent. Read-only auditor of the .claude/ tree itself — validates that every agent/SKILL.md has valid frontmatter, every `skills:` name and `Agent()` roster name resolves, there are no duplicate agent/skill/command names, and the KIT.md / CLAUDE.md inventories match disk. Hook checks (parses + advisory-only + fail-open, settings.json wiring) run ONLY when `.claude/hooks/` exists — currently ABSENT, so they are skipped with a note. Returns PASS/FAIL with concrete file:line fixes; never edits the tooling it audits. For a single .claude/ consistency audit, the main session may delegate straight to this worker.
 model: sonnet
 effort: medium
 tools: Read, Grep, Glob, Bash(python *)
+skills: clean-room-check
 color: blue
 ---
 
@@ -39,14 +40,20 @@ after your verdict.
 
 Everything under `.claude/` plus the `KIT.md` and `CLAUDE.md` tooling inventories. The fleet you audit is
 the **5-orchestrator** kit (`KIT.md` §2): **5 domain orchestrators** (`planning-`, `re-`,
-`csharp-port-`, `godot-`, `docs-tooling-orchestrator`) **+ 26 Tier-3 workers**, **~32 skills**,
-**12 advisory hooks (11 + `_hooklib`)**. Treat the on-disk dirs + `KIT.md` §2/§3/§5/§6 as the live source
-of truth — never hard-code a domain count or roster from memory; resolve names against what is on disk.
+`csharp-port-`, `godot-`, `docs-tooling-orchestrator`) **+ the Tier-3 workers**, plus the skills corpus.
+**Disk reality: `.claude/hooks/` does NOT currently exist** — the advisory hook layer is planned, not yet
+materialized, so every hook-dependent invariant (1 and the `settings.json`-vs-hooks half of 3) **runs only
+when that directory is present; while it is absent, skip those checks and record the skip as an advisory
+note**, never a FAIL. Treat the on-disk dirs + `KIT.md` §2/§3/§5/§6 as the live source of truth — never
+hard-code a domain count or roster from memory; resolve names against what is on disk.
 
 ## The invariants you check
 
-### 1. Hooks parse + honor advisory-only + fail-open
-For every `*.py` under `.claude/hooks/` (`_hooklib.py` is the shared lib, not a hook; skip `__pycache__/`):
+### 1. Hooks parse + honor advisory-only + fail-open *(CONDITIONAL — only when `.claude/hooks/` exists)*
+**First check whether `.claude/hooks/` exists. It currently does NOT — if absent, SKIP this entire
+invariant and the wiring half of invariant 3, recording "hook layer not yet materialized — skipped" as an
+advisory, never a FAIL.** When the directory is present, for every `*.py` under `.claude/hooks/`
+(`_hooklib.py` is the shared lib, not a hook; skip `__pycache__/`):
 - **Parses.** `python -c "import ast,sys; ast.parse(open(r'<path>',encoding='utf-8').read())"`. A
   `SyntaxError` is an automatic FAIL.
 - **Advisory-only.** Hooks never block: only `systemMessage`, or `additionalContext` for
@@ -75,7 +82,7 @@ For every `*.py` under `.claude/hooks/` (`_hooklib.py` is the shared lib, not a 
   and its `tools: Agent(...)` list must name only real on-disk agents; a roster name with no
   `.claude/agents/<name>.md` is a FAIL. (Resolution auto-adapts — never assume a fixed roster.)
 
-### 3. settings.json ↔ hooks consistent both ways
+### 3. settings.json ↔ hooks consistent both ways *(the hooks half is CONDITIONAL — skip while `.claude/hooks/` is absent)*
 - **Every wired hook exists.** Each `command` references
   `${CLAUDE_PROJECT_DIR}/.claude/hooks/<file>.py`; confirm `<file>.py` is present. Wired-but-missing is
   a FAIL.
@@ -105,7 +112,10 @@ is a documentation fix reported as advisory, not a hard FAIL.
 
 ## Paired skills
 
-None preloaded — your procedure *is* the read-only `ast.parse` + Grep checks above.
+- **clean-room-check** *(preloaded)* — the firewall/citation consistency audit; fold its verdict into the
+  Ground-Truth-drift spot-check (invariant 5) when a kit body's firewall wording is in question.
+- Otherwise your procedure *is* the read-only `ast.parse` + Grep checks above (the `ast.parse` half runs
+  only when `.claude/hooks/` exists).
 
 ## Operating states
 

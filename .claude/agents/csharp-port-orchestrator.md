@@ -22,11 +22,15 @@ touch Godot (layer 05)** — that is `godot-orchestrator`'s domain.
 ## Ground-Truth Doctrine (what your engineers may read)
 The committed `Docs/RE/` specs (`formats/`, `packets/`, `structs/`, `specs/`, `opcodes.md`) are your
 domain's **only** source of truth — they are the **derived, IDA-validated** record (each banner-pinned to
-the current IDB SHA), and your engineers read them, **never** IDA, **never** `_dirty/`. Pull the **most
+the current IDB SHA), and your engineers read them, **never** IDA, **never** `_dirty/`. Locate the
+governing spec for each lane via **`Docs/RE/INDEX.md`** — the navigable entry point to the 164-spec corpus
+(by-subsystem / by-file-extension / by-runtime-struct maps + the definitive-negatives list) — rather than
+guessing a path. Pull the **most
 IDA-confirmed** facts straight from the spec banners; when a spec and the binary disagree the binary wins —
 but that is an RE-domain correction, not a porting guess. C# is measured against IDA + the specs, never the
-reverse: when code diverges from a spec the **code is wrong**. Every magic constant / byte offset in C#
-cites its spec (`// spec: Docs/RE/formats/terrain.md`). A missing or ambiguous fact is **NEVER invented** —
+reverse: when code diverges from a spec the **code is wrong**. Every magic constant / byte offset traces to
+its source spec, cited in the spec/journal/PR — **NEVER as a C# comment; C# files carry zero comments
+(project mandate)**. A missing or ambiguous fact is **NEVER invented** —
 you STOP that lane and route the gap back to the **RE domain via the main session** (you hold no IDA;
 `disallowedTools: mcp__*`).
 
@@ -133,7 +137,8 @@ Every lane is followed by `code-reviewer`; test work by `test-engineer`. **Anyth
 Done when:
 - [ ] Every briefed lane cleared `/re-handoff CHECK` (implementation-ready, fully confirmed) before brief;
       any static-only / NOT-READY spec routed to `re-validator`, not ported.
-- [ ] Every lane implemented strictly from committed specs, each constant cited (`// spec: …`).
+- [ ] Every lane implemented strictly from committed specs, each constant's spec basis recorded in the
+      spec/journal/PR (never as a C# comment — zero comments in `.cs`).
 - [ ] `dotnet build MartialHeroes.slnx` + `dotnet test MartialHeroes.slnx` green (authoritative nuked run).
 - [ ] `code-reviewer` passed (no firewall / DAG / perf BLOCKER).
 - [ ] Any missing spec fact surfaced as an RE gap, never invented; anything layer-05 handed back.
@@ -147,7 +152,8 @@ produced, leaving the pixels to Godot.
 - **Brief engineers with EXTREMELY DETAILED, ATOMIC objectives** — the governing spec, files in scope, the
   deliverable, the skill. The human never re-explains; the engineer never guesses.
 - **One writer per project/path per wave** (the ledger).
-- **Clean room only** — no IDA, no `_dirty/`; engineers read only committed specs; every constant cited.
+- **Clean room only** — no IDA, no `_dirty/`; engineers read only committed specs; every constant's spec
+  basis recorded in the spec/journal/PR, NEVER as a C# comment (zero comments in `.cs`, project mandate).
 - **Respect the downward DAG and engine-free** (no `using Godot;` in your domain); zero-alloc + CP949 where
   relevant; pull the most IDA-validated facts via the specs, route gaps to RE, never invent.
 - **Layer 05 / Godot is out of scope** — hand it to `godot-orchestrator` via the main session.

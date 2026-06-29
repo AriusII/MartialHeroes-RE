@@ -10,6 +10,7 @@ ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): dispatch architect
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: RESOLVED this pass — (a) major-0 is a hardwired (0,0) handshake branch, NOT an inline switch (doc reworded); (b) install raw-store counts corrected to Response 102 / Push 65 (was 101/66; derived counts unchanged: 100 Response slots / 99 distinct handlers / 2 NULL slots 0,27 / one live default); (c) keepalive duality recorded — the ctor-armed (2,10000)@20s frame AND the runtime C2S 2/112 toggle are BOTH real, neither's on-wire cadence pinned (capture-pending). CYCLE 2 EXTENSION (2026-06-19): (d) THREE-thread model resolved; (e) 2/10000 body = 4 bytes; (f) Response/Push install slot maps folded in (§2a/§2b); (g) 5/146→C2S 2/146 ack-request handshake recorded; (h) {202/203/232} 3/100 codes prime GameState=2; (i) PHANTOM REFUTED — no 5000/10000/10001 string-id class. 2026-06-24 network-dispatch audit: (j) §1.4 step-3 corrected — (0,0) branch sets suppress latch +0x141BC, not a separate key-exchange-complete flag; (k) §4.5a 5/146 system-message string id resolved to 51027; (l) §5.1 10001 timer two-interval fact (5000 ms / 10000 ms); (m) §4.4a recv buffer geometry added
+consolidated: 2026-06-29 — network_protocol.scrub.md absorbed; unique facts folded: (A) Net_DispatchInboundByMajorMinor named in §1 prose [confirmed per CYCLE 14 re-anchor f61f66a9]; (B) send-convergence canonical names Net_SendPacket / Net_EncryptOutboundPacket / Net_Cipher_OutboundXorRol3Round / Net_CompressOutboundPacket added to §6.1 [static-hypothesis; unverified at f61f66a9]; (C) pre-convergence build chain Net_AllocPacketBuffer → NetMsgBuffer_Construct → PacketBuf_AppendBytes added to §6.1 [static-hypothesis; unverified at f61f66a9]; (D) send_timestamp field at +0x141B0 noted in §6.1 [static-hypothesis; unverified at f61f66a9]; (E) C2S payload sizes 1/9=40B / 1/14=1B routed to opcodes.md, not folded here; source header a verbatim dup of this master header; no net_contracts.md cross-ref present in master to remove.
 ---
 
 # Network Dispatch & Connection Lifecycle — Clean-Room Specification
@@ -75,9 +76,9 @@ conflicts: RESOLVED this pass — (a) major-0 is a hardwired (0,0) handshake bra
 
 ## 1. Master receive dispatcher
 
-A single function is the entry point for every framed game packet that has been received,
+A single function — **`Net_DispatchInboundByMajorMinor`** — is the entry point for every framed game packet that has been received,
 decompressed, and is ready to act on. Its job is to read the opcode out of the frame header and
-fan out to the correct family handler. *(STRUCTURE-HIGH; build 263bd994.)*
+fan out to the correct family handler. *(STRUCTURE-HIGH; build 263bd994; canonical name confirmed by CYCLE 14 re-anchor on f61f66a9.)*
 
 ### 1.1 Frame header read
 
@@ -817,11 +818,16 @@ plaintext payload
    → enqueue → send
 ```
 
-The send-chain convergence point (the single routine that ~all send sites flow through) stamps a
-`GetTickCount` timestamp, runs the **cipher gate**, then the **compress stage** (swapping in the
-compressed buffer and freeing the original), then hands the frame to the queue/transport writer.
+The send-chain convergence point — **`Net_SendPacket`** — (the single routine that ~all send sites flow through) stamps a
+`GetTickCount` timestamp into the network-client's **`send_timestamp`** field at `+0x141B0` (the tick-count value the keepalive
+timer of §4.5a reads for the idle predicate; the adjacent suppress latch at `+0x141BC` is documented in §1.4 and §4.5b),
+runs the **cipher gate** (**`Net_EncryptOutboundPacket`** — a thin wrapper routing to **`Net_Cipher_OutboundXorRol3Round`**,
+a stateless 3-pass XOR/ROL transform over the payload), then the **compress stage**
+(**`Net_CompressOutboundPacket`** — raw-block LZ4, `crypto.md §3.2`) (swapping in the compressed buffer and freeing the
+original), then hands the frame to the queue/transport writer.
 **The order is cipher THEN compress.** **Header-only frames (`size == 8`) bypass both stages.**
-*([confirmed].)*
+*([confirmed] pipeline shape and ordering; canonical function names and `send_timestamp` at `+0x141B0`
+are [static-hypothesis: sourced from names.yaml at build 263bd994; unverified at f61f66a9].)*
 
 > **Send fan-in (corrected count — binary wins).** The convergence is reached by **105 distinct
 > builder functions emitting 104 unique `(major, minor)` opcodes** — 105 call sites, each a distinct
@@ -830,6 +836,20 @@ compressed buffer and freeing the original), then hands the frame to the queue/t
 > request — so the 105 builders map onto 104 unique opcodes. (Earlier "~104 builders" wording is
 > corrected to **105 builders / 104 unique opcodes**.) The per-builder opcode census is owned by the
 > C2S catalogue in `opcodes.md`; what each builder's payload bytes *mean* is `[capture/debugger-pending]`.
+
+> **Pre-convergence packet build-up chain ([static-hypothesis: sourced from names.yaml at build 263bd994; unverified at f61f66a9]).**
+> Before a C2S packet reaches `Net_SendPacket`, the client builds it through a three-step helper pattern:
+>
+> | Step | Function | Action |
+> |---|---|---|
+> | 1 — Allocate | **`Net_AllocPacketBuffer`** | Allocates the raw memory block that will hold the complete packet (header + payload). |
+> | 2 — Construct | **`NetMsgBuffer_Construct`** | Receives the raw pointer; writes the 8-byte `NetPacketHeader` (size field initialised to `8`; major and minor opcode fields filled) and returns a `NetMsgBuffer` wrapper. |
+> | 3 — Append | **`PacketBuf_AppendBytes`** | Copies caller-supplied payload bytes after the header and updates the `size` word at `+0` to reflect the new total. May be called multiple times for multi-field payloads. |
+> | 4 — Send | **`Net_SendPacket`** | Passes the completed buffer through the cipher → compress → queue pipeline above. |
+>
+> The `NetMsgBuffer` wrapper encapsulates the raw memory pointer, manages the dynamic-growth append interface,
+> and keeps the `size` word consistent. It is an in-process construction aid; the wire sees only the completed
+> frame bytes.
 
 ### 6.2 Inbound (server → client), before dispatch
 

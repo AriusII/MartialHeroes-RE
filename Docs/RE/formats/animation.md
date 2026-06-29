@@ -4,7 +4,7 @@
 > NO binary code addresses. Consumed by Assets.Parsers. Every offset an engineer cites must
 > reference this file.
 >
-> verification: sample-verified (layout, incl. BANI body); confirmed (loader-control-flow facts); handedness capture/debugger-pending; CYCLE 14 re-anchor (f61f66a9): 2 facts re-confirmed SAME, 0 corrected
+> verification: sample-verified (layout, incl. BANI body); confirmed (loader-control-flow facts); handedness capture/debugger-pending; CYCLE 14 re-anchor (f61f66a9): 2 facts re-confirmed SAME, 0 corrected; deep-cartography deepening (f61f66a9, 2026-06-29): Q1 static bound sharpened toward id_a at per-actor registry (added after CYCLE-7 reconciliation note); no layout changes
 > re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20): runtime stand idle = actormotion col16 (record +0x44, direction-array-A element 1), NOT col15/+0x40; death SFX/effect = motion_ids_b element b[4] (+0x74), NOT b[5]; the runtime idle catalogue lookup is keyed by the APPEARANCE KEY (player = 5·(class+4·variant)−24), NOT col2/skin_class; the a[1] motion id joins to a `.mot` clip through the motlist.txt-seeded clip registry keyed by the `.mot` header `id_b` (no `g{id}.mot` runtime sprintf exists).
 > re-verified again (2026-06-21): BANI body is now DECODED (identical standard track/keyframe layout, sample residual 0); the BANI "all-files-constant" claims are CORRECTED (the `unknown_field` and `track_count` are NOT constant — three rig groups exist); the oversized standard clip is identified. See §BANI variant and §Oversized standard clip.
 > re-verified (2026-06-24): static-analysis + five-sample on-disk re-confirmation pass (IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee). Zero structural drift. Confirmed: header read order (id_a → id_b → name LenStr → frame_count), 10-fps duration rule, track-array layout (8-byte preamble + key_count×28 keyframes), keyframe 7 f32 vec3+quat XYZW, track_descriptor low-byte=bone_id (upper 3 bytes reserved/zero on all observed tracks), id_b load-time registry key, motlist.txt → data/char/mot/ prefix + id_b-keyed registry (no g{id}.mot sprintf), 80-byte clip object. Five standard samples parsed to zero residual. BANI variant accepted from prior pass (one g170350513 file confirmed BANI by magic). No corrections required.
@@ -691,6 +691,18 @@ are correct once read in their respective contexts.
 > pins *which header field* the registry matches them on.
 >
 > *evidence: [static-ida]; ida_anchor: 263bd994; CYCLE 7.*
+>
+> **SHARPENED static bound (deep-cartography pass, f61f66a9, 2026-06-29):** The per-actor clip
+> registry at actor+0x510 is confirmed as a `std::map<unsigned int, CoreAnimation*>`, and
+> `MotClipList_SampleByTime` sets a newly-created layer's identity field to `clip+0x44` (= id_a) and
+> subsequently matches refresh attempts via `layer+0x08 == motion_id`. For the refresh-match to ever
+> succeed, `motion_id` must equal `clip+0x44` (id_a), implying the **per-actor registry is id_a-keyed
+> and the actormotion array-A ids are in the id_a namespace** — which contradicts the CYCLE-7 id_b-keyed
+> claim above. A two-registry architecture (boot-time id_b-keyed master populated by `motlist.txt`, plus
+> a per-actor id_a-keyed subset populated at first play) is one reconciliation that could make both
+> observations true. **Neither this spec nor `anim_runtime.md` is overwritten** — the conflict is
+> escalated to `re-validator` for a single live `?ext=dbg` read of the `motion_id` value against the
+> resolved clip's id_a and id_b. See `Docs/RE/structs/anim_runtime.md` Q1 (full sharpened static bound).
 
 Neither field encodes a format version. Both fields carry semantic identity values assigned at
 content-creation time.

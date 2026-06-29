@@ -1,7 +1,7 @@
 ---
 name: ida-explore
-description: Use to NAVIGATE and TRIAGE the legacy Martial Heroes client (Main.exe / doida.exe) in IDA before AND including the deep read of a single function — five modes in one skill. XREF mode maps every cross-reference to a string/global/constant/function ("who reaches this"); CALLGRAPH mode builds a bounded callers+callees graph around a target ("how this function sits in its subsystem"); DATA-FLOW mode traces a value forward/backward from an instruction ("where does this recv buffer go / what feeds this length field"); BATCH mode profiles a whole candidate subsystem of related functions and emits a per-function role summary; DECOMPILE-ONE mode exports exactly ONE function's raw Hex-Rays pseudo-C plus its callers/callees into the dirty quarantine for an analyst to describe in neutral prose. Drives the typed mcp__ida__* navigation/decompile tools (xref_query/xrefs_to/callgraph/callees/trace_data_flow/analyze_batch/decompile), falling back to bundled IDAPython snippets, and writes neutral maps (and dirty pseudo-C, DECOMPILE-ONE only) to Docs/RE/_dirty/. The fast way to find the few functions worth reading closely — then to read one of them.
-allowed-tools: mcp__ida__* Read Write
+description: Use to NAVIGATE and TRIAGE the legacy Martial Heroes client (Main.exe / doida.exe) in IDA before AND including the deep read of a single function — five modes in one skill. XREF mode maps every cross-reference to a string/global/constant/function ("who reaches this"); CALLGRAPH mode builds a bounded callers+callees graph around a target ("how this function sits in its subsystem"); DATA-FLOW mode traces a value forward/backward from an instruction ("where does this recv buffer go / what feeds this length field"); BATCH mode profiles a whole candidate subsystem of related functions and emits a per-function role summary; DECOMPILE-ONE mode exports exactly ONE function's raw Hex-Rays pseudo-C plus its callers/callees into the dirty quarantine for an analyst to describe in neutral prose. MICROCODE mode (microcode_text/microcode_calls) resolves indirect/virtual dispatch cleaner than pseudocode. Drives the typed mcp__ida__* navigation/decompile tools (xref_query/xrefs_to/callgraph/callees_recursive/callers_recursive/trace_data_flow/analyze_batch/func_profile/microcode_calls/decompile), falling back to bundled IDAPython snippets, and writes neutral maps (and dirty pseudo-C, DECOMPILE-ONE only) to Docs/RE/_dirty/. The fast way to find the few functions worth reading closely — then to read one of them.
+allowed-tools: mcp__ida__*, Read, Write
 model: sonnet
 effort: high
 ---
@@ -39,9 +39,10 @@ fabricate an xref, edge, flow step, or metric.
    `http://127.0.0.1:13337/mcp?ext=dbg` with the Martial Heroes IDB open. If red, STOP and surface:
    `claude mcp add --transport http ida "http://127.0.0.1:13337/mcp?ext=dbg"`.
 2. **Discover the toolset at runtime.** List the `mcp__ida__*` tools. Prefer the **typed** navigation
-   tools when present (names vary by build); fall back to the bundled snippet via the script-exec
-   tool (`mcp__ida__py_exec_file` / `execute_script` / `run_python`) only when no typed tool covers
-   the mode.
+   tools when present; fall back to the bundled snippet via the script-exec tool
+   (`mcp__ida__py_exec_file` / `py_eval` / `run_script`, persisting reusable probes with
+   `save_script` / `read_script` / `list_scripts`) only when no typed tool covers the mode. Each probe
+   emits one `RESULT_JSON <json>` line per the harness contract — see the `ida-python-lib` skill.
 
 ## Mode A — XREF (map every reference to a target)
 
@@ -76,9 +77,11 @@ bounded depth, render an edge list + a short per-node role description.
 1. **Resolve the target** to a function start EA (typed `func_query` / `entity_query`, or the
    snippet resolver). Confirm it is a real function, not CRT/library code.
 2. **Walk the graph, bounded.**
-   - **Typed (preferred):** `mcp__ida__callgraph` with `direction` (callers/callees/both) + `depth`.
+   - **Typed (preferred):** `mcp__ida__callgraph` / `mcp__ida__call_hierarchy` with `direction`
+     (callers/callees/both) + `depth`; `mcp__ida__callees_recursive` / `mcp__ida__callers_recursive`
+     for the bounded recursive fan-out/fan-in, and `mcp__ida__reaches` to answer "can A reach B?".
      If only `callees` + `xrefs_to` exist, BFS by hand (callees via `callees`, callers via `xrefs_to`
-     filtered to call refs).
+     filtered to call refs). For runtime-confirmed edges, `mcp__ida__trace_calls` (via `re-validator`).
    - **Snippet:** read `${CLAUDE_SKILL_DIR}/scripts/callgraph_map.py`, set CONFIG (`TARGET`;
      `DIRECTION` = `both` | `callers` | `callees`; `MAX_DEPTH`; `MAX_NODES`). It BFS-walks, dedups,
      caps node count, and prints an edge table + per-node summary (name, EA, in/out degree, lib flag).
@@ -169,9 +172,12 @@ RE; the live `?ext=dbg` debugger confirms the layout before any spec asserts it.
    or an address `0x…`. If the name is not yet applied to the DB, fall back to the address. **One
    function per invocation** — to map a call tree, re-run per discovered callee from Mode B.
 2. **Run the export.**
-   - **Typed (preferred for the body):** if `mcp__ida__decompile` / `decompile_function` exists, use
-     it for the pseudo-C, but still gather xrefs + the SHA-256 (run the snippet, or `xrefs_to` /
-     `callees`) — the dirty file needs callers, callees, and the build tag.
+   - **Typed (preferred for the body):** if `mcp__ida__decompile` exists, use it for the pseudo-C, but
+     still gather xrefs + the SHA-256 (run the snippet, or `xrefs_to` / `callees`) — the dirty file
+     needs callers, callees, and the build tag. To cite a finding precisely by line, pair
+     `mcp__ida__map_ea_to_pseudocode` (EA → pseudocode line) and `mcp__ida__map_pseudocode_line_to_eas`
+     (pseudocode line → EAs) so the analyst's neutral note references the exact line↔EA correspondence
+     without copying the body.
    - **Snippet:** read `${CLAUDE_SKILL_DIR}/scripts/decompile_one.py`, set `TARGET` (name in quotes,
      or address as an int literal `0x004A1230`), run via the exec tool. It resolves the target,
      decompiles, collects xrefs to/from with names, captures prototype + local-var types, computes the
@@ -195,6 +201,21 @@ RE; the live `?ext=dbg` debugger confirms the layout before any spec asserts it.
 it for `ida-debugger-drive` (`dbg_add_bp` at the EA, then `dbg_gpregs` / `dbg_read`; never `dbg_start`).
 **Garbled decompilation** (bad stack analysis, missing/wrong inferred prototype) → fix the
 prototype/struct first (or fall back to disassembly); never transcribe garbled pseudo-C as fact.
+
+## Mode F — MICROCODE (resolve indirect / virtual dispatch)
+
+When a function dispatches through a register or a vtable slot (exactly what the protocol/opcode and
+the actor virtual-call paths do), pseudo-C often shows an opaque `(*(funcptr))(...)`. The Hex-Rays
+**microcode** exposes the resolved target cleaner than pseudocode does.
+
+1. **Read the microcode.** `mcp__ida__microcode_text` for the function's microcode listing — far more
+   explicit about computed call targets and register dataflow than the C view.
+2. **Enumerate the calls.** `mcp__ida__microcode_calls` lists every call site with its resolved (or
+   candidate) target — pair it with `mcp__ida__list_indirect_calls` to catch the dispatch sites a
+   plain callgraph misses. This is the cleanest static read of an opcode→handler or virtual dispatch.
+3. **Confirm the live target.** A static candidate set is a hypothesis; which target actually fires is
+   dynamic — hand the candidates to `ida-debugger-drive` (`re-validator`). Microcode is dirty like
+   pseudo-C: keep any verbatim listing in `_dirty/`, never in a reply or committed file.
 
 ## Verify / Done when
 

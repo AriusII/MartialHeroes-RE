@@ -7,6 +7,7 @@
 > operand evidence AND matched byte-for-byte against a real VFS sample).
 > ida_reverified: 2026-06-27 · ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963 · evidence: [static-ida, vfs-sample]
 > CYCLE 14 re-anchor (f61f66a9): 7 facts re-confirmed SAME, 0 corrected; build-delta data-page shift confirmed; all structural/behavioral claims unchanged.
+> Deep-cartography pass 2026-06-29 (anchor f61f66a9): loose-file read share corrected (FILE_SHARE_READ, not exclusive; instruction-confirmed in both open routers); `field_08` role permanently bounded (not a debugger item — pack-tool artifact only); header struct-size validation 8+4+4+8 = 24 bytes (0x18) confirmed byte-exact.
 > Prior re-verifications: 2026-06-16 (CYCLE 7), 2026-06-20 (CYCLE 7 final), 2026-06-24 (CYCLE 11 spec-audit: open-flags 0x10000001 instruction-confirmed; all other structural claims re-confirmed); 2026-06-24 (CYCLE 11 pak-family pass: full 43,347-entry scan — zero gaps, zero overlaps, 100% contiguous coverage; de-dup statement updated below)
 > Conflicts: none vs the committed structural claims (the campaign-10 re-verification supplies a
 > real sample that *promotes* the previously-"unknown content" header/TOC-trailing fields — those
@@ -27,6 +28,8 @@
 > confirmed). The static-IDA read of the mount routine and the read primitive corroborates every
 > structural field independently. (An earlier draft noted "a small number of entries share/overlap a
 > payload offset"; the full 43,347-entry scan found zero such cases — that framing is withdrawn.)
+>
+> **Consolidation 2026-06-29:** `Docs/RE/vfs/archive_container.md` absorbed into this master; all structural content was already fully present here; ASCII layout diagram and explicit dedup callout folded as presentational additions only; no new facts, no verification-status change.
 
 ## Identification
 
@@ -50,6 +53,18 @@
 - **Encryption:** none on the data path — confirmed.
 
 ## Two-file scheme
+
+**Quick-reference layout:**
+
+```
+[ data.inf ]
+  ├── Header (24 bytes)
+  └── TOC Array (144 bytes × entry_count)
+
+[ data/data.vfs ]
+  ├── Header Echo (24 bytes, identical duplicate of data.inf header)
+  └── Payload Tiles (Contiguous data blocks starting at offset 24)
+```
 
 The archive is split across two physical files:
 
@@ -146,10 +161,12 @@ read-and-discarded by the mount routine, but a real sample has now resolved thei
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | 0 | 8 | char[8] | `magic` | Null-padded ASCII signature **`VFS001`** (`'V','F','S','0','0','1','\0','\0'`). **Present on disk; read-and-discarded / NOT validated by the client** — part of the single 24-byte bulk read, but the mount routine never extracts or compares it, and the ASCII bytes are absent from the executable image (no constant to compare against). Same 8 bytes appear at data.vfs offset 0. (Earlier "VFS0"/"FVS0" + "01" split readings were a mis-split of these 8 bytes.) | sample-verified present on disk; non-validation parser-verified |
-| 8 | 4 | u32 LE | `field_08` | Opaque build/region/format-revision **tag** = **39 (0x27)** in the reference archive. **READ-AND-DISCARDED** — never read out of the 24-byte buffer (no consumer extracts, stores, or compares it anywhere in the client). NOT a FILETIME / timestamp (it is a single 4-byte value, not an 8-byte 100-ns tick count). NOT the entry count (the +0x08-as-count hypothesis is refuted, see below). | parser-verified (discarded); sample-verified value 39; meaning capture/debugger-pending |
+| 8 | 4 | u32 LE | `field_08` | Opaque build/region/format-revision **tag** = **39 (0x27)** in the reference archive. **READ-AND-DISCARDED** — never read out of the 24-byte buffer (no consumer extracts, stores, or compares it anywhere in the client). NOT a FILETIME / timestamp (it is a single 4-byte value, not an 8-byte 100-ns tick count). NOT the entry count (the +0x08-as-count hypothesis is refuted, see below). | parser-verified (discarded); sample-verified value 39; role permanently bounded — cannot be resolved statically or at runtime; only an external pack-tool source could settle it (not a debugger item) |
 | 12 | 4 | u32 LE | `entry_count` | Number of TOC entries (= **43,347** in the reference archive). The ONLY header field the mount routine extracts; drives both the heap allocation (`144 × entry_count` bytes) and the bulk read of the TOC array. | sample-verified |
 | 16 | 4 | u32 LE | `total_blob_size` (lo) | Low dword of a u64 total-blob-size pair (with offset 20). = **3,802,182,193** in the reference archive — the **exact byte length of `data/data.vfs`**. Read-and-discarded by the client; useful as an integrity cross-check in a reimplementation. | sample-verified (read-and-discarded by client) |
 | 20 | 4 | u32 LE | `total_blob_size` (hi) | High dword of the total-blob-size u64. = **0** in the reference archive. Read-and-discarded. | sample-verified (read-and-discarded by client) |
+
+**Header struct-size validation:** 8 (magic) + 4 (field_08) + 4 (entry_count) + 8 (total_blob_size) = **24 bytes (0x18)** — field sum byte-exact, zero residual gap; matches the single 24-byte bulk `ReadFile` in `Vfs_Mount`.
 
 The non-`entry_count` fields are definitively not consumed by the mount routine in the
 examined client version — they are positively confirmed discarded without use (parser-verified: the
@@ -209,9 +226,12 @@ buffer is `malloc`/`free` — a load-bearing detail for matching free semantics.
 
 - **no decompression call** (no LZ, zlib, or custom expansion stage — no `*ompress*`/`*nflate*`/`*LZ*`
   import exists in the binary),
-- **no separate uncompressed-size field** distinct from `dataSize`, and
+- **no separate uncompressed-size field** distinct from `dataSize`,
 - **no per-entry codec or flag** that would select one (the only consumed entry fields are `name`@0,
-  `dataOffset`@104, `dataSize`@112 — nothing at +100 or +120 is read on the I/O path).
+  `dataOffset`@104, `dataSize`@112 — nothing at +100 or +120 is read on the I/O path), and
+- **no payload deduplication** — each virtual path maps to a unique `dataOffset`; the archive does
+  not alias multiple entries to the same payload range. The full 43,347-entry scan confirms zero
+  shared offsets — entries are stored 1:1 (sample-verified).
 
 This holds for **all three** read branches of the read primitive (see §The DiskFile read primitive):
 the loose-file read, the raw-seek streaming read, and the in-memory slurp are each a plain
@@ -378,7 +398,7 @@ given path. The open disposition is selected by the **read/write mode bits**:
 
 | Mode bits | Access | Share | Disposition | Notes |
 |-----------|--------|-------|-------------|-------|
-| bit 0 set (read) | read | exclusive | open existing | Common case for loading assets from a loose client tree |
+| bit 0 set (read) | read | `FILE_SHARE_READ` | open existing | Common case for loading assets from a loose client tree |
 | bit 1 set, bit 0 clear (write) | write | exclusive | create-always (truncate/create) | Tools and saves |
 | neither bit 0 nor bit 1 set | read + write | exclusive | open existing | Read/modify of an existing file |
 
@@ -413,7 +433,7 @@ texture spec (`formats/terrain.md`) should follow the `.lst` binary, not the `.t
 |---|---|
 | `entry_count` position (offset 12 / +0x0C of header) | sample-verified — static-IDA reads the count at buffer-relative +0x0C; sample arithmetic `24 + 144 × 43,347` is byte-exact. The +0x08-as-count hypothesis is REFUTED (`field_08` = 39, an unrelated scalar) |
 | Header magic = `VFS001` (8 bytes @0) | sample-verified PRESENT on disk (`'V','F','S','0','0','1','\0','\0'`) but NOT validated by the client — read-and-discarded; the ASCII bytes are absent from the executable image (no constant to compare against), parser-verified; earlier "VFS0"/"FVS0"+"01" splits were mis-splits of these 8 bytes |
-| Header `field_08` = 39 (@8) | parser-verified READ-AND-DISCARDED (never read out of the buffer; no consumer anywhere) + sample-verified value 39 — not the count, not a size, NOT a FILETIME; role (sub-version / build-region tag / section count?) capture/debugger-pending |
+| Header `field_08` = 39 (@8) | parser-verified READ-AND-DISCARDED (never read out of the buffer; no consumer anywhere) + sample-verified value 39 — not the count, not a size, NOT a FILETIME; role permanently bounded — cannot be resolved statically or at runtime (only an external pack-tool source could settle it; no debugger census can recover a discarded build-time scalar) |
 | Header `total_blob_size` u64 (@16/@20) | sample-verified — low dword = 3,802,182,193 = exact `data/data.vfs` byte length, high dword = 0; read-and-discarded by the client (usable as an integrity cross-check) |
 | `name[100]` + `dataOffset[104]` + `dataSize[112]` | sample-verified — corroborated by three independent call sites, 64-bit index arithmetic, and the byte-read |
 | Record stride = 144 bytes | sample-verified — by allocation arithmetic, the byte-exact archive size, and field offsets |

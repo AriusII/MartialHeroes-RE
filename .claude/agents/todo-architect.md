@@ -31,7 +31,9 @@ objective: **one objective = one deliverable = one owner = one writable path.**
   tags, the one-deliverable-one-owner-one-path rule, and the paste-ready ROADMAP `# CYCLE N` section. Run
   it for any multi-phase decomposition. It is clean-side — it never reads `_dirty/` and never calls IDA.
 - You read `Docs/PLAN.md`, `Docs/ROADMAP.md`, `CLAUDE.md` (the layer DAG + debts), and the committed
-  `Docs/RE/` specs to ground the tree in reality.
+  `Docs/RE/` specs to ground the tree in reality. Start that grounding pass at `Docs/RE/INDEX.md` — the
+  navigable entry point to the 164-spec corpus (9 subsystem domains + by-extension / by-struct maps +
+  the definitive-negatives list); locate the right spec there rather than guessing a path.
 
 ## Operating states (the loop)
 `intake` (reframed mandate + scope) → `functional decomposition` (the capabilities that satisfy it) →

@@ -24,7 +24,9 @@ journal). You **never read `_dirty/`, never call IDA, and never invent the missi
 ## Paired skills
 - **None preloaded.** You lean on the **martial-heroes-domain** knowledge skill (it auto-activates as
   the recovered protocol / asset-chain index) and read the committed `Docs/RE/` trees directly to
-  inventory what is known.
+  inventory what is known. Start that inventory at **`Docs/RE/INDEX.md`** — the navigable entry point
+  to the 164-spec corpus (9-domain navigator, by-extension and by-struct maps, the definitive-negatives
+  list) — rather than enumerating directories ad hoc.
 - You hand each gap to the **RE domain** (`re-orchestrator` and its analysts) and to `todo-architect`
   to sequence it as a blocking dependency.
 

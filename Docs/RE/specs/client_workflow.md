@@ -2,6 +2,7 @@
 verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))            # the dominant tier for this doc's load-bearing facts (scene machine, frame loop, boot, login sub-states, world spawn re-derived from binary control-flow); wire-level opcode bytes are capture/debugger-pending
 ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory — scene-machine / world-build / "charater scene" label cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior 2026-06-18: scene re-confirmation campaign (build 263bd994)
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+consolidation: 2026-06-29 — §10 architecture-index folded from specs/client_architecture.md (CAMPAIGN 10 static-ida+vfs-sample synthesis); singleton lists, module names, and spec index added; no new binary claims introduced; R5 provenance honored
 evidence: [static-ida]             # add 'vfs-sample' only where a real asset sample corroborated (UI dialog IDs via msg.xdb, area inventory); noted inline as SAMPLE-VERIFIED
 conflicts: login credential wire opcode (key-string secure context vs literal C2S 2/1 byte form); 4/1-form arrival ordering; whether the display FRAMERATE config is truly inert vs the hardcoded 60 FPS cap — all capture/debugger-pending
 status: confirmed
@@ -47,6 +48,7 @@ encoding_note: All Korean in-game text, dialog strings, config keys, and player 
 7. [Module interconnection matrix](#7-module-interconnection-matrix)
 8. [Engine identity](#8-engine-identity)
 9. [Open questions register](#9-open-questions-register)
+10. [Architecture index](#10-architecture-index)
 
 ---
 
@@ -1430,30 +1432,132 @@ short-circuit directly on the IO thread. Owned by `specs/handlers.md`.
 
 ---
 
-## Cross-references
+## 10. Architecture index
 
-- Engine runtime constants and full INI table: `specs/client_runtime.md`
-- Frame loop timing and day/night details: `specs/game_loop.md`, `specs/client_runtime.md §8`
-- Scene lifecycle (deep): `specs/frontend_scenes.md`
-- Login flow (sub-states 2–41): `specs/login_flow.md`
-- UI widget system (full toolkit + all screen layouts + corrections): `specs/ui_system.md`
-- Effects runtime (spawn, attach, trigger, tick): `specs/effects.md`
-- Sound runtime: `specs/sound.md`
-- Environment/day-night: `specs/environment.md`
-- Resource/loading pipeline: `specs/resource_pipeline.md`
-- Skinning math: `specs/skinning.md`
-- Opcode catalogue: `opcodes.md`
-- Packet wire layouts: `packets/*.yaml`
-- Singleton construction: `structs/runtime_singletons.md`
-- Asset formats:
-  - `formats/pak.md` — VFS container
-  - `formats/terrain.md` — `.ted`, `.map`, `.sod`, `.bud`, `.mud`
-  - `formats/mesh.md` — `.skn`
-  - `formats/animation.md` — `.mot`, `.bnd`
-  - `formats/environment_bins.md` — sky/fog/light bins
-  - `formats/sound_tables.md` — `.bgm`, `.bge`, `.eff` (sound), `.wlk`, `.run`
-  - `formats/effects.md` — `.xeff`, `.eff` (geometry), `particleEmitter.eff`, `effectscale.xdb`
-  - `formats/ui_manifests.md` — `uitex.txt`, `skillicon.txt`, `crestlist.txt`
-  - `formats/area_inventory.md` — per-area cell census
-- Canonical glossary: `Docs/RE/names.yaml`
-- Provenance audit trail: `Docs/RE/journal.md`
+> Unique singleton lists, module names, and comprehensive spec cross-links folded from
+> `specs/client_architecture.md` (CAMPAIGN 10 synthesis — static-ida + vfs-sample evidence;
+> no new binary claims introduced here). All values trace to cited satellite specs.
+
+### 10.1 Diamond engine module map
+
+The "Diamond" engine exposes roughly **90 RTTI classes** in a uniform refcounted object graph.
+Canonical root chain (CODE-CONFIRMED — `structs/runtime_singletons.md`):
+
+```
+GObject  (abstract refcounted base: vtable ptr +0x00 · ref_count +0x04 · std::string name +0x08)
+  └─ GNode  (adds parent back-reference vector)
+       ├─ GViewPlatform  (per-frame view processing; 84-byte object)
+       └─ GGroup  (adds child vector)
+            └─ { GScene · GTransform · GGeode · GSwitch · GLight · … }
+```
+
+Canonical class families (all derive from `GObject`):
+
+| Family | Representative classes |
+|---|---|
+| Render state | `GRS*` (depth-test, alpha-test, blending, material, fog, …) |
+| UI | `GUWindow` / `GUPanel` / `GUComponent` / `GUComponentEx` / `GULabel` |
+| Pipeline | `GPipeline` / `GCullPipeline` / `GCull` / `GTraverser` |
+| Assets | `GTexture` / `GSound` / `CVFSManager` / `DiskFile` / `File` |
+| Camera | `GCamera` / `GPerspectiveCamera` / `GFrustum` |
+
+Every class shares the same object head. Vtable slot 0 is the MSVC vector-deleting destructor
+(flags byte; calls real destructor chain then frees the block when `(flags & 1)`). `ref()` is an
+inlined increment of `+0x04`; `unref()` asserts non-zero then decrements; children are freed at
+refcount 0. Allocation is plain CRT `new`/`malloc` — **no custom game pool**.
+(CODE-CONFIRMED — `structs/runtime_singletons.md`.)
+
+### 10.2 Top-level window singletons
+
+Five `GUWindow` subclasses are the scene's named top-level windows (CODE-CONFIRMED —
+`structs/runtime_singletons.md`, `specs/ui_system.md`):
+
+| Singleton | State | Notes |
+|---|---|---|
+| `LoginWindow` | 1 — Login | ~1368 B; see §5.1 |
+| `COpeningWindow` | 3 — Opening | ~720 B; see §5 |
+| `SelectWindow` | 4 — Character Select | ~6280 B; see §5.3 |
+| `MainMaster` | 5 — In-game | HUD master window owning a **~223-slot service-slot table** of HUD panels; constructed inside the `MainHandler` world-build (§5.4.1 step 4) |
+
+`GUWindow` two-vtable layout (CODE-CONFIRMED — `structs/guwindow.md`):
+
+| Offset | Content |
+|---|---|
+| `+0x00` | Primary vtable — component/panel/window chain, 15 slots |
+| `+0xBC` | Secondary "Cmdhandler" vtable — 3 slots; 44-byte sub-object `+0xBC..+0xE7` |
+| `+0xE8` | Embedded auxiliary `GView` — 312 bytes |
+| `+0x220` | Per-window texture list — eager-load atlases; released on scene unload (`specs/resource_pipeline.md §3A.4`) |
+
+The "is-a-window" flag (mask `0x2000`) is OR-set last in the `GUWindow` constructor.
+
+### 10.3 Background thread roster
+
+One main thread drives the client. All special-purpose background threads (CODE-CONFIRMED —
+`specs/resource_pipeline.md §5`, `specs/game_loop.md §0/§7`):
+
+| Thread | Priority | Role |
+|---|---|---|
+| `BulkAssetLoader_Thread` (boot data-table worker) | ABOVE_NORMAL | Loads ~50-table boot corpus; 500 ms grace; exits on completion (state 2) |
+| `TerrainLoader` streamer worker | — | Created before world entry; **DORMANT in this build** — `init` immediately re-clears the run-flag; exits at once; peripheral streaming is inert |
+| Streaming-BGM refill | — | 9-operation event queue; ring-buffer refill ~5×/s (Sleep(200) poll); `specs/sound.md` |
+| IO-completion (network) | — | `WSAWaitForMultipleEvents`; overlapped recv/send; raw frame enqueue |
+| Network receive worker | — | Recv-queue pop → message-bus hop → handler dispatch on main/frame thread |
+| Keepalive timer | — | Idle heartbeat C2S 2/10000 — polls every 1000 ms; fires after 20 s outbound silence (§6.4.1 (a)) |
+| Send-proxy worker | — | Outbound C2S queue drain; idle filler C2S 1/2 ~1×/ms while idle (§6.4.1 (c)) |
+
+### 10.4 Spec index
+
+Comprehensive map of satellite specs to what each owns. (Paths relative to `Docs/RE/`.)
+
+| Subject spec | Owns |
+|---|---|
+| `specs/client_runtime.md` | boot, singletons, sound, UI struct, render constants, scene lifecycle |
+| `specs/game_loop.md` | bootstrap, four-phase loop, timing and clock |
+| `specs/client_workflow.md` *(this file)* | master end-to-end flow, scene state machine, transitions |
+| `specs/frontend_scenes.md` | login/server/select/create scene detail, dolly camera, ambient FX |
+| `specs/intro_sequence.md` | opening cinematic |
+| `specs/login_flow.md` | login handshake sub-machine, PIN modal, server records |
+| `specs/ui_system.md` | widget toolkit, vtable contract, per-screen layouts, font table |
+| `structs/guwindow.md` | two-vtable window layout (+0xBC / +0xE8 / +0x220) |
+| `structs/gucomponent.md` | base widget field offsets and flag bits |
+| `specs/input_ui.md` | input event taxonomy, IME, hit-test ordering |
+| `formats/ui_manifests.md` | `UiTex.txt` / `uitex.txt` id-resolved atlases |
+| `structs/runtime_singletons.md` | singleton construction order, MainMaster service slots, Diamond base-object layout |
+| `specs/rendering.md` | per-frame draw loop, draw order, glow/bloom chain |
+| `formats/pak.md` | `.inf`/`.vfs` container byte layout |
+| `specs/vfs_overview.md` | VFS overview |
+| `specs/asset_pipeline.md` | asset request to decode |
+| `specs/resource_pipeline.md` | open chokepoint, caches, boot loader, terrain streaming |
+| `specs/terrain-streaming.md` | streaming lifecycle |
+| `structs/terrain-manager.md` | `TerrainLoader` + `TerrainManager` (34-pool / 25-ring) |
+| `opcodes.md` | wire frame header, opcode to handler catalogue |
+| `specs/network_dispatch.md` | dispatcher, installers, lifecycle, connection-state machine |
+| `specs/crypto.md` | byte cipher, LZ4, RSA/FLINT handshake |
+| `specs/handlers.md` | per-handler behaviour and dispatch model |
+| `specs/world_systems.md` | world-scene gameplay index |
+| `specs/combat.md` | combat, melee, derived stats |
+| `specs/skills.md` | skills, cooldowns, buffs |
+| `specs/inventory_trade.md` | inventory, equipment, shop, trade |
+| `specs/progression.md` | exp, rank, level, stat allocation |
+| `specs/quests.md` | quests |
+| `specs/npc_interaction.md` | NPC dialogue and services router |
+| `specs/chat.md`, `specs/social.md` | chat, whisper, party, guild |
+| `specs/minimap.md` | HUD radar and world map |
+| `specs/camera_movement.md` | five view modes, movement, collision |
+| `specs/lua_scripting.md`, `specs/lua-config.md` | Lua VM and config trees |
+| `specs/effects.md`, `formats/effects.md`, `specs/effect-scheduling.md` | effects runtime, `.xeff`, scheduler |
+| `specs/skinning.md` | CPU LBS, inverse-bind bake |
+| `specs/environment.md` | sky, light, fog, water |
+| `specs/sound.md` | runtime audio engine |
+| `formats/terrain.md`, `formats/terrain_scene.md`, `formats/terrain_layers.md` | terrain cell formats |
+| `formats/bgtexture_lst.md`, `formats/bindlist.md`, `formats/actormotion.md`, `formats/npc_spawns.md` | asset-chain lookup tables |
+| `formats/msg_xdb.md`, `formats/misc_data.md`, `formats/config_tables.md`, `formats/scr.md` | UI strings, config tables, `.scr` tables |
+| `formats/mesh.md` | `.skn` mesh format |
+| `formats/animation.md` | `.mot`, `.bnd` animation formats |
+| `formats/environment_bins.md` | sky/fog/light/weather binary formats |
+| `formats/sound_tables.md` | `.bgm`, `.bge`, `.eff`, `.wlk`, `.run` sound table layouts |
+| `formats/area_inventory.md` | per-area cell census |
+| `structs/actor.md`, `structs/npc.md`, `structs/item.md`, `structs/skill.md`, `structs/stats.md`, `structs/spawn_descriptor.md` | runtime entity and record layouts |
+| `formats/game_ver.md` | client version gate |
+| `Docs/RE/names.yaml` | canonical glossary |
+| `Docs/RE/journal.md` | provenance audit trail |

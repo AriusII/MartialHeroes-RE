@@ -607,16 +607,22 @@ a string path. Access is always **lazy find-or-load**:
 There is **no eviction during a session.** Containers only grow; they are torn down wholesale when
 the owning scene or handler is destroyed (e.g. on scene exit or on logout).
 
+**Exception — terrain background texture pool.** The terrain ground and mass-object texture pools
+(populated from `bgtexture.lst` — §3B) implement **two-level reference counting with an explicit
+unload-on-last-release path**. This is the engine's only client-managed texture eviction. All other
+caches in this section remain grow-only with no eviction during a session. See §3B for the full
+eviction mechanics and layout.
+
 ## 3.2 Per-manager inventory — (CODE-CONFIRMED)
 
 | Manager | Key | Canonical VFS path pattern | Cache lifetime |
 |---|---|---|---|
-| **Skin cache** (`CoreSkinManager`) | Skin ID (gid integer) | `data/char/skin/g{id}.skn` | Scene/session |
+| **Skin cache** (`CoreSkinManager`) | Skin ID (integer; integer-keyed ordered map; see §3B.9) | `data/char/skin/g{id}.skn` | Scene/session |
 | **Motion cache** (`CoreMotManager`) | Motion ID or path; populated at boot via list-text files | `data/char/mot/…` (paths from a boot-time list-text registry) | Session |
 | **Bind-pose pool** | Bind ID (IdB integer) | `data/char/bind/g{id}.bnd` | Session |
 | **Animation catalogue** | — (no per-entry key; a one-time boot init) | Loads skin/mot/bind list-text registries | Session |
 | **Named UI/icon texture cache** (`GHTexManager`) | Texture name (string) | Name-keyed sorted array; path formed from the name | Scene |
-| **Terrain texture pool** (`TerrainPool`) | Background-texture ID | Populated from `bgtexture.lst`; runtime terrain bypasses the named-texture cache and uses this pool directly | Scene |
+| **Terrain texture pool** (`TerrainPool`) | Background-texture ID | Populated from `bgtexture.lst`; runtime terrain bypasses the named-texture cache and uses this pool directly | Scene; **two-level ref-counted with unload-on-last-release (§3B)** |
 | **Shadow manager** | — (singleton init, no per-entry key) | Inited on the boot thread | Session |
 
 **Error path** (skin cache as the documented example): a cache miss that fails to load logs
@@ -650,6 +656,13 @@ All D3D textures in the pipeline are created with `D3DPOOL_MANAGED`. This means:
 distinct assets touched in a scene, not by a working-set limit. A clean-room reimplementation may
 use the same load-once-per-scene lifetime without a per-asset LRU and will not exceed the original
 memory envelope in normal play.
+
+**Addendum — terrain background textures (§3B).** Terrain background textures additionally carry a
+**client-side refcount** (the GHTex refcount field at +0x2C). When this refcount drops to zero, the
+client explicitly invokes the GHTex unload method, which calls D3D `Release()` on the texture
+object. D3D9 managed-pool semantics still govern VRAM residency (as above); the client refcount
+governs whether the D3D texture object itself exists. This is the only path where the client
+explicitly releases a D3D texture during a session.
 
 ---
 
@@ -808,6 +821,236 @@ glyph atlas in the VFS** for body text. The full per-slot face/size/weight table
 > **Godot guidance.** This is a system-font path — the original relies on Windows having DotumChe /
 > Dotum / BatangChe (CP949 Hangul). A 1:1 port must ship/substitute equivalent CP949 Korean fonts and
 > map the 15 slots (slot index → {face, size, weight}); the text encoding is CP949 throughout.
+
+---
+
+# 3B. Terrain texture pool, GHTex deferred-texture lifetime, and two-level reference counting — (CODE-CONFIRMED)
+
+> This section covers the 3D-specific texture plumbing that §3/§3A do not enumerate: how
+> `bgtexture.lst` builds the runtime pool of GHTex deferred-texture objects, the GHTex lazy-upload
+> mechanism, and the two-level ref-counted eviction path unique to the terrain texture pools. The
+> on-disk `bgtexture.lst` format is also owned by `formats/bgtexture_lst.md`; terrain cell geometry
+> is cross-referenced in `formats/terrain.md`. This section covers only the runtime pool lifecycle
+> and the object layouts needed to reproduce it.
+
+## 3B.1 Two distinct texture lifetime models in the 3D pipeline — (CODE-CONFIRMED)
+
+The pipeline has two completely different texture ownership models depending on what loads the
+texture:
+
+- **Named/UI/effect textures** (§3/§3A — `GHTexManager` named cache, the `UiTex.txt` id pool, the
+  `bmplist.lst` effect pool, per-window one-shot loads): grow-only, no eviction; freed wholesale on
+  scene teardown; D3DPOOL_MANAGED.
+- **Terrain background textures** (`bgtexture.lst` → TerrainPool): **explicitly two-level reference
+  counted** with an active unload-on-last-release path. This is the engine's only client-managed
+  texture eviction.
+
+## 3B.2 `bgtexture.lst` disk format — (CODE-CONFIRMED)
+
+Path: `data/map000/texture/bgtexture.lst`, opened in raw/seek mode through the open router (§1).
+Textures are **global under `map000`** for all areas. See `formats/bgtexture_lst.md` for the
+authoritative on-disk byte layout; the runtime-relevant facts are:
+
+| Offset | Size | Type | Field | Notes |
+|---|---|---|---|---|
+| 0x00 | 4 | u32 | count | Valid range: 1–1999 inclusive; 0 or ≥ 2000 → abort with error |
+| 0x04 | 48 × count | record[] | entries | 48-byte stride |
+
+**48-byte index record:**
+
+| Offset | Size | Type | Field | Notes |
+|---|---|---|---|---|
+| +0x00 | 1 | u8 | kind | `0` = empty slot (skipped); `1` = static render-object type; any other value = non-static render-object type |
+| +0x01 | ≤47 | char[] | name | NUL-terminated; resolved VFS path = `data/map000/texture/<name>.dds` |
+
+Empty slots (kind = 0) are skipped; their GHTex pool objects are left uninitialized.
+
+## 3B.3 TerrainPool build sequence — (CODE-CONFIRMED)
+
+The terrain pool is built once at terrain-manager init (boot step 50, §2.1a). The build is an
+**idempotent rebuilder** — re-entrant with no cache gate, consistent with the REPLAY doctrine (§2.6).
+
+1. Open `bgtexture.lst` in raw/seek mode through the open router.
+2. Read the u32 count; validate the range (1–1999 inclusive).
+3. Free any prior entry array and kind-byte array.
+4. Allocate a **GHTex entry array** of `count` objects (76 bytes each); EH-vector-construct each
+   via the GHTex constructor (stores count at array[−1]).
+5. Allocate a **kind-byte array** (`count` bytes, zero-initialized) — one byte per slot mirroring
+   the record's kind field.
+6. Read the 48-byte index records into a temporary buffer. Per non-zero-kind record: form the path
+   `data/map000/texture/<name>.dds`, write the slot index into the GHTex pool-id field (+0x38), set
+   the render-object-type descriptor pointer by kind (static vs. non-static), call the pool-entry
+   initializer to populate the GHTex (path into +0x04, lifetime 180 000 into +0x24, scheduler slot
+   into +0x34, objtype into +0x3C, shared options sentinel into +0x48).
+7. Free the temporary record buffer.
+8. Allocate **nine per-id slot pools** (arrays sized to `count`): one ground pool, one mass-object
+   pool, and seven FX-layer pools (FX1–FX7). See §3B.8.
+
+**TerrainPool runtime fields:**
+
+| Field | Notes |
+|---|---|
+| Entry array | Pointer to GHTex[count] (76-byte stride); count stored at array[−1] |
+| Kind array | u8[count], mirrors each record's kind field |
+| Count | The u32 read from the file |
+
+## 3B.4 GHTex deferred-texture object layout — (CODE-CONFIRMED)
+
+GHTex extends a base handle type (GHandle). GHandle is 48 bytes; GHTex extends it to **76 bytes**.
+
+**GHandle base (48 bytes):**
+
+| Offset | Size | Field | Initial value | Notes |
+|---|---|---|---|---|
+| +0x00 | 4 | vftable | GHandle vtable | Replaced by GHTex vtable in GHTex constructor |
+| +0x04 | 28 | name | std::string (MSVC SSO layout) | Path string; inline buffer starting at +0x08 |
+| +0x20 | 1 | load_attempted | 1 | Set to 1 when `GHTex::Load` is first called |
+| +0x21 | 1 | load_ok | 0 | Set to 1 on successful D3DX decode |
+| +0x22 | 1 | (reserved) | 0 | |
+| +0x24 | 4 | lifetime | 180 000 | Default TTL; also gates scheduler registration (non-zero = register) |
+| +0x28 | 4 | (padding) | 0 | |
+| +0x2C | 4 | refcount | 0 | Terrain-manager AddRef / Release path operates on this field |
+
+**GHTex extension (+0x30..+0x4B):**
+
+| Offset | Size | Field | Notes |
+|---|---|---|---|
+| +0x34 | 4 | scheduler_slot | −1 = unregistered; index into the 6000-slot scheduler ring (§3B.7) |
+| +0x38 | 4 | pool_id | The bgtexture slot index; −1 sentinel set in constructor |
+| +0x3C | 4 | objtype | Render-object-type descriptor pointer (static or non-static) |
+| +0x40 | 4 | d3d_texture | `IDirect3DTexture9*`; null until `GHTex::Load` succeeds; released in destructor |
+| +0x48 | 4 | options | Pointer to a 10-dword D3DX create-args block; default = shared scheduler sentinel (not freed by destructor if it equals the sentinel, preventing double-free) |
+
+GHTex vtable has four entries: scalar-deleting destructor (+0), `Load` (+4), a third method (+8),
+and an **unload/release-texture method** (+12) invoked when the GHTex refcount drops to ≤ 0. The
+unload method releases the D3D texture object and resets the handle to null.
+
+## 3B.5 Lazy (deferred) DDS upload — `GHTex::Load` — (CODE-CONFIRMED)
+
+Texture bytes are **not** read at pool build time. Each GHTex registers a scheduler slot; its D3D
+texture handle (+0x40) stays null until first use. On first draw that needs the texture,
+`GHTex::Load` runs:
+
+1. **Idempotent gate:** if load_attempted (+0x20) = 1 **and** load_ok (+0x21) = 1 **and**
+   d3d_texture (+0x40) ≠ null → return success immediately (no re-decode).
+2. Read the 10-dword D3DX options block from +0x48; if null → log error and return failure.
+3. Call `Texture_D3DXCreateFromDiskOrVfs` with the render device, path string, 10 D3DX args,
+   object-type descriptor, and the texture-handle output slot (+0x40).
+4. On **success:** increment the global live-texture counter, set load_ok (+0x21) = 1, set
+   load_attempted (+0x20) = 1.
+5. On **failure:** log error; clear load_attempted, load_ok, and d3d_texture.
+
+**`Texture_D3DXCreateFromDiskOrVfs` — no client decompression — (CODE-CONFIRMED).** The wrapper
+branches on the VFS mount flag (§1.5.5):
+
+- **Mounted:** opens the entry through the VFS (raw/seek mode), slurps bytes into memory, calls
+  **`D3DXCreateTextureFromFileInMemoryEx`** with the device, buffer, size, and the 10 D3DX args
+  (width / height / mip levels / usage / format / pool / filter / mipfilter / colorkey / palette +
+  output).
+- **Unmounted (loose):** calls **`D3DXCreateTextureFromFileExA`** on the bare file path.
+
+There is **no client-side header check and no inflate or decompress step** anywhere in this path.
+DDS decoding is delegated entirely to D3DX9. This confirms and extends §3A.3 ("no custom image
+codec") to the terrain texture path specifically: **zero client codec for terrain textures, UI
+textures, or mesh data** — the entire 3D decode chain is D3DX-only.
+
+The 10 D3DX args for terrain textures come from the shared scheduler options sentinel (§3B.7). The
+exact width/height/miplevel/format values in that sentinel block are capture/debugger-pending (§8
+item 15).
+
+## 3B.6 Two-level reference counting and terrain texture eviction — (CODE-CONFIRMED)
+
+This is the **one texture eviction path** in the engine. It operates at two levels:
+
+- **Level 1 — Tile node** (20-byte per-id node, one per bgtexture slot): tracks which loaded cells
+  reference a given texture id.
+- **Level 2 — GHTex refcount** (GHTex +0x2C): incremented when the first tile node for an id is
+  created; decremented when the last is released. When this refcount drops to ≤ 0, the GHTex
+  unload method (vtable +12) is called to Release the D3D texture.
+
+**Tile node layout (20 bytes):**
+
+| Offset | Size | Field | Initial value | Notes |
+|---|---|---|---|---|
+| +0x00 | 4 | id | set on alloc | The bgtexture pool-id |
+| +0x04 | 4 | refcount | 1 | Decremented on each release; node is freed when `< 2` on a delete call |
+| +0x08 | 4 | next_active | 0 | Singly-linked active-list pointer (rebuilt by the active-list sweep) |
+| +0x0C | 4 | scratch_a | 0 | Cleared by the orphan sweep; runtime role unverified (§8 item 17) |
+| +0x10 | 4 | scratch_b | 0 | Cleared by the orphan sweep; runtime role unverified |
+
+**Reference-count operations (ground texture pool):**
+
+| Operation | Behavior |
+|---|---|
+| Add-ref (by texture id) | Bounds-check id < count. If slot already holds a node → `++node.refcount`. If slot is null → allocate a 20-byte tile node, store it, then call the terrain-manager AddRef which increments GHTex +0x2C. First reference both creates the node and bumps the GHTex refcount; further references only bump the node refcount. |
+| Release (by texture id) | `--node.refcount` only; does not free (deferred-free variant handles the actual free). |
+| Delete / last-release (by texture id) | If `refcount ≥ 2` → `--refcount`. Else (last ref) → free the node, null the slot, call terrain-manager release which decrements GHTex +0x2C; when GHTex refcount drops to ≤ 0, calls **GHTex vtable +12 to unload / Release the D3D texture**. |
+| Active-list rebuild | Relinks all non-null tile nodes into a singly-linked list via node +0x08; the list head is kept in the ground pool's active-list field. |
+| Orphan sweep | Per slot: clears node +0x0C and node +0x10, and frees nodes whose refcount < 1. |
+
+`GroundLayer_AddRefTextures` (the cell ground layer consumer) calls the add-ref operation for each
+texture id the loaded cell references.
+
+**Mass-object pool** mirrors the ground pool with the same two-level structure, but maintains two
+32-capacity active texture-id vectors instead of a singly-linked active list.
+
+## 3B.7 GHTex scheduler ring — (CODE-CONFIRMED)
+
+A global scheduler maintains a **6000-slot** ring of GHTex pointers, populated at pool build:
+
+- **Primary ring:** up to 6000 GHTex entries. A slot counter tracks the next free index; when the
+  counter would exceed 5999 on overflow, it is held at 5999 — the last slot is **clobbered** rather
+  than the ring growing. Each registered GHTex stores its slot index in +0x34; the slot is freed
+  (nulled) in the GHTex destructor.
+- **Secondary effect sublist:** entries whose lifetime (+0x24) is non-zero are additionally
+  registered in a parallel sublist with its own 6000-slot capacity and the same clobber-on-overflow
+  behavior.
+- **Shared default options sentinel:** the scheduler holds a shared 10-dword D3DX-args block used
+  as the default +0x48 value for terrain GHTex entries. The GHTex destructor frees +0x48 only if
+  it is NOT this sentinel, preventing a double-free.
+
+Constants: scheduler ring capacity = **6000** (primary and effect sublist each); default GHTex
+lifetime/TTL = **180 000**.
+
+The ring-walker consumer (the subsystem that reads registered entries to drive age-out or batch
+upload using the TTL value) was not traced in this pass — see §8 item 14.
+
+## 3B.8 Nine per-id terrain slot pools — (CODE-CONFIRMED)
+
+Nine per-id slot pools are allocated at pool build (§3B.3), all sized to the bgtexture count:
+
+| Pool | Role |
+|---|---|
+| Ground | Tile nodes for the cell ground texture layer (§3B.6) |
+| Mass-object | Tile nodes for the mass-object / building texture layer |
+| FX1 | FX-layer 1 slot pool |
+| FX2–FX7 | Six additional FX-layer slot pools; per-pool node layout assumed to mirror ground / mass (see §8 item 16) |
+
+## 3B.9 Skin cache internals — (CODE-CONFIRMED)
+
+The skin cache (`CoreSkinManager`) is an **integer-keyed ordered map** (find-or-insert by skin id
+integer). On a cache miss: format the path `data/char/skin/g{id}.skn`, call the skin load and
+inverse-bind baker (`Skin_LoadAndBakeInverseBind`), re-find in the map, return the cached pointer.
+The map only grows (no per-entry eviction — consistent with §3.1 for char assets). On a load
+failure: log `"load core skin check error manager id <name> <id>"`.
+
+**Skin load and skeleton resolution (`Skin_LoadAndBakeInverseBind`).** Parsing `.skn` proceeds by
+plain field reads (u32, float, and bulk memory reads) straight from the VFS buffer — **no inflate,
+no LZ, no client container around the records.** After parsing, the loader reads `id_b` from the
+skin header and looks it up **verbatim** in the CorePose (bind-pose) pool, then bakes the
+inverse-bind skin influences. On a pose-pool miss: logs an error. Returns `id_a`. This confirms the
+**`.skn` id_b → bind-pose actor_id verbatim** skeleton link documented in `specs/skinning.md`.
+
+**`.skn` parse constants** (cross-reference `formats/skn.md` and `formats/mesh.md` for the full
+field map):
+
+| Constant | Value | Notes |
+|---|---|---|
+| Vertex record stride | 36 bytes | Per raw vertex in the `.skn` file |
+| Weight record stride | 24 bytes | Per bone-weight record (6 dword fields) |
+| Skinned-vertex output stride | 32 bytes | Assembled in system memory after parse |
+| Influence weight cull threshold | 0.01 | Influences with weight < 0.01 are discarded |
+| Weight normalization | sum-divide | Weights are divided by their sum; three assertion points in `coreskin.cpp` |
 
 ---
 
@@ -1159,6 +1402,34 @@ and `.ted` are required for a cell to be minimally renderable.
     recoverable (every sampled record carries identical values across the four positions). Resolving
     non-zero base HP/MP needs a live debugger witness on the grid consumer and/or the server
     base-stat packet. The C# `ScrStatCatalogue` zero-base result is faithful in the meantime.
+14. **GHTex scheduler ring-walker consumer. *(static — next pass)*** The 6000-slot scheduler ring
+    (§3B.7) is built at pool init and entries register their slot, but the subsystem that walks the
+    ring (a per-frame age-tick or batch-upload sweep using the 180 000 TTL?) was not traced. The
+    lifetime field strongly implies an age-out sweep — find and document the ring walker before
+    assuming GHTex terrain textures live forever once loaded.
+15. **GHTex +0x48 default options block contents. *(capture/debugger-pending)*** The 10 D3DX-create
+    dwords used for terrain textures come from the shared scheduler sentinel (§3B.7); the exact
+    width/height/mip-levels/usage/format/filter values were not read out. Confirm the terrain texture
+    D3DX create parameters (especially mip-level count and format hint vs. the UI DXT5 default of
+    §3A.3) by reading the static sentinel block or observing a live `GHTex::Load` call.
+16. **FX2–FX7 slot-pool node layout and ref-count discipline.** The six additional FX-layer slot
+    pools (§3B.8) are allocated to `count` at pool build but their per-pool node layout and
+    ref-count discipline were not traced in this pass. Assumed to mirror the ground / mass-object
+    model — confirm before relying on it.
+17. **Tile node +0x0C / +0x10 scratch fields. *(static or debugger)*** Both fields are zeroed by the
+    orphan sweep (§3B.6) but their runtime role was not traced. Candidates include: a resolved D3D
+    handle cache, UV or animation state, or an index into a secondary look-up. Confirm before
+    reproducing the sweep behavior in the clean-room port.
+18. **Ring-overflow clobber high-water mark. *(capture/debugger-pending)*** At 6000 registered GHTex
+    slots the scheduler clobbers the last slot rather than growing (§3B.7). Whether the shipped data
+    approaches this cap (bgtexture count ≤ 1999, but effect/UI pools also register) is unverified.
+    Measure the registration high-water mark on a live session to confirm no silent slot collision
+    occurs.
+19. **`bgtexture.lst` kind-byte values beyond 0 and 1.** Kind = 0 means skip; kind = 1 selects the
+    static render-object-type descriptor; any other value selects non-static (§3B.2). Whether
+    specific non-zero, non-one values carry additional meaning (animated / scrolling terrain texture?)
+    beyond the static/non-static split is unconfirmed. Inspect the shipped `bgtexture.lst` kind bytes
+    and the non-static render-object-type descriptor to resolve.
 
 ---
 
@@ -1168,7 +1439,9 @@ and `.ted` are required for a cell to be minimally renderable.
 - **Terrain cell formats (`.map`, `.ted`, `.sod`, `.bud`):** `formats/terrain.md`,
   `formats/terrain_scene.md`
 - **Animation catalogue and motion files:** `formats/animation.md`
+- **Terrain background texture index (`bgtexture.lst` on-disk byte layout):** `formats/bgtexture_lst.md`
 - **Skinned mesh and bind-pose formats:** `formats/mesh.md`
+- **Skinned mesh source format (`.skn` field map, vertex / weight / influence record layouts):** `formats/skn.md`
 - **Environment sky binary formats:** `formats/environment_bins.md`
 - **Sound table format:** `formats/sound_tables.md`
 - **Spawn record format:** `formats/npc_spawns.md`

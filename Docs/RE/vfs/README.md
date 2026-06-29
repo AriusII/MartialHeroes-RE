@@ -6,15 +6,15 @@ The dossier serves as the clean-room reference guide for the `Assets.Vfs` and `A
 
 ## Dossier Index
 
-1. **[VFS Master Manual](file:///C:/Users/Arius/RiderProjects/MartialHeroes/Docs/RE/vfs/vfs_master_manual.md)**
+1. **[VFS Master Manual](vfs_master_manual.md)** *(pending remediation — consolidated spec deferred; link retained)*
    - Complete consolidated specification: container layouts, in-memory struct maps, C++ CVFSManager and DiskFile lifecycle and algorithms, sub-asset format registry, and global linkages.
-2. **[Archive Container layout (`data.inf` & `data.vfs`)](file:///C:/Users/Arius/RiderProjects/MartialHeroes/Docs/RE/vfs/archive_container.md)**
+2. **[Archive Container layout (`data.inf` & `data.vfs`)](../formats/pak.md)**
    - Header mapping (24 B, no FILETIME), 144-byte TOC stride incl. per-entry FILETIME triplet, and payload contiguity.
-3. **[VFS I/O Subsystem Runtime Mechanics](file:///C:/Users/Arius/RiderProjects/MartialHeroes/Docs/RE/vfs/io_subsystem.md)**
+3. **[VFS I/O Subsystem Runtime Mechanics](../specs/vfs_loader_dispatch.md)**
    - Analysis of `CVFSManager`, the mount sequence, lowercase binary-search lookup, the three-branch read primitive (slurp, streaming, and loose fallbacks), the `vfsmode` config, and load-progress tracking arithmetic.
-4. **[Sub-Asset Census & Format Directory](file:///C:/Users/Arius/RiderProjects/MartialHeroes/Docs/RE/vfs/census_and_formats.md)**
+4. **[Sub-Asset Census & Format Directory](../specs/vfs_overview.md)**
    - A classified index of the 49 file extensions found inside the reference archive, matching them to their purpose and parser specs.
-5. **[Linkage Layer & Usage Map](file:///C:/Users/Arius/RiderProjects/MartialHeroes/Docs/RE/vfs/linkage_and_usage.md)**
+5. **[Linkage Layer & Usage Map](../specs/asset_linkages.md)**
    - High-level view of how assets reference each other (mesh, animations, lightmaps, textures, localization) and who consumes them.
 
 

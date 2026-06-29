@@ -48,7 +48,9 @@ Fidelity is graded against **two** ground truths, and they govern different thin
    - **Behavior/data oracle (IDA-derived specs):** `CLAUDE.md` -> "Recovered asset mappings" (the
      terrain / skin / bind / mot / spawn / collision chains) and "Coordinate conventions" (negate-Z
      world, negate-X mesh, 1024 / 65x65 / spacing 16); the committed `Docs/RE/formats/*.md` and
-     `Docs/RE/specs/*.md` for the area's assets.
+     `Docs/RE/specs/*.md` for the area's assets — start at `Docs/RE/INDEX.md`, the navigable entry
+     point to the spec corpus (by-subsystem / by-file-extension / by-runtime-struct maps + the
+     definitive-negatives list), to locate the right terrain/mesh/environment spec rather than globbing.
    - **Pixel oracle (the official captures):** the maintainer's official screenshots/captures of this
      scene, when available — they govern the final image and **outrank the spec on appearance**
      (`oracle > spec`). If no capture exists for the area, grade pixels against the recovered-fact

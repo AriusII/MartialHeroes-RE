@@ -27,6 +27,7 @@ source-format: derived from Docs/RE/_dirty/formats/cell_up.raw.md (dirty-room RE
 | Attribute        | Value |
 |------------------|-------|
 | `verification`   | CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME, 0 corrected. Covered fact: `.up` format is `u32 triangleCount` + `triangleCount × 40-byte` triangle records (3 × vec3 + trailing f32); decoder allocates 72-byte runtime triangles and expands 40→72 (XZ-AABB + vertices + plane + scalar); file-size formula `4 + 40×count`; the `.exd` decoder is byte-identical to the `.up` decoder (same shared expander, same element ctors). Build-stable under the uniform +0x80 relocation. |
+| `deep-cartography deepening` | 2026-06-29 (static-only, anchor f61f66a9) — UP layer (cell+20436) confirmed: no static read site other than the two parsers (build) and ctor/dtor (construct/destroy); no query/render site references the UP offset; built and freed but no located runtime consumer. `attr` at +0x24 (runtime +68) also unread by the located EXD ground consumer. Open item #3 tightened. |
 | `ida_reverified` | `2026-06-27` |
 | `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
 | `evidence`       | `[static-ida]` — triangle decoder and shared 40→72 expander re-confirmed at relocated addresses under build f61f66a9. |
@@ -211,8 +212,12 @@ are already world-space, so no external transform table is needed.
   the cell-load chain (cell-descriptor load ← cell-file streaming ← cell acquire/find-or-load).
 - **Intended runtime use** (inferred from the runtime triangle = XZ-AABB + plane + `attr`): an **XZ
   point-locate then plane-evaluate** to obtain the supplementary ground Y on the upper-terrain surface —
-  a height/ground query for overhang/bridge geometry beyond the `.ted` bilinear heightfield. The exact
-  per-frame query that walks the decoded array is **not yet traced** (see Known unknowns).
+  a height/ground query for overhang/bridge geometry beyond the `.ted` heightfield. STATIC BOUND
+  TIGHTENED (2026-06-29): a static scan for the UP layer offset (cell+20436) found **no query or
+  render site** — only the two `.map` parsers (build) and the cell ctor/dtor (construct/destroy)
+  reference this offset. The EXD layer (cell+16332) IS queried by the ground raycast leaf; the UP
+  layer is not. [debugger-confirm D2]: whether a live session ever dereferences the UP layer via a
+  pointer cached elsewhere; if not, UP is load-and-hold-only dead geometry in the shipped client.
 
 ---
 
@@ -234,8 +239,12 @@ one-sided is unverified.
    Settling it needs a consumer trace or more samples. — UNVERIFIED
 2. **Surface sidedness / winding intent.** The plane normal follows `cross(v0 − v1, v2 − v1)`; whether
    the surface is meant to be one-sided is unverified.
-3. **The per-frame ground-Y query** that reads the decoded `.up` array (the XZ point-locate +
-   plane-eval consumer) is not yet located — recommended future RE pass.
+3. **The per-frame ground-Y query for `.up`** — STATIC BOUND TIGHTENED (2026-06-29): no static
+   read site referencing the UP layer offset (cell+20436) was found outside the parsers and
+   ctor/dtor. The EXD layer IS the located supplementary ground surface (queried by
+   `BuildBasisVectorsFromTwoPoints` after the `.ted` subtile test); UP is not. [debugger-confirm
+   D2]: whether the UP layer is ever dereferenced at runtime via a cached pointer. If a live
+   attach confirms no runtime read, UP is load-and-hold-only dead geometry in the shipped client.
 4. **`.up` vs `.exd` semantic difference.** Both are supplementary triangle surfaces sharing the exact
    format and decoder ("UP_TERRAIN" vs "EXTRA_TERRAIN"); the precise gameplay/render distinction between
    them is not pinned.
@@ -248,7 +257,7 @@ one-sided is unverified.
 |--------|------|--------------|
 | `terrain.md` | `data/map<area>/dat/*` | Cell coordinate model, `.map` descriptor grammar, and the §9 `.up`/`.exd` summary this spec details (and corrects on the +0x24 field) |
 | `sod.md` | `data/map<area>/dat/*.sod` | Sibling per-cell collision surface (2D-XZ walls); same cell base path and world-coordinate model |
-| `cell_pre.md` / `authoring_sidecars.md` | `*.pre` / `*.post` | The authoring-sidecar family; confirms `.up`/`.exd` carry NO `.pre`/`.post` and `DATAFILE` names base extensions only |
+| `authoring_sidecars.md` | `*.pre` / `*.post` | The authoring-sidecar family; confirms `.up`/`.exd` carry NO `.pre`/`.post` and `DATAFILE` names base extensions only |
 | `pak.md` | `data.inf` / `data/data.vfs` | VFS container that delivers `.up` / `.exd` files |
 
 - **Glossary:** see `Docs/RE/names.yaml`

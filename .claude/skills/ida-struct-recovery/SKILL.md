@@ -1,7 +1,7 @@
 ---
 name: ida-struct-recovery
-description: Use when you need the field layout or vtable of a legacy object from the Martial Heroes client (Main.exe / doida.exe) — for example a packet struct, an entity/actor class, or an asset header — so a spec-author can write a clean offset table. Dumps member offset/size/type and vtable slots to the dirty quarantine, plus a neutral .h-style offset table that is safe to promote. Includes a dedicated VTABLE-WALK mode that resolves a C++ vtable from its data EA or its installing constructor, role-tags each function-pointer slot (ctor/dtor, per-frame virtual, getter, serialize), and harvests RTTI — the way to recover a polymorphic interface (an actor or asset-loader class hierarchy) before the clean struct is written.
-allowed-tools: mcp__ida__* Read Write
+description: Use when you need the field layout or vtable of a legacy object from the Martial Heroes client (Main.exe / doida.exe) — for example a packet struct, an entity/actor class, or an asset header — so a spec-author can write a clean offset table. Seeds prototypes with infer_types, detects vtables via classify_pointer, and confirms layouts against live instances via read_struct_live. Dumps member offset/size/type and vtable slots to the dirty quarantine, plus a neutral .h-style offset table that is safe to promote. Includes a dedicated VTABLE-WALK mode that resolves a C++ vtable from its data EA or its installing constructor, role-tags each function-pointer slot (ctor/dtor, per-frame virtual, getter, serialize), and harvests RTTI — the way to recover a polymorphic interface (an actor or asset-loader class hierarchy) before the clean struct is written.
+allowed-tools: mcp__ida__*, Read, Write
 model: sonnet
 effort: high
 ---
@@ -42,10 +42,17 @@ This skill produces **two** kinds of output:
 1. **MCP must be green.** Run `/ida-mcp-connect`; confirm a live IDA Pro 9.3 MCP server at
    `http://127.0.0.1:13337/mcp` with the IDB open. If red, STOP and surface:
    `claude mcp add --transport http ida http://127.0.0.1:13337/mcp`.
-2. **Discover the exec tool name at runtime.** `mcp__ida__*` names vary by build. List them and
-   pick the script-execution tool (e.g. `mcp__ida__execute_script` / `mcp__ida__run_python` /
-   `mcp__ida__eval`). Fall back to typed `mcp__ida__*` struct/type tools only if no exec tool
-   exists.
+2. **Prefer the typed struct/type tools; script-exec is the fallback.** Lead with the typed family:
+   `mcp__ida__read_struct` (static decode of a type at an EA) and `mcp__ida__read_struct_live` (decode
+   the live layout at a real `this` pointer in the maintainer's `?ext=dbg` session — via `re-validator`);
+   `mcp__ida__type_inspect` / `mcp__ida__type_query` / `mcp__ida__search_structs` /
+   `mcp__ida__domain_type_layout` to inspect known types; `mcp__ida__infer_types` to seed a prototype
+   from access patterns; `mcp__ida__classify_pointer` to detect a vtable pointer; `mcp__ida__xrefs_to_field`
+   (+ `mcp__ida__watch_field` at runtime) to discover who reads/writes each field; and
+   `mcp__ida__lvar_usage` / `mcp__ida__stack_frame` for stack-local structs. Run the bundled IDAPython
+   only when no typed tool covers the need, via `mcp__ida__py_exec_file` / `py_eval` / `run_script`
+   (persist reusable probes with `save_script` / `read_script` / `list_scripts`; one `RESULT_JSON` line
+   per probe — see `ida-python-lib`).
 
 ## Inputs
 
@@ -54,6 +61,18 @@ This skill produces **two** kinds of output:
   - a **vtable address** (e.g. `0x006C1A40`) to recover a class by its method table, or
   - a **global instance address** whose first DWORD is a vtable pointer (the snippet follows it).
 
+## The `this+offset` recovery workflow (how a layout is actually built)
+
+A 2004-era `__thiscall` object has no declared type at first — you recover it from how the code uses
+it. The loop: (1) harvest every `[base+off]` read/write against the object pointer plus the access
+**width** (byte/word/dword/float) and direction (read vs write) — `mcp__ida__xrefs_to_field` once a
+partial type exists, or `mcp__ida__infer_types` to seed one from raw access; (2) cross-reference the
+**constructor** (the function that writes the vtable into `[this+0]` and initializes the early fields)
+to fix sizes and zero-init defaults; (3) apply the partial type and **re-decompile** (`force_recompile`)
+so the next still-unknown offset surfaces with a meaningful access; (4) repeat until the layout closes.
+Unknown spans become raw byte padding, never guessed types. Field *meaning* (is `+0x1C` a length or a
+flags word?) is confirmed live via `read_struct_live` / `watch_field` through `re-validator`.
+
 ## Mode A — struct/vtable dump (steps)
 
 1. Read the bundled snippet `${CLAUDE_SKILL_DIR}/scripts/struct_dump.py` (also
@@ -61,7 +80,7 @@ This skill produces **two** kinds of output:
    `ida_bytes`.
 2. Edit the `TARGET` / `TARGET_KIND` lines at the top of the source before sending it: set
    `TARGET_KIND` to `"type"`, `"vtable"`, or `"instance"`, and `TARGET` to the name or address.
-3. Feed the edited source to the discovered MCP exec tool. The snippet:
+3. Feed the edited source to `mcp__ida__py_exec_file`. The snippet:
    - resolves the target,
    - walks members (offset, byte size, declared type, name) for a struct/type,
    - walks vtable slots (index, function address, function name) for a vtable/instance,
@@ -101,7 +120,7 @@ together they give the whole object: fields + virtual interface.
    multiple-inheritance/base-subobject vtables — recover each as its own table.
 2. **Walk the slots.** Read `${CLAUDE_SKILL_DIR}/scripts/vtable_recover.py`, set CONFIG (`VTABLE_EA` =
    the table's data EA, OR `CTOR` = the constructor name/address to auto-find the table; `CLASS_NAME`;
-   `MAX_SLOTS`). Run it via the exec tool. It reads consecutive pointer-sized slots from `VTABLE_EA`,
+   `MAX_SLOTS`). Run it via `mcp__ida__py_exec_file`. It reads consecutive pointer-sized slots from `VTABLE_EA`,
    stops at the first non-code / cross-referenced boundary, and for each slot records: slot index, slot
    EA, target function EA + name, the target's in-degree, and a heuristic role tag (destructor for the
    `~`/`vector deleting destructor` pattern, getter if tiny, virtual handler otherwise).
@@ -109,7 +128,9 @@ together they give the whole object: fields + virtual interface.
    per slot ("slot 0: destructor", "slot 3: per-frame update", "slot 7: serialize-to-buffer"). These
    are hypotheses; confirm the important ones by reading the single slot's behavior
    (`ida-explore` DECOMPILE-ONE mode) before a spec-author promotes them.
-4. **(Optional) harvest RTTI / class hierarchy.** For a wider sweep across many classes, the bundled
+4. **(Optional) harvest RTTI / class hierarchy.** Lead with `mcp__ida__module_hierarchy` for the
+   static RTTI class tree and `mcp__ida__hierarchy_runtime_overlay` (via `re-validator`) to map observed
+   runtime construction onto that tree. For a wider sweep the bundled
    `${CLAUDE_SKILL_DIR}/scripts/rtti_harvest.py` enumerates RTTI complete-object-locators / type
    descriptors / base-class arrays, and `${CLAUDE_SKILL_DIR}/scripts/c01_manifest_gen.py` builds a
    class/vtable manifest from that harvest — both for cartography passes over the object model.

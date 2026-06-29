@@ -16,6 +16,27 @@ verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06
                           # bilinear lerp.  See §6.5 correction note.
                           # CYCLE 14 (2026-06-27, IDB SHA f61f66a9): confirmatory re-anchor — subsystem
                           # cleanly relocated, 1 re-confirmed SAME. Prior reverified: 2026-06-16 / 2026-06-22.
+                          # CYCLE 19 (2026-06-28, IDB SHA f61f66a9): GPU render lane added (§11, §12)
+                          # — per-subtile draw architecture, 7×7 draw window, FVF 0x252 vertex bake
+                          # math, 96-index template, opaque render states, MODULATE2X combiner,
+                          # camera-space stage-1 projector, reconciliation flags (diffuse channel
+                          # order, .ted as runtime geometry source). Three items debugger-pending (§12).
+                          # Static-confirmed from Ted_LoadGeometryBlob / TerrainGround_DrawAllLayers.
+                          # CYCLE 19 closeout (2026-06-28, IDB SHA f61f66a9): terrain render close-out
+                          # — stage-1 projected texture identified as dynamic actor shadow map on a
+                          # dedicated shadow-projector singleton; corrected attribution (texture +96,
+                          # matrix +176 live on singleton, NOT terrainMgr); full projection matrix
+                          # formula recovered (invCamView·lightLookAt·perspProj(π/8)·UVbias);
+                          # vertex diffuse R/B swap statically confirmed (byte-certain); stage-1
+                          # TEXTURETRANSFORMFLAGS corrected to PROJECTED|COUNT4 (0x104); per-triangle
+                          # height sampler full algorithm documented (§6.5.1). §12 items 1–2 promoted
+                          # from debugger-pending to RESOLVED (static); items 3–6 unchanged.
+                          # Consolidation (2026-06-29): terrain_system.scrub.md unique facts folded —
+                          # sound-table naming patterns (§7.1 step 5, static-hypothesis); .exd extra-
+                          # terrain file escalation added (§9/§10); struct-offset facts (TerrainCell
+                          # size/fields, sub-manager allocation sizes, TerrainManager ring-ptr byte
+                          # offsets) routed to structs/terrain-manager.md (static-hypothesis;
+                          # unverified at f61f66a9).
 conflicts: none-open      # the campaign-10 conflicts (pool 34 vs ring 25, +10000 index offset,
                           # per-frame load count, clamp threshold wording) are RESOLVED in-text
 # CORRECTED CYCLE 1 (ida_anchor 263bd994): §7 split into a two-phase bootstrap — Phase A (area load +
@@ -45,6 +66,22 @@ conflicts: none-open      # the campaign-10 conflicts (pool 34 vs ring 25, +1000
 > concern, not streaming). **Conflicts: none open** — the Campaign-10 reconciliation
 > (the 34-slot pool vs the 25-slot ring, the `+10000` cell-index origin offset, the per-frame
 > 3-cell load count, and the 15000-threshold clamp wording) is resolved in-text below.
+>
+> **CYCLE 19 (2026-06-28):** GPU render lane added in §11 and §12 — per-subtile draw architecture
+> (16×16 subtile grid, 7×7 per-frame draw window, one `DrawIndexedPrimitiveUP` per patch), FVF
+> `0x252` vertex layout with full bake math, 96-index uniform-diagonal template, opaque pass render
+> states, stage-0 MODULATE2X combiner, stage-1 camera-space projected texture. Reconciliation flags
+> resolved: `.ted` confirmed as the runtime geometry source; MODULATE2X / ×0.5 bake are a matched
+> pair; diffuse channel ordering flagged for `formats/terrain.md §5.8` confirmation.
+> `formats/terrain.md §5.7` "PARTIAL" open item resolved: the draw triangulation diagonal is
+> uniform regardless of `directionByte`. Three items remain debugger-pending (§12).
+>
+> **CYCLE 19 closeout (2026-06-28):** stage-1 texture identity resolved — it is the dynamic actor
+> shadow map rendered per frame by the shadow-projector singleton (§11.8, §11.8.1–§11.8.2); the
+> wave-1 `terrainMgr` attribution is corrected. Vertex diffuse R/B swap confirmed statically
+> (byte-certain, §11.4). Stage-1 `TEXTURETRANSFORMFLAGS` corrected to `PROJECTED|COUNT4` (0x104).
+> Per-triangle height sampler full algorithm documented (§6.5.1). §12 items 1–2 promoted to
+> RESOLVED (static); items 3–6 remain open.
 >
 > **Confidence vocabulary:**
 > - **CODE-CONFIRMED** — behaviour recovered from the instruction stream, corroborated across
@@ -393,6 +430,67 @@ sequence, not two independent ones:
 > shortcut gives different results near the diagonal and must NOT be used.
 > (Confidence: CODE-CONFIRMED, IDB SHA 263bd994. cite: `// spec: Docs/RE/specs/terrain-streaming.md §6.5`)
 
+### 6.5.1 Per-triangle height sampler — full algorithm (CYCLE 19 closeout, CODE-CONFIRMED)
+
+`Terrain_SampleGroundTrianglePlaneHeight` is the function that implements the ground-height query
+described above. Its signature is `(subtileRecord, queryX, queryZ, ioMaxY)` where `subtileRecord` is
+the ground-subtile record base (§11.3). Within that record, float 0 = `texIndex`; the 5×5 vertex
+grid starts at float 1, with vertex k (k = 5·row + col, row/col 0..4) occupying floats
+`[1 + 11·k … 11 + 11·k]`: X at `float(1 + 11·k)`, Y at `float(2 + 11·k)`, Z at `float(3 + 11·k)`.
+Float-index arithmetic is byte-offset divided by 4; the 44-byte (11-float) vertex stride matches §11.4.
+
+**(a) Sub-quad selection — binary vertex comparisons, no division.** The function partitions the
+4×4 quad grid by comparing stored vertex coordinates against the query point:
+
+- **Column (X axis):** if the center-column boundary vertex X ≤ queryX, select the right half
+  (cols 2–4); within that half, the 3/4-boundary vertex X resolves col 3 vs 2. Otherwise left
+  half (cols 0–2); the 1/2-boundary vertex X resolves col 1 vs 0.
+- **Row (Z axis):** analogous binary partition on Z using the center-row (row 2), 3/4-boundary
+  (row 3), and 1/2-boundary (row 1) vertex Z values.
+
+Result: `(col, row) ∈ {0,1,2,3} × {0,1,2,3}` — one quad in the 4×4 grid. Quad corner vertices:
+V00 = (row, col), V01 = (row, col+1), V10 = (row+1, col), V11 = (row+1, col+1).
+
+**(b) Triangle pick — uniform V01↔V10 diagonal.** `Geom_PointInTriangleXZ` (a 2D XZ signed-area
+test using three cross-product signs) is used to classify the query point:
+
+1. Test Triangle A = {V00, V01, V10}. If inside: build the plane from Triangle A and proceed to (c).
+2. Else test Triangle B = {V10, V01, V11}. If inside: build the plane from Triangle B and proceed to (c).
+3. If outside both triangles: return 0 (query is not inside this subtile — no height produced).
+
+The split diagonal runs V01↔V10 uniformly across all 16 quads, **matching the 96-index draw
+template** (§11.5). The `directionByte` field affects UV coordinate flips only; it never alters the
+height-sampler diagonal. Confirmed: these two are consistent.
+
+`Geom_PointInTriangleXZ` tests containment via three signed-area cross products in the XZ plane;
+the query is inside when all three signs agree (a zero-area boundary passes as inside).
+
+**(c) Plane build (`Geom_PlaneFromTriangle`).** For the selected triangle with points P0, P1, P2
+(Triangle A: P0=V00, P1=V01, P2=V10; Triangle B: P0=V10, P1=V01, P2=V11):
+
+```
+edge1 = P0 − P1
+edge2 = P2 − P1
+normal = normalize(cross(edge1, edge2))
+d = −dot(normal, P1)
+```
+
+Returns degenerate failure if the cross product is zero. Plane = {nx, ny, nz, d} anchored at P1.
+
+**(d) Height solve and MAX-combine.** Solve the plane equation `nx·X + ny·Y + nz·Z + d = 0` for Y:
+
+```
+Y = (−d − nx·queryX − nz·queryZ) / ny
+```
+
+If `Y > *ioMaxY`, write Y to `*ioMaxY` (MAX-combine into the caller's accumulator). Multiple
+subtile invocations for the same world query point accumulate via this max — the highest ground
+surface wins. Returns 1 on a hit, 0 if outside both triangles.
+
+This is the complete, exact height math feeding the center-cell height feed in §6.5 and the camera
+height-clamp in `specs/camera_movement.md §A.6`. No bilinear shortcut is present anywhere on this
+path.
+
 ### 6.6 Stream-radius selection, override, and clamp
 
 The stream radius (the float that selects 3×3 vs 5×5 and drives the frustum) is chosen on area entry
@@ -435,7 +533,10 @@ In order, the area orchestrator:
 3. Set area time-of-day and option/dome flags; load the map-option binary.
 4. **Open the 4 per-area binaries** — `map<NNN>.bin`, `regiontable<NNN>.bin`, `region<NNN>.bin`,
    `npc<NNN>.arr` (see `formats/area_inventory.md §1A.3`).
-5. Load the 5 sound tables for the area.
+5. Load the 5 sound tables for the area: `soundtable<NNN>.bgm` (background music),
+   `soundtable<NNN>.bge` (ambient), `soundtable<NNN>.eff` (sound effects),
+   `soundtable<NNN>.wlk` (walk footstep), `soundtable<NNN>.run` (run footstep).
+   [static-hypothesis; unverified at f61f66a9]
 6. Get the terrain manager and write its **map-option + region words**, then **PICK the stream
    radius** (the quality-mode default, or the per-area literal override — see §6.6), which selects
    the ring size.
@@ -549,8 +650,10 @@ object-placement grids driven by the cell `.map` descriptor.
   receives a request (static shows no producer; a live read is the ground truth).
 - That the per-frame dispatcher is the **sole** live driver, firing under real player input (static
   shows the only live call site; a breakpoint would confirm it hits on movement).
-- The **frustum matrix major-order / world up-axis** (and any on-screen visible-cell colour) — a
-  render-lane concern, **out of streaming-behaviour scope**, flagged here for the render/capture lane.
+- The **frustum matrix major-order / world up-axis** (cell-level culling matrix layout) — a
+  render/capture concern, flagged here for the render/capture lane.
+- **Note:** the GPU draw architecture (per-subtile FVF, vertex bake math, render states, per-frame
+  7×7 draw window, stage-0/1 combiners) is now documented in **§11** and **§12** of this spec.
 
 **Out of scope (other lanes):**
 
@@ -558,6 +661,12 @@ object-placement grids driven by the cell `.map` descriptor.
   collision / building specs and `formats/area_inventory.md §1A`.
 - **The 9 sub-manager byte layouts and FX-attach wiring** — see `formats/terrain.md` (§8 names only
   the slot roles).
+- **`.exd` extra-terrain file** (`d<NNN>x<mapX>z<mapZ>.exd`) — additional per-cell terrain geometry
+  data found alongside `.map`/`.ted`/`.bud`/`.sod` in `data/map<NNN>/dat/`. Role uncharacterised;
+  whether it is consumed on the live cell-load path by `Map_LoadCellDescriptor` /
+  `Ted_LoadGeometryBlob` or a separate sub-loader is unconfirmed. [static-hypothesis; unverified at
+  f61f66a9] **Escalation:** the asset-format lane should confirm and document in
+  `formats/area_inventory.md`.
 
 ---
 
@@ -569,5 +678,428 @@ object-placement grids driven by the cell `.map` descriptor.
 - World / scene lifecycle: `specs/world_systems.md`, `specs/resource_pipeline.md`.
 - Collision (`.sod`) and building (`.bud`) cell objects: the collision/building specs.
 - VFS open router: `specs/resource_pipeline.md`.
+- GPU render draw lane — per-subtile architecture, vertex format, render states: **§11** (this spec).
+- Render-lane open items (projector identity, diffuse channel, material values): **§12** (this spec).
+- Building geometry layout: `formats/terrain_scene.md`.
+- Vertex diffuse channel order reconciliation: `formats/terrain.md §5.8`.
+- UV-direction / triangulation reconciliation: `formats/terrain.md §5.7`.
+- Extra-terrain file (`.exd`): uncharacterised per-cell asset — see §9 escalation and `formats/area_inventory.md`.
 - Glossary: `Docs/RE/names.yaml`.
 - Provenance: `Docs/RE/journal.md`.
+
+---
+
+## 11. GPU Render Lane — Per-Subtile Draw Architecture
+
+> **Confidence: CODE-CONFIRMED (static)** — recovered from `Ted_LoadGeometryBlob` (vertex bake) and
+> `TerrainGround_DrawAllLayers` (per-frame draw loop). Three items remain debugger-pending (§12).
+> Added CYCLE 19, 2026-06-28, IDB SHA f61f66a9.
+
+### 11.0 Architecture at a glance
+
+The terrain ground is not drawn as whole 1024-unit cells. Each loaded cell is subdivided into a
+**16×16 grid of 256 ground subtiles**, each subtile covering a **64×64-unit patch** (4×4 quads, 5×5
+vertices). At cell-load time, `Ted_LoadGeometryBlob` bakes all 256 subtile vertex blocks once from
+the five `.ted` on-disk blocks (see `formats/terrain.md §5`). At draw time,
+`Terrain_TickCellsAroundPlayer` touches a **player-centered 7×7 subtile window** (≈ ±192 world
+units) each frame, setting a `visibleThisFrame` flag on each reached subtile.
+`TerrainGround_DrawAllLayers` then draws each visible subtile as **one `DrawIndexedPrimitiveUP`
+call** (25 vertices, 32 triangles, 96 u16 indices, one background texture on stage 0).
+
+One draw call = one 64-unit ground patch = one texture = one `DrawIndexedPrimitiveUP`.
+
+### 11.1 Pass placement and draw order
+
+`RenderPass_WorldTerrainAndBuildings` is the opaque-world pass driver, executed per frame. Sequence
+within it:
+
+1. `Terrain_TickCellsAroundPlayer` — builds the per-frame subtile draw window (§11.2); returns a
+   "terrain present" flag.
+2. Shared opaque render states set (§11.6) + stage-0 combiner configured (§11.7).
+3. Buildings drawn: `BuildingTree_CullAndDraw` (near building tree) and `BuildingFar_CullAndDraw`
+   (far building tree), plus additional FX/object overlay passes.
+4. If terrain present: stage-1 projected texture enabled (§11.8) → `TerrainGround_DrawAllLayers`
+   (ground) → building/object blend pass → stage-1 torn down.
+
+**Buildings are drawn before the ground** in this pass. Buildings use texture address mode CLAMP;
+ground uses WRAP. Both share the stage-0 combiner state.
+
+### 11.2 Per-frame draw window (`Terrain_TickCellsAroundPlayer`)
+
+The cell streaming ring (§6) keeps a 3×3 or 5×5 block of 1024-unit cells resident. The **draw
+window is far tighter** — only the nearest subtiles around the player are submitted to the GPU each
+frame.
+
+`Terrain_TickCellsAroundPlayer` walks a square grid in **64-unit steps** centered on the player's
+world XZ:
+
+| Window | Step range | Subtiles | Purpose |
+|---|---|---|---|
+| Ground (default) | −192 to +192 at 64-unit steps | **7×7 = 49** | Ground draw |
+| Ground (near mode) | −64 to +64 at 64-unit steps | **3×3 = 9** | Ground draw, reduced-detail state |
+| Object/mass | −64 to +64 at 64-unit steps | **3×3 = 9** | Object placement |
+
+The "near mode" is selected by a terrain-manager state field (see `structs/terrain-manager.md`). A
+separate manager state disables the whole pass (returns 0; no terrain drawn that frame).
+
+For each step, `Terrain_TickCellsAroundPlayer` resolves the loaded cell at that world XZ (using
+`cellIndex = 10000 + floor(coord/1024)` from §6.2), then calls `TerrainCell_TouchGroundSubtileAtXZ`
+or `TerrainCell_TouchObjectSubtileAtXZ`.
+
+**Touch logic** (`TerrainCell_TouchGroundSubtileAtXZ`): maps world XZ to a 16×16 subtile index
+using `(X − cellOriginX) × (1/64)` and `(Z − cellOriginZ) × (1/64)`; if the subtile has geometry
+(`faceCount > 0`, offset +1128 in the subtile record), sets `visibleThisFrame` (offset +1135) to 1.
+The visible flag links the subtile into the draw list consumed by `TerrainGround_DrawAllLayers`.
+
+**Engineering consequence:** only the ~49 nearest 64-unit ground patches (and ~9 object patches) are
+submitted to the GPU per frame, regardless of how many cells are resident. This is the terrain's
+primary per-frame LOD/cull boundary.
+
+### 11.3 Ground subtile record layout (256 per cell, 1136 bytes each)
+
+Each cell's ground sub-manager allocates a 16×16 grid of 256 ground subtile records at construction
+time (`TerrainCell_InitGroundSubtileGrid`). Each record is **1136 bytes**.
+
+| Offset | Size | Type | Field | Notes |
+|------:|-----:|------|-------|-------|
+| +0 | 4 | u32 | `texIndex` | Initially the raw `.ted` block-3 texture index; rewritten in-place by `Ted_ResolvePatchTextures` to the resolved texture-pool pointer. `TerrainGround_DrawAllLayers` reads this to select the stage-0 texture. |
+| +4 | 1100 | bytes | `vertices[25]` | 25 ground vertices at 44 bytes each (§11.4). Copied wholesale to the batch vertex scratch at draw time. |
+| +1104 | 4 | f32 | `aabb.minX` | World X minimum of patch |
+| +1108 | 4 | f32 | `aabb.minY` | World Y minimum (lowest height in patch) |
+| +1112 | 4 | f32 | `aabb.minZ` | World Z minimum |
+| +1116 | 4 | f32 | `aabb.maxX` | = `minX + 64` |
+| +1120 | 4 | f32 | `aabb.maxY` | World Y maximum (highest height) |
+| +1124 | 4 | f32 | `aabb.maxZ` | = `minZ + 64` |
+| +1128 | 4 | u32 | `faceCount` | Touch sets `visibleThisFrame` only when this is > 0. |
+| +1132 | 1 | u8 | `steepFlag` | Set when `(maxY − minY) > 8.0` world units. See `formats/terrain.md §5.0`. |
+| +1133 | 1 | u8 | `directionByte` | The `.ted` block-4 byte for this patch (bit 0 = S-flip, bit 1 = T-flip). |
+| +1135 | 1 | u8 | `visibleThisFrame` | Set by touch (§11.2); drives draw-list membership. |
+
+Cell-wide Y-extent bounds are stored on the ground sub-manager object, not on individual subtile
+records.
+
+### 11.4 Ground vertex format — 44 bytes, FVF 0x252
+
+Ground vertices use **FVF `0x252`** = `D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE | D3DFVF_TEX2`
+(bitmask: `0x002 | 0x010 | 0x040 | 0x200`). Stride = **44 bytes**. All 25 vertices per subtile are
+baked once at cell-load time by `Ted_LoadGeometryBlob`.
+
+| Offset | Type | Field | Bake source / formula |
+|------:|------|-------|----------------------|
+| +0 | f32 | X | `(4·subtileX + localCol) × 16.0 + (mapX − 10000) × 1024.0` |
+| +4 | f32 | Y | Height f32 from `.ted` block 1 — direct world Y, no scale |
+| +8 | f32 | Z | `(4·subtileZ + localRow) × 16.0 + (mapZ − 10000) × 1024.0` |
+| +12 | f32 | Nx | `(signed_byte normal_x) / 127.0` |
+| +16 | f32 | Ny | `(signed_byte normal_y) / 127.0` |
+| +20 | f32 | Nz | `(signed_byte normal_z) / 127.0` |
+| +24 | u8 | Blue | `disk_diffuse_byte0 × 0.5` (see reconciliation note below) |
+| +25 | u8 | Green | `disk_diffuse_byte1 × 0.5` |
+| +26 | u8 | Red | `disk_diffuse_byte2 × 0.5` (see reconciliation note below) |
+| +27 | u8 | Alpha | Initialised to `0xFF` by vertex construction; not overwritten by bake |
+| +28 | f32 | U0 | `localCol × 0.25`; if `directionByte & 1` (S-flip): `U0 = 1.0 − U0`; 5th/edge vertex forced to `1.0` |
+| +32 | f32 | V0 | `localRow × 0.25`; if `directionByte & 2` (T-flip): `V0 = 1.0 − V0`; edge vertex forced to `1.0` |
+| +36 | f32 | U1 | Copied from U0 at bake; overridden at draw by stage-1 texcoord generator (§11.8) |
+| +40 | f32 | V1 | Copied from V0 at bake; overridden at draw by stage-1 texcoord generator (§11.8) |
+
+`localCol` and `localRow` range 0..4. Each subtile maps its texture across the full 0..1 UV range
+(one texture repeat per 64-unit patch). The 5 vertices per axis span U/V = {0, 0.25, 0.5, 0.75, 1.0}.
+
+Vertices carry **absolute world-space XYZ** — the `(mapX − 10000) × 1024.0` term unpacks the
+cell-origin from the stored cell index (§6.2), consistent with the WORLD = identity render state
+(§11.6). UV1 satisfies the FVF TEX2 stride but its stored value is unused at draw time.
+
+**Input data — five `.ted` scratch buffers** (filled by `Ted_LoadGeometryBlob`; see
+`formats/terrain.md §5` for on-disk layout):
+
+| .ted Block | Content | Grid | Bytes |
+|---|---|---|---:|
+| Block 1 | f32 heights | 65×65 | 16900 |
+| Block 2 | signed-byte×3 normals | 65×65 | 12675 |
+| Block 3 | u8 texture indices | 16×16 per-subtile | 256 |
+| Block 4 | u8 direction bytes (S/T flip) | 16×16 per-subtile | 256 |
+| Block 5 | u8×4 RGBA diffuse | 65×65 | 16900 |
+
+Index into 65×65 grids: `col + 65 × row` (col = X-inner, row = Z-outer). Normals at
+`3 × (col + 65 × row)`. Texture-index/direction at the subtile's 16×16 linear position. Bake outer
+loop: subtileX 0..15; inner: subtileZ 0..15; then 5×5 vertex grid (localCol outer, localRow inner).
+
+**Reconciliation — disk diffuse channel order (CYCLE 19 closeout, CODE-CONFIRMED):** The bake
+stores disk-byte0 → vertex Blue (+24), disk-byte1 → Green (+25), disk-byte2 → Red (+26). Since
+`formats/terrain.md §5.8` establishes the on-disk order as RGBA (R@+0, G@+1, B@+2, A@+3), the
+positional byte copy produces `D3DCOLOR { B = diskR×0.5, G = diskG×0.5, R = diskB×0.5, A = 0xFF }`
+— **Red and Blue are swapped** relative to disk order. This mapping is **byte-certain**
+(CODE-CONFIRMED from the vertex bake loop; see §12, item 2). A faithful reimplementation must
+reproduce exactly this byte assignment. The visual effect on non-white terrain tiles remains
+**capture-pending** (all observed tiles are white; the swap is present in the byte stream but not
+yet visually discriminated). The reimplementation is not blocked: the byte behavior is definitive.
+
+**Reconciliation — MODULATE2X and the ×0.5 bake:** disk diffuse bytes are halved at bake (×0.5) and
+the stage-0 combiner applies MODULATE2X (×2, §11.7). Net multiplier = ×1 for normal-range tiles,
+with disk values above 127 providing HDR headroom. The bake and the combiner are a matched pair. See
+`formats/terrain.md §5.8`.
+
+**Reconciliation — `.ted` as runtime geometry source:** `Ted_LoadGeometryBlob` is the live
+cell-load-time vertex bake. Any prior claim that `.ted` is an export-only or authoring-only file is
+incorrect; it is the runtime ground geometry source, consumed at cell-load time. See
+`formats/terrain.md §5`.
+
+### 11.5 The 96-index triangulation template
+
+A single shared **96-entry u16 index list** (32 triangles) is built once by
+`TerrainGroundSubtile_ctor` at first subtile construction and reused for every patch draw. A
+build-guard prevents duplicate initialisation.
+
+For each of the 16 quads in the 4×4 patch (row i = 0..3, col j = 0..3), vertex-row stride = 5:
+
+> base vertex = `5 × i + j`
+> Triangle A: `{ base, base+5, base+1 }`
+> Triangle B: `{ base+5, base+6, base+1 }`
+
+This is a **uniform diagonal** (from `base+1` to `base+5`) applied identically to all 16 quads.
+
+**Consequence for `directionByte`:** the `directionByte` field (§11.3, §11.4) flips UV coordinates
+only — it does **not** alter the triangulation diagonal. This resolves the "PARTIAL" open item in
+`formats/terrain.md §5.7` for the GPU draw path: the draw triangulation is always the uniform
+diagonal regardless of direction byte; UVs mirror, triangles do not.
+
+The 96-entry sequence is runtime-initialised and reads as zero in a static binary scan. The pattern
+above is recovered from constructor logic. For a byte-exact index buffer (winding verification under
+`D3DCULL_CW`), a live read of the initialised buffer is needed (debugger-pending; §12, item 4).
+
+`GroundBlend_FillCellIndices` copies this template into the per-draw index batch with a base-vertex
+offset. For the per-patch immediate-mode draw (25 self-contained vertices, `DrawIndexedPrimitiveUP`),
+the offset is 0.
+
+### 11.6 Opaque pass render states
+
+Set once at the start of `RenderPass_WorldTerrainAndBuildings`, shared by terrain and buildings.
+Vertices carry absolute world-space XYZ (baked by `Ted_LoadGeometryBlob`), so the WORLD transform
+is set to identity — no per-patch matrix multiplication.
+
+| Render State | Value | Notes |
+|---|---|---|
+| WORLD transform | Identity | Absolute world space; set once for the pass |
+| LIGHTING (D3DRS 137) | ON | Fixed-function vertex lighting enabled |
+| ZENABLE (D3DRS 7) | ON | Depth test enabled |
+| ZWRITEENABLE (D3DRS 14) | ON | Depth writes enabled |
+| FOGENABLE (D3DRS 28) | ON | Distance fog enabled |
+| ALPHABLENDENABLE (D3DRS 27) | OFF | Opaque pass |
+| ALPHATESTENABLE (D3DRS 15) | OFF | No alpha cutout on terrain |
+| CULLMODE (D3DRS 22) | D3DCULL_CW (2) | Back-face cull, clockwise winding |
+| Material (D3DMATERIAL9) | Runtime-filled | Applied by the lighting subsystem before the pass; static value is zero — see §12, item 3. |
+
+### 11.7 Stage-0 texture combiner and sampler
+
+Configured once for the shared opaque pass (terrain and buildings).
+
+**TextureStageState combiner:**
+
+| Stage | COLORARG1 | COLORARG2 | COLOROP | ALPHAOP |
+|---|---|---|---|---|
+| 0 | TEXTURE | DIFFUSE | MODULATE2X (D3DTOP 5) | DISABLE |
+| 1+ | — | — | DISABLE | DISABLE |
+
+Stage-0 output = `texture × vertexDiffuse × 2`. Paired with the ×0.5 diffuse bake (§11.4).
+
+**SamplerState (stage 0):**
+
+| Property | Value |
+|---|---|
+| MAGFILTER | D3DTEXF_LINEAR |
+| MINFILTER | D3DTEXF_LINEAR |
+| MIPFILTER | D3DTEXF_LINEAR (trilinear) |
+| ADDRESSU / V (ground draws) | D3DTADDRESS_WRAP — texture tiles once per 64-unit patch |
+| ADDRESSU / V (building draws) | D3DTADDRESS_CLAMP — set around building-tree draws; restored to WRAP for ground |
+
+### 11.8 Stage-1 projected texture — dynamic actor shadow map (CYCLE 19 closeout, CODE-CONFIRMED)
+
+**Identity:** the stage-1 texture is a **dynamic actor shadow map** rendered per frame by the
+**shadow-projector singleton** — a dedicated subsystem object separate from the terrain manager.
+The texture handle and the projection matrix are **not** fields of the terrain manager; the terrain
+pass reads them from the shadow-projector singleton by calling its lazy accessor. The wave-1
+attribution to `terrainMgr.projectorTexture` / `terrainMgr.projectorMatrix` is corrected here.
+`structs/terrain-manager.md` should re-home those fields onto the shadow-projector singleton struct
+lane. See §12, item 1 (resolved).
+
+**Stage-1 device state** (enabled immediately before `TerrainGround_DrawAllLayers`; torn down after):
+
+| State | Value | Notes |
+|---|---|---|
+| Stage-1 texture | Shadow-projector singleton texture (field +96) | Dynamic actor shadow RT; see §11.8.1 |
+| D3DTS_TEXTURE1 transform | Shadow-projector singleton matrix (field +176) | Per-frame composed projection; see §11.8.2 |
+| TEXCOORDINDEX (stage 1) | `D3DTSS_TCI_CAMERASPACEPOSITION` (0x20000) | Texcoords generated from camera-space vertex position |
+| TEXTURETRANSFORMFLAGS (stage 1) | `D3DTTFF_PROJECTED \| D3DTTFF_COUNT4` (0x104) | 4-component projected mapping with homogeneous divide |
+| COLORARG1 | TEXTURE | Shadow map sample |
+| COLORARG2 | CURRENT | Stage-0 output (lit ground) |
+| COLOROP | MODULATE (D3DTOP 4) | Multiplies shadow over lit terrain |
+| ALPHAOP | DISABLE | |
+| MAGFILTER / MIPFILTER | D3DTEXF_POINT / none | Point filter, no mipmaps |
+| ADDRESSU / ADDRESSV | D3DTADDRESS_CLAMP | |
+
+After the ground draw, stage 1 is fully torn down: `TEXTURETRANSFORMFLAGS` reset to 0, stage-1
+texture unbound, `TEXTURE1` transform restored, combiner and sampler reset to defaults.
+
+**Net ground color** = `shadowMap × (groundTexture × litVertexDiffuse × 2)`. Where the shadow map
+samples white (1.0) the lit terrain is unaffected; where it samples gray (≈ 0.5 actor silhouette)
+the terrain is darkened by ~50%, producing the projected actor shadow on the ground.
+
+**Why `TCI_CAMERASPACEPOSITION` is used:** a ground vertex in camera space is mapped back to world
+space (via the inverted camera view embedded in +176) → light view → light clip → [0,1] shadow UV,
+with the homogeneous divide (`PROJECTED|COUNT4`) handling the perspective correction. The matrix
+composition is described in §11.8.2.
+
+### 11.8.1 Shadow-projector singleton — field table
+
+The singleton is constructed lazily by `Renderer_BuildShadowPerspectiveMatrix` (static, once) and
+read each frame by `Renderer_BuildShadowLookAtMatrix`. Its relevant fields (byte offsets from the
+singleton base):
+
+| Offset | Type | Content |
+|---:|---|---|
+| +88 | object | Render-target wrapper (vtable; begin render-to-texture = vtable slot+20, end = slot+24) |
+| +96 | handle | Render-target color texture — the shadow map texture bound to stage 1 |
+| +112 | 4×4 f32 | Static light-perspective matrix: `PerspectiveFovLH(fovY = π/8, aspect = 1.0, zNear = 0.0, zFar = 10000.0)` — built once |
+| +176 | 4×4 f32 | Runtime projection (texture) matrix — recomposed per frame; set as D3DTS_TEXTURE1 |
+| +240 | 4×4 f32 | Static UV-bias matrix: `Scale(0.5, −0.5, 1.0) · Translate(0.5, 0.5, 0.0)` — built once; maps clip-space to [0,1]² with V-axis flip |
+| +304/+308 | f32 | Light-angle scalar derived from the `EnvironmentLightScene` sun angle |
+| +312 | i32 | Projector mode flag; the per-frame render is gated on this field not equalling 3 |
+
+The pixel dimensions of the shadow render target (allocated via the +88 wrapper) were not recovered
+in this pass. Hand to the shadow-projector struct lane.
+
+### 11.8.2 Shadow map render process (per frame)
+
+`Renderer_BuildShadowLookAtMatrix` is called once per frame from the frame pre-step that precedes
+`RenderPass_WorldTerrainAndBuildings`. It is gated on: the singleton's enabled flag, a local player
+being present, and `singleton+312 != 3`.
+
+**Step A — light view matrix.** The look-at target is the local player's world position. The light
+direction / azimuth is derived from the `EnvironmentLightScene` singleton (sun angle), with a
+fallback fixed angle for low-angle cases. The light eye = target + direction × 10.0. A standard
+left-handed look-at matrix is built from eye, target, and up = {0, 1, 0}.
+
+**Step B — projection (texture) matrix composed into singleton +176:**
+
+```
+invCamView  = inverse(current device VIEW transform)
++176        = invCamView · lightView · (+112 perspProj) · (+240 UVbias)
+```
+
+The four-matrix chain transforms a camera-space position all the way to a shadow UV: invert back to
+world, rotate into light view, project into light clip, remap to [0, 1]². This is exactly what the
+`TCI_CAMERASPACEPOSITION` texgen + `PROJECTED|COUNT4` pipeline executes per vertex.
+
+**Step C — shadow map render into the RT (+88).**
+
+- Activate the render target via vtable slot+20.
+- Clear to white (0xFFFFFF color), z = 1.0.
+- Render states: depth write off, depth test on, alpha blend off, alpha test off, cull NONE, fill
+  SOLID, lighting off, fog off, stage-0 texture = null.
+- Set `D3DRS_TEXTUREFACTOR = 0x95808080` (mid-gray RGB ≈ 0x80, alpha 0x95). Stage-0 combiner:
+  COLORARG1 = TFACTOR, COLOROP = SELECTARG1 — draws all geometry as flat gray.
+- Draw actor silhouettes: `Actor_DrawPartsForShadow` for the local player; then all nearby battle
+  actors within XZ distance² < 23104.0 (wide-quality mode) or < 1936.0 (narrow mode).
+- End render target via vtable slot+24.
+
+**Result:** white background + gray (≈ 0.5 luminance) silhouettes of the local player and nearby
+actors, rendered from the light's viewpoint. Projected onto the ground via stage 1: white → ×1
+(no change); gray → ×0.5 (~50% ground darkening under each actor).
+
+**Note — separate mechanism:** `ActorShadow_DrawBlobQuads` (also driven by the shadow-projector
+singleton) draws per-actor blob-quad shadows in a separate pass; it is not part of the stage-1
+projected shadow mechanism described here.
+
+**Residual open items** (optional debugger confirmations; neither blocks a faithful reimplementation):
+
+- Shadow RT pixel dimensions (not recovered in this pass; hand to the struct lane).
+- Live numeric value of singleton +176 at draw time (formula is statically certain).
+- Whether the `+312 != 3` gate and the low-angle `EnvironmentLightScene` branch act as a
+  quality/option toggle that can disable dynamic shadows at runtime (see the options/lighting lane).
+
+### 11.9 Cell construction and bake sequence
+
+On a cache miss (§4), the per-cell loader constructs a cell via this sequence:
+
+1. **Cell object construction** (`TerrainCell_ctor`): allocates the cell with a 9-sub-manager array
+   (§8). `TerrainCell_InitGroundSubtileGrid` within this allocates the 16×16 grid of 256 subtile
+   records (1136 bytes each).
+2. **Cell descriptor parse** (`Map_LoadCellDescriptor`): parses the `.map` file. During the TERRAIN
+   section of the parse, invokes **`Ted_LoadGeometryBlob`** — reads all five `.ted` blocks and fills
+   all 256 subtile vertex blocks in one pass.
+3. **Finalize tail** (after the `.map` parse returns), in order:
+   - `Ted_ResolvePatchTextures`: rewrites each subtile's raw texture-index (`.ted` block 3) to the
+     resolved texture-pool pointer.
+   - `Ted_BuildCellGroundGrid`: builds a 16×16 grid of patch centroids (per-subtile midpoints) for
+     the quadtree.
+   - `Map_BuildMassObjectGrid`: builds the building/object placement grid.
+   - Seven FX-layer builder calls (FX overlay layers 1..7).
+   - `TerrainCell_BuildSubtileQuadtreeBounds`: builds the subtile quadtree culling bounds (16 leaves).
+
+`Ted_LoadGeometryBlob` is the runtime geometry source, not an export path. It reads the five `.ted`
+blocks from the VFS and fills all 256 subtile vertex blocks. See `formats/terrain.md §5`.
+
+### 11.10 Per-patch draw loop detail (`TerrainGround_DrawAllLayers`)
+
+Each frame, after `Terrain_TickCellsAroundPlayer` has set the visible flags:
+
+1. Set FVF to `0x252` once for the ground pass.
+2. Walk the visible-subtile linked list. For each visible subtile:
+   - Read `texIndex` (offset +0). If the texture changed since the previous patch, resolve the
+     texture-pool entry (`TexturePool_GetEntryByIndex_B`) and bind it to stage 0
+     (`RenderDevice_SetStageTextureByNameOrDefault`; falls back to the default texture if the entry
+     is null).
+   - Copy the 25-vertex block (1100 bytes from subtile offset +4) to the batch vertex buffer.
+   - Copy the 96 shared indices to the batch index buffer (base-vertex offset = 0).
+   - Issue `DrawIndexedPrimitiveUP`: `PrimitiveType = D3DPT_TRIANGLELIST`, `MinVertexIndex = 0`,
+     `NumVertices = 25`, `PrimitiveCount = 32`, `IndexFormat = D3DFMT_INDEX16`, `VertexStride = 44`.
+   - Reset vertex/index batch counts.
+
+One `DrawIndexedPrimitiveUP` = one texture = one 64-unit² ground patch.
+
+### 11.11 Building draw companion (render details)
+
+`BuildingTree_CullAndDraw` and `BuildingFar_CullAndDraw` use the same device call pattern as ground
+but with different geometry: FVF `0x112` (`D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX1`), vertex
+stride = 32 bytes. See `formats/terrain_scene.md` for building geometry layout.
+
+Per-building distance culling: computes distance² (XZ plane) from the camera to the building
+midpoint. If distance² ≤ the building's visibility budget, the building is visible; distance² > 0.7
+× budget selects the far-LOD mesh. Distance² > budget culls the building. Both near/far LOD meshes
+share the CLAMP sampler state.
+
+---
+
+## 12. Render-Lane Open Items
+
+Items 1–2 were resolved statically in the CYCLE 19 closeout. Items 3–6 still require a live
+`?ext=dbg` session.
+
+1. **Stage-1 projector identity — RESOLVED (static, CYCLE 19 closeout).** The stage-1 texture is
+   the **dynamic actor shadow map** rendered per frame by the shadow-projector singleton. The wave-1
+   `terrainMgr` attribution is corrected: the texture and matrix live on the shadow-projector
+   singleton at fields +96 and +176, not on the terrain manager. The projection matrix formula is
+   statically recovered: `invCamView · lightView · perspProj(π/8, 1, 0, 10000) · UVbias`. The
+   per-frame render process (white RT, gray actor silhouettes, shadow tint TFACTOR `0x95808080`) is
+   documented in §11.8–§11.8.2. `structs/terrain-manager.md` should re-home the +96/+176 fields
+   onto the shadow-projector singleton struct. Residual optional confirmations: shadow RT pixel
+   dimensions; live numeric value of the composed matrix at draw time. Neither gates implementation.
+2. **Vertex diffuse channel order — RESOLVED (static, CYCLE 19 closeout); visual tint capture-pending.**
+   The R/B swap is **byte-certain** (CODE-CONFIRMED): the bake maps disk-RGBA positionally to
+   `D3DCOLOR { B = diskR×0.5, G = diskG×0.5, R = diskB×0.5, A = 0xFF }`. See §11.4. A faithful
+   reimplementation must reproduce this byte assignment regardless of the visual confirmation status.
+   Residual: **capture-pending** — confirm on a non-white terrain tile that non-white ground
+   actually shows the swap (all observed tiles are white; the swap is visually undetected but
+   byte-certain).
+3. **Material values** — the D3DMATERIAL9 record applied before the pass is runtime-filled by the
+   lighting subsystem; its static value is zero. Capture actual diffuse, ambient, emissive, and
+   specular-power fields written before the terrain pass in a live session.
+4. **96-index template exact byte sequence** — the uniform-diagonal pattern is recovered from
+   constructor logic. Read the runtime-initialised 96-entry u16 buffer in a live session if a
+   byte-exact index order is required for winding verification under `D3DCULL_CW`.
+5. **Draw-window manager mode** — which terrain-manager state value (default 7×7 vs. near-mode 3×3)
+   is active during normal gameplay; confirm subtiles outside the active window are not submitted to
+   the GPU.
+6. **Offscreen-RT / cel path** — a second render path (offscreen render-target, cel/glow
+   post-processing) is present in the binary. The render states in §11 describe the direct-draw path;
+   confirm which path is active on the target GPU configuration before the cel-shading analyst
+   commits.

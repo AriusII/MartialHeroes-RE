@@ -1,6 +1,6 @@
 ---
 name: ida-crypto-hunt
-description: Use to recover the packet cipher and key schedule of the legacy Martial Heroes client (doida.exe; Main.exe historical) so Network.Crypto can interoperate with the original wire format. Fuses crypto-shaped bit-op loop detection, xrefs walked out from the socket-recv/decrypt path, and constant-table (S-box/key-material) extraction into one crypto-focused report under Docs/RE/_dirty/crypto/. The deliverable that crosses the firewall is a NEUTRAL algorithm description in words and math — never transcribed code.
+description: Use to recover the packet cipher and key schedule of the legacy Martial Heroes client (doida.exe; Main.exe historical) so Network.Crypto can interoperate with the original wire format. Leads with mcp__ida__recipe_crypto_candidates, anchors on the socket-recv path, and points runtime confirmation at probe_net/appcall. Fuses crypto-shaped bit-op loop detection, xrefs walked out from the socket-recv/decrypt path, and constant-table (S-box/key-material) extraction into one crypto-focused report under Docs/RE/_dirty/crypto/. The deliverable that crosses the firewall is a NEUTRAL algorithm description in words and math — never transcribed code.
 allowed-tools: mcp__ida__*, Read, Write
 model: sonnet
 effort: high
@@ -54,36 +54,51 @@ byte = plain XOR k_i; key schedule seeds S from a 16-byte session key delivered 
 1. **Check connectivity.** List `mcp__ida__*` tools; if none resolve, report the
    `claude mcp add` hint and stop.
 
-2. **Run the bundled tracer.** Read `${CLAUDE_SKILL_DIR}/scripts/crypto_trace.py`, then paste
-   its full source into the IDA script-exec tool (name varies:
-   `mcp__ida__execute_script` / `mcp__ida__run_python` / `mcp__ida__eval`). It:
+2. **Lead with `recipe_crypto_candidates`.** Run `mcp__ida__recipe_crypto_candidates` first — the
+   purpose-built crypto detector: it ranks functions by crypto-shaped bit-op density and constant-table
+   association. This is the LEAD signal. Then supplement:
+   - **Anchor on the socket-recv path (highest-signal).** `mcp__ida__recipe_import_usage` to find the
+     recv/`WSARecv` import sites, then `mcp__ida__trace_data_flow` forward from the received buffer to
+     the first function that transforms it; `mcp__ida__microcode_calls` to walk out from
+     recv/decrypt cleanly. The cipher is whatever first mutates the recv buffer.
+   - **Constant-table hunt.** `mcp__ida__find_bytes` / `mcp__ida__find_regex` / `mcp__ida__memory_scan`
+     for S-box / key-table / round-constant markers — the magic constants worth scanning for: SHA-1
+     `0x5A827999` / `0x6ED9EBA1`, MD5/SHA init `0x67452301`, TEA delta `0x9E3779B9`, CRC32 reversed
+     poly `0xEDB88320`, and the RC4 256-byte twin-loop (a 0..255 permutation built then consumed).
+3. **Run the bundled tracer for the fused report.** Read `${CLAUDE_SKILL_DIR}/scripts/crypto_trace.py`
+   and run it via `mcp__ida__py_exec_file` (emits one `RESULT_JSON` line — harness contract, see
+   `ida-python-lib`). It:
    - locates recv/decrypt anchor functions by import + string heuristics;
    - from those anchors, walks callees a few levels and flags functions containing
      cipher-shaped loops (XOR/ROL/ROR/shift, per-byte stride);
    - extracts 256-byte / 256-dword constant tables near those functions (S-box / round
      constants / CRC) and flags 0..255 permutations;
-   - emits a ranked Markdown report (anchor -> candidate cipher func -> loop fingerprint ->
+   - emits a ranked report (anchor -> candidate cipher func -> loop fingerprint ->
      associated constant tables).
 
-3. **Capture output** to `Docs/RE/_dirty/crypto/crypto_trace.md` (the script writes it if it
+4. **Capture output** to `Docs/RE/_dirty/crypto/crypto_trace.md` (the script writes it if it
    can; otherwise copy the printed Markdown and Write it there yourself).
 
-4. **Confirm the cipher function.** The top candidate is the function that is (a) reachable
+5. **Confirm the cipher function.** The top candidate is the function that is (a) reachable
    from the recv path, (b) has the tightest bit-op loop, and (c) references a constant table.
    If two functions look symmetric, you've likely found encrypt + decrypt — note both.
 
-5. **Characterize, in neutral terms.** From behavior (not pasted code), write down for the
+6. **Characterize, in neutral terms.** From behavior (not pasted code), write down for the
    dirty notes: operation per byte/block (XOR? add-mod-256? rotate-by-key?), block vs.
    stream, state size, how the key is derived (key schedule), where the key enters (which
    packet/opcode or handshake), endianness, and whether encrypt and decrypt are the same
    routine. If you need callers of the key-setter or what touches the key global, use the
-   **ida-py** snippets (`callers_of.py`, `touches_global.py`).
+   **ida-py** / `ida-python-lib` snippets (`callers_of`, `touches_global`).
 
-6. **Optional: behavioral verification.** If a Wireshark capture's first encrypted bytes are
-   known, you can sanity-check the recovered algorithm against them out-of-band — but never
-   put capture bytes or addresses in a committed file.
+7. **Runtime confirmation (the definitive cipher proof).** Hand off to `ida-debugger-drive` /
+   `re-validator` for the dynamic confirm against the maintainer's live `?ext=dbg` session — none of
+   these spawn the process: `mcp__ida__probe_net` auto-captures every socket send/recv (the ciphertext
+   on the wire), and `mcp__ida__appcall` invokes the client's OWN decryptor on captured bytes — the
+   definitive confirmation of the transform and key without transcribing any code. A Wireshark capture's
+   first encrypted bytes are a useful out-of-band cross-check, but never put capture bytes or addresses
+   in a committed file.
 
-7. **Hand off to the spec-author.** State: "Crypto recon in Docs/RE/_dirty/crypto/; the
+8. **Hand off to the spec-author.** State: "Crypto recon in Docs/RE/_dirty/crypto/; the
    neutral algorithm description for Network.Crypto must be authored into
    Docs/RE/specs/crypto.md by the spec-author, with a journal.md entry. Constants promote
    only via that reviewed spec." Do not author the clean spec from here.

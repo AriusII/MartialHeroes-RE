@@ -1,7 +1,7 @@
 ---
 status: static-hypothesis
 sample_verified: false
-subsystems: [world_systems, actor_placement, terrain]
+subsystems: [world_systems, actor_placement, terrain, static_object_placement]
 ida_anchor: "(f61f66a9 build — differs from committed anchor 263bd994; see provenance note)"
 evidence: [static-ida]
 verification: "[static-hypothesis] — recovered 2026-06-26 from a session whose live IDB build differs
@@ -9,7 +9,7 @@ verification: "[static-hypothesis] — recovered 2026-06-26 from a session whose
 conflicts: refines terrain.md §5.4a triangle-selection rule; no contradiction with the plane-math result
 ---
 
-# Spec: World-Entity Vertical Placement (Terrain Grounding)
+# Spec: World Entity Placement — Actor Grounding and Static Object Placement
 
 > **Clean-room spec. Neutral description only — NO decompiler pseudo-code, NO binary addresses,
 > NO decompiler-generated identifiers.** Promoted from dirty-room static analysis under EU
@@ -324,3 +324,329 @@ Hand to: `re-function-analyst` (terrain streaming / map-area state).
 All struct field offsets in §6 are from the f61f66a9 build session and require re-validation against
 the committed IDB anchor (263bd994) before being used in implementation. Request a re-validator pass
 against the pinned build to confirm or correct each offset.
+
+---
+
+## 8. Static Decorative Object Placement (Mass Objects and FX Layers)
+
+[static-hypothesis — recovered 2026-06-28; load-bearing items flagged `[debugger-confirm]`/`[capture-confirm]` for a G2 pass; see §8.9 for open items]
+
+This section documents the runtime placement model for static world-dressing geometry: buildings and
+props loaded from `.bud` files ("mass objects") and the animated decorative geometry layers loaded
+from `.fx1`–`.fx7` files. On-disk formats for both families are documented separately —
+`Docs/RE/formats/terrain_scene.md` covers the `.map` text descriptor and `.bud` building geometry;
+`Docs/RE/formats/effects.md` covers the `.fx1`–`.fx7` per-cell layer formats. This section covers
+only the **runtime placement model**: spatial indexing, culling, level-of-detail, draw batching, and
+wind-sway animation. None of this material appears in the format specs or in §1–§7 above.
+
+Actor spawn descriptors (`.arr` records) are the one exception to the no-transform convention
+described in §8.1 — they carry a per-instance position and heading quaternion and are covered in
+`Docs/RE/formats/npc_spawns.md` and `Docs/RE/structs/spawn_descriptor.md`, cross-referenced only here.
+
+---
+
+### 8.1 No per-instance transform — geometry is absolute world-space
+
+Static dressing objects carry no per-instance world transformation matrix. Buildings, props, and FX
+layer geometry store their vertex coordinates as **absolute world-space positions baked offline by the
+map author**. Each object's position, rotation, and scale are embedded in the vertex stream at
+content-creation time. The runtime never multiplies a per-object transformation matrix.
+
+The draw path collects visible objects by concatenating their vertex data verbatim into a shared
+upload buffer, rebasing only the index values by the accumulated vertex count. No matrix multiply
+occurs anywhere in the gather-or-draw sequence. This is consistent with the terrain geometry
+convention in `Docs/RE/formats/terrain.md` (world-space Y in the vertex stream) and with actor
+grounding (§1–§5), where the runtime places actors on top of pre-baked terrain geometry.
+
+---
+
+### 8.2 Two static-object families
+
+Both families share the world-space-vertex convention and are drawn as real indexed triangle lists
+(D3DPT_TRIANGLELIST). There is no camera-facing billboard path for world dressing; billboards are
+confined to sky, particles, and effect sprites.
+
+**Mass objects** (from `.bud` via the `BUILDING` section of the `.map` descriptor): static triangle
+meshes — buildings, large props, and non-animated decorative geometry. Each object is represented by
+a 116-byte in-memory record (§8.4). Vertex format: XYZ position (12 bytes) + unit normal (12 bytes)
++ one UV set (8 bytes) = 32 bytes per vertex; FVF `0x112`.
+
+**FX layers** (`FX1`–`FX7`, from `.fx1`–`.fx7`): per-cell animated decorative geometry (foliage,
+banners, water surfaces, wind-swayed dressing). Each layer group carries a base vertex buffer (the
+disk-loaded positions) and a separate working vertex buffer (a copy updated each animated frame by
+the wind-sway oscillator, §8.7). FX vertex formats differ by layer; FX6 uses 32-byte verts, FX1
+disk verts are 36 bytes. Per-layer vertex and file format details are in `Docs/RE/formats/effects.md`.
+
+---
+
+### 8.3 Spatial indexing — 16×16 grid per terrain cell
+
+At cell-load time, `Map_BuildMassObjectGrid` partitions each terrain cell into a **16×16 = 256-square
+grid** of **64 × 64 world-unit squares**. The grid origin XZ aligns to the cell descriptor origin.
+
+Each mass object is binned into every grid square whose XZ extent overlaps the object's world-space
+AABB. The overlap test is a four-comparison axis-aligned bounding-box check: a square spanning
+`[X₀, X₀+64] × [Z₀, Z₀+64]` overlaps an object whose AABB spans `[minX, maxX] × [minZ, maxZ]`
+when `X₀ ≤ maxX` and `minX ≤ X₀+64` and `Z₀ ≤ maxZ` and `minZ ≤ Z₀+64`. On overlap, the object
+reference is appended to that square's growable list.
+
+Two height arrays of 256 entries each track the per-square min and max Y extent of all objects binned
+into each square; these are consumed by the terrain/ground system. The square index is `row × 16 + col`.
+
+`Map_BuildMassObjectGrid` also remaps each object's section-local texture selector (1-based integer
+from the `.bud` record) to a global texture-pool id using the `TEXTURES` table from the `.map`
+`BUILDING` section, validating the remapped id against the pool size. Out-of-range selectors are
+clamped to 1 with an error-log entry.
+
+---
+
+### 8.4 Mass-object in-memory record — 116 bytes
+
+Built by `Bud_LoadBuildingBlob` from the `.bud` binary; AABB and draw-distance budget computed by
+`BudObject_ComputeAABBAndBudget`; geometric-LOD buffer allocated by `BudObject_BuildLodBuffer` for
+LOD-class objects. A load-time warning is emitted (non-fatal; object is retained) when a single
+object exceeds 3 072 vertices.
+
+| Byte offset | Type | Field | Notes |
+|---:|---|---|---|
+| +0x00 | u32 | `tex_id` | Disk: 1-based section-local selector; remapped in-place to global texture-pool id by `Map_BuildMassObjectGrid` |
+| +0x04 | ptr | base vertex array | 32-byte verts, absolute world-space XYZ |
+| +0x08 | u32 | vertex count | Non-fatal warn if > 3 072 |
+| +0x0C | ptr | index array | u16 indices |
+| +0x10 | u32 | index count | |
+| +0x14 | f32 | AABB minX | |
+| +0x18 | f32 | AABB minY | |
+| +0x1C | f32 | AABB minZ | |
+| +0x20 | f32 | AABB maxX | |
+| +0x24 | f32 | AABB maxY | |
+| +0x28 | f32 | AABB maxZ | |
+| +0x30 | u32 | vertex byte size | `32 × vertex_count` |
+| +0x34 | u8 | type byte | From the `.bud` per-object header |
+| +0x35 | u8 | skip flag | Non-zero: object excluded from batching this frame |
+| +0x3C | u8 | stage byte | 0 = near; 1 = far; set per-frame by cull logic (§8.5) |
+| +0x3D | u8 | cull flag | 1 = beyond draw distance; 0 = visible |
+| +0x40 | f32 | draw-distance² budget | Size-keyed; see §8.5 draw-distance table |
+| +0x44 | u8 | batch-dirty flag | Batch-state bookkeeping |
+| +0x46 | u8 | LOD class byte | From the per-texture LOD-class table; classes 10–14 and 20–24 trigger geometric-LOD buffer; else 1 |
+| +0x48 | ptr | geometric-LOD vertex buffer | Allocated for LOD-class objects; starts as a copy of the base buffer |
+| +0x54–+0x60 | f32×3 | LOD step / params | Filled only for LOD-class objects |
+| +0x68–+0x70 | f32×3 | centroid | Midpoint of two corner vertices built by `BudObject_BuildLodBuffer`; world-space |
+
+AABB degenerate-axis fix: when any AABB axis has `min == max`, `max` is increased by 2.0 world units
+before the budget computation, ensuring a non-zero-volume bounding box.
+
+---
+
+### 8.5 Per-frame culling and near/far stage assignment
+
+`BuildingTree_CullAndDraw` performs per-frame culling and near/far classification of all mass objects
+in the visible grid squares. Camera eye XYZ is read from the terrain-manager view block.
+
+For each non-skipped object in a visible grid square:
+
+1. AABB centre is computed as the midpoint of `AABBmin` and `AABBmax`.
+2. XZ distance-squared is computed between the camera position and the AABB centre (Y ignored).
+3. If `distSq > budget (+0x40)`: cull flag (+0x3D) = 1; object is skipped this frame.
+4. If `distSq ≤ budget`: cull flag = 0, and **stage byte (+0x3C) = 1 when `distSq > 0.7 × budget`,
+   else 0**. Stage 0 = "near" (texture-batched draw); stage 1 = "far" (per-object projected-texture draw).
+
+#### Size-keyed draw-distance budget
+
+`BudObject_ComputeAABBAndBudget` assigns each object a squared-distance draw budget based on a size
+metric derived from its world AABB:
+
+```
+size_metric = max( 0.6 × XZ_diagonal(AABB), AABB_height )
+```
+
+where `XZ_diagonal` is the distance from `AABBmin` to `AABBmax` and `AABB_height` is
+`AABBmaxY − AABBminY`.
+
+| Size metric `s` | Squared budget stored at +0x40 | Effective draw radius |
+|---:|---:|---:|
+| s < 8 | 90 000 | 300 world units |
+| 8 ≤ s < 16 | 250 000 | 500 world units |
+| 16 ≤ s < 32 | 1 000 000 | 1 000 world units |
+| 32 ≤ s < 64 | 2 250 000 | 1 500 world units |
+| s ≥ 64 | 3 240 000 | 1 800 world units |
+
+Small props vanish at 300 world units; large buildings remain visible at up to 1 800 world units.
+
+#### Per-texture LOD class
+
+A per-texture LOD-class table inside the terrain manager (indexed by global texture-pool id) maps
+each texture to a LOD class byte that controls whether `BudObject_BuildLodBuffer` allocates a
+geometric-LOD vertex buffer. Classes 10–14 and 20–24 trigger buffer allocation; any other class
+yields byte value 1 (no LOD buffer). The subdivision factor is `2 << (class − base)`:
+
+| Class | Subdivision factor |
+|---|---|
+| 10 or 20 | 2 |
+| 11 or 21 | 4 |
+| 12 or 22 | 8 |
+| 13 or 23 | 16 |
+| 14 or 24 | 32 |
+
+Which draw path substitutes the LOD buffer at runtime, and how the LOD-class table is populated, are
+open questions (§8.9.1).
+
+---
+
+### 8.6 Texture-batched draw
+
+#### Near-stage mass objects (stage 0)
+
+Near objects are drawn by batching geometry per texture into a shared upload buffer, flushed to the
+GPU via `DrawIndexedPrimitiveUP` (D3DPT_TRIANGLELIST) when a ceiling is reached or when the texture
+changes.
+
+Batch collection: for each non-culled, non-skipped, stage-0 object in the per-square linked list:
+- Append the object's base vertex array verbatim (memcpy, `32 × vertex_count` bytes) to the upload
+  vertex buffer.
+- Append indices rebased by the running vertex count: `dst[i] = accumulated_vertex_offset + src[i]`.
+
+Flush thresholds (mass objects): flush when adding the next object would bring the total index count
+to ≥ 24 576 or total vertex count to ≥ 6 144. A single object exceeding these limits is drawn alone.
+
+Flush action (`BuildingSection_DrawIndexed`): bind the object's texture (only when the texture changes
+since the last flush — a texture change forces an immediate flush of the in-progress batch). Then
+issue `DrawIndexedPrimitiveUP` with the accumulated buffer. Batching is therefore per-texture.
+
+#### Far-stage mass objects (stage 1)
+
+Far objects (stage byte = 1) are drawn one per `DrawIndexedPrimitiveUP` call (no batching), under a
+texture-matrix render-state branch. This branch enables a projected-texture / texture-coordinate
+generation mode on a secondary texture stage, applied as a per-object push/pop around each far draw.
+
+#### FX layer draw
+
+FX batching follows the same texture-batched `DrawIndexedPrimitiveUP` pattern with smaller flush
+thresholds: index total ≥ 3 072 or vertex total ≥ 1 024 triggers a flush. Vertex emit per group is
+either the animated working buffer (when the sway accumulator fired this frame, §8.7) or a static
+memcpy of the cached working buffer (between recompute frames).
+
+---
+
+### 8.7 FX wind-sway animation
+
+FX layer groups carry a wind-sway oscillator that displaces each group's entire geometry rigidly
+along a fixed authored direction vector. The sway pattern is a triangle wave with a slightly
+asymmetric velocity reversal. Animation is driven by an environment-time accumulator that throttles
+the recompute rate.
+
+#### Accumulator throttle
+
+The FX6 layer driver accumulates an environment time delta each frame:
+
+```
+accumulator += per_frame_environment_time_delta
+```
+
+When `accumulator ≥ 50`: `timeScale = accumulator × 1×10⁻⁶`; the animated vertex emit runs for
+each visible group; then `accumulator` resets to 0. When `accumulator < 50`, the cached working
+buffer from the last animated frame is reused without recompute (static memcpy emit). Wind-sway is
+therefore recomputed only a few times per second. `[debugger-confirm]` — the unit of the environment
+time delta is an open item (§8.9.4).
+
+#### Per-group animated emit
+
+For each FX group when the accumulator fires:
+
+1. **Advance phase:** `phase += rate × timeScale × phaseVelocity`
+2. **Bounce (triangle wave):**
+   - If `phase > upperBound`: in normal mode (`one_shot_flag == 0`) set `phaseVelocity = -96.0` and
+     clamp `phase = upperBound`; in one-shot mode, reset `phase = 0`.
+   - If `phase < lowerBound`: in normal mode set `phaseVelocity = +100.0` and clamp
+     `phase = lowerBound`; in one-shot mode, reset `phase = 0`.
+   - The asymmetric reversal values (−96.0 / +100.0) produce a slightly skewed triangle wave.
+3. **Rigid translate:** `displacement = swayDirection × phase`. For each vertex in the group, only
+   the XYZ position triple is modified: `working[i].xyz = base[i].xyz + displacement`. Normal and UV
+   fields retain their load-time copy. The entire group translates as one rigid block — there is no
+   per-vertex weighting, no rotation, and no vertex bending. A foliage patch, banner, or water sheet
+   rocks uniformly along one direction.
+4. The updated working buffer is memcopied into the draw batch.
+
+#### FX group record layout (FX6 variant)
+
+[static-hypothesis; FX1 in-memory layout differs — see `Docs/RE/formats/effects.md` for per-layer
+on-disk format and vertex stride details]
+
+| Byte offset | Type | Field | Notes |
+|---:|---|---|---|
+| +0x04–+0x0C | f32×3 | sway direction (vx, vy, vz) | Fixed world-space displacement axis; authored per group |
+| +0x10 | i32 | phase rate | Per-frame phase increment multiplier |
+| +0x18 | i32 | one-shot mode flag | Non-zero: phase resets to 0 at a bound rather than reversing velocity |
+| +0x1C | u32 | vertex count | |
+| +0x20 | u32 | index count | |
+| +0x24 | ptr | base vertex array | Read-only source; 32-byte verts for FX6 |
+| +0x2C | ptr | working vertex array | Animated destination; memcopied into draw batch |
+| +0x30–+0x38 | f32×3 | AABB centre input | Used for cull-distance computation |
+| +0x4C | u32 | working byte size | `32 × vertex_count` |
+| +0x50 | f32 | phase (accumulated) | Current oscillation value |
+| +0x54 | f32 | phase velocity / sign | Reversed at bounds; initial absolute value ≈ 96–100 |
+| +0x58 | f32 | phase lower bound | Authored per group |
+| +0x5C | f32 | phase upper bound | Authored per group |
+| +0x60 | f32 | cull distance² | Per-group draw-distance budget |
+| +0x64 | u8 | cull flag | 1 = beyond draw distance this frame |
+
+---
+
+### 8.8 Per-frame pass order (world opaque pass)
+
+Within the world opaque render pass (`RenderPass_WorldTerrainAndBuildings`), static dressing draws
+in this order:
+
+1. Terrain streaming ring tick (cell stability check).
+2. World opaque material state block: sets up a 3-texture-stage opaque material (fog enabled,
+   alpha-test enabled, alpha-blend disabled, CCW cull mode, bilinear min/mag/mip filters). The exact
+   D3DTSS and D3DSAMP enum values for a faithful Godot material port require debugger confirmation
+   against the target GPU (§8.9.3). `[debugger-confirm]`
+3. **Near mass objects:** `BuildingTree_CullAndDraw` — cull + near/far classification, then
+   texture-batched draw of stage-0 objects.
+4. **FX layers:** animate (throttled) + cull + texture-batched draw. FX6 and FX7 are driven directly
+   in this pass branch; FX1–FX5 are driven from render-globals layer slots via their own draw
+   routines.
+5. **Far-blend decals** (`BuildingFar_CullAndDraw`): ground/terrain blend-cell quads — this is the
+   ground-blend pass, not a mass-object placement concern; noted to avoid mis-scoping.
+6. **Ground layers** (`TerrainGround_DrawAllLayers`).
+7. **Far mass objects:** per-object draw of stage-1 objects under the texture-matrix /
+   projected-texture render-state branch.
+
+---
+
+### 8.9 Open questions and hand-offs
+
+#### 8.9.1 Geometric-LOD buffer consumption
+
+`BudObject_BuildLodBuffer` allocates a LOD vertex buffer for LOD-class objects (classes 10–14 and
+20–24), and the LOD-class byte table inside the terrain manager governs which objects qualify. The
+near/far draw paths in this pass reference the base vertex buffer. Which draw path (or LOD-distance
+gate) substitutes the LOD buffer at runtime, the subdivision/decimation fill algorithm, and how the
+LOD-class byte table is populated (from `bgtexture.lst` kind bytes or another config) were not traced
+in this pass.
+Hand to: `re-asset-format-analyst` / `re-struct-analyst` (terrain manager LOD table).
+
+#### 8.9.2 FX layer to content-type mapping
+
+FX1–FX7 are seven distinct decorative layers with different vertex formats and distinct per-cell
+corpus sizes. From static analysis alone it is not possible to determine which layer represents grass,
+banners, water, or other content types — the sway direction and phase bounds are per-group authored
+data. Confirmation requires inspection of rendered scenes or VFS samples. `[capture-confirm]`
+Hand to: `re-asset-format-analyst`.
+
+#### 8.9.3 Render-state enum values for the Godot port
+
+The exact D3DTSS and D3DSAMP enum values for the world-opaque material block and the far-building
+texture-matrix branch are partially recovered from static analysis. A debugger-confirmation pass
+against the running client on the target GPU is needed to translate these faithfully into Godot
+material and sampler node state. `[debugger-confirm]`
+Hand to: material / render-state analyst (pilot the maintainer's live `?ext=dbg` session — never
+`dbg_start`).
+
+#### 8.9.4 Wind-sway accumulator unit
+
+The environment time delta accumulated per frame (§8.7 throttle, threshold ≥ 50) controls the
+recompute cadence. The unit of that delta (milliseconds, arbitrary ticks, or another scale) was not
+confirmed by static analysis; it governs how frequently wind-sway recomputes in real time.
+`[debugger-confirm]`
+Hand to: `re-validator` (read the accumulator in motion during a live debugger session).

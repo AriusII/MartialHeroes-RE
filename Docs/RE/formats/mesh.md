@@ -1,4 +1,4 @@
-# Format: .xobj / .skn / .bnd  (geometry and skeleton assets)
+# Format: .xobj / .skn / .bnd / .bud  (geometry, skeleton and building mesh assets)
 
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file.
@@ -9,9 +9,13 @@ ida_reverified: 2026-06-24; 2026-06-27
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]
 conflicts: none
+bud_coverage: static-analysis only (no VFS sample walked); ida_anchor: f61f66a9; evidence: [static-ida]
+bud_open_questions: type-byte semantics, UV v-flip — see Known Unknowns (LOD/decimated-buffer and lod_class items resolved by wave-3 struct reconciliation; see Resolved items)
+wave3_reconciliation: 2026-06-28 — §In-memory BudObject upper half corrected against Docs/RE/structs/bud_object.md (authoritative for the full 116-byte layout): lod_class→anim_class, lod_vertex_buffer→anim_vertex_buffer, lod_step→sway_amp, lod_factor→sway_vfactor, far_lod_flag→near_far_flag; LOD/decimated-buffer construction and lod_class-source-table Known Unknowns resolved; Grid build step 3 and Draw passes sections updated accordingly.
+deep_cartography_pass: 2026-06-29 — centroid +104 corrected from AABB midpoint to vertex-buffer normal-slot formula; near_far_flag renamed flag_60 (role unverified in foliage cluster); draw constants table updated; per-frame cull section annotated; Resolved items table extended.
 -->
 
-> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-24; 2026-06-27` ·
+> **Verification banner (`xobj`/`skn`/`bnd`).** `sample-verified` · `ida_reverified: 2026-06-24; 2026-06-27` ·
 > `ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` ·
 > `evidence: [static-ida, vfs-sample]` · `conflicts: none`. Re-verified two-witness against build
 > `263bd994` (the `.skn` / `.bnd` byte parsers in the loader chain) AND a real VFS sample: a rigid
@@ -32,18 +36,20 @@ conflicts: none
 > 24 B, weight 12 B), disk vertex NORMAL-first order, weight drop threshold (~0.01), per-vertex
 > normalize-to-1.0, render-vertex field copy order, `.bnd` `actor_id`/`bone_count`/36-byte bone
 > record layout, and hierarchy build pass all re-confirmed SAME against build `f61f66a9`
-> (static-ida); no corrections.
+> (static-ida); no corrections. The `.bud` building-mesh section added in this revision is **static-analysis only** (no VFS sample walked); its facts carry `[confirmed]` confidence from the loader code and do not affect the `sample-verified` status of `.xobj`/`.skn`/`.bnd`.
 
 ## Overview
 
-Three file types carry geometry and skeletal data. All are opened through the VFS chokepoint
-(see `formats/pak.md`).
+Five file types carry geometry, skeletal, and building mesh data. All are opened through the VFS
+chokepoint (see `formats/pak.md`).
 
 | Extension | Style | Role | Sample verified |
 |---|---|---|---|
 | `.xobj` | ASCII whitespace-tokenized | Static triangle mesh; used for scene objects and editor primitives | YES — 3 samples (plane, cone, triangle) |
 | `.skn` | Binary, little-endian | Skinned character mesh with per-vertex bone weights | YES — 3 item-skin samples (rigid); 1,140 multi-weight character skins census-verified |
 | `.bnd` | Binary, little-endian | Bind-pose skeleton: bone hierarchy and rest transforms | YES — 3 single-bone samples; 349-file census (incl. 84–89-bone player rigs) |
+| `.bud` | Binary, little-endian | Static building / prop geometry; world-absolute vertices; no per-object transform | NO — static-analysis only; no VFS sample byte-walked |
+| `.map` | ASCII token grammar | Per-cell layout descriptor; references `.bud`, `.ted`, `.exd`, `.upd`, `.sod` and FX layers | N/A (text format) |
 
 > **The math that consumes `.skn` + `.bnd` + `.mot`** — linear-blend skinning, the load-time
 > inverse-bind bake, pose composition, and the quaternion / handedness conventions — is specified in
@@ -508,13 +514,357 @@ Tolerate 0 or 4 residual bytes after the last bone record (both are valid; ~32% 
 
 ---
 
+## Format: `.bud` — binary building and static-mesh container
+
+### Status
+
+- **sample_verified:** NO — all facts below are static-analysis only; no `.bud` sample bytes have
+  been walked. Pull a live VFS sample to two-witness `object_count`, the per-object stride, and the
+  32-byte vertex field order before treating this section as fully confirmed.
+- **ida_anchor:** `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963`
+- **evidence:** [static-ida]
+- **confidence baseline:** `[confirmed]` for loader-code-derived facts; `[unverified]` for all open
+  questions listed in §Known unknowns.
+
+### Identification
+
+- **Extension:** `.bud`
+- **Found in:** `.vfs` archive; path referenced from the cell `.map` descriptor under
+  `BUILDING { DATAFILE … }`.
+- **Magic / signature:** none — file begins immediately with `object_count`; no sentinel bytes or
+  version field.
+- **Endianness:** little-endian throughout.
+- **Purpose:** stores all static building geometry ("mass objects") for a map cell. Walled-town
+  architecture and scene props are stored in this format. Vertices are world-absolute (baked with
+  the cell offset at export time); no per-object or per-cell transform is applied at render time.
+
+### On-disk container layout
+
+**File header — 4 bytes:**
+
+| Offset | Size | Type | Field | Notes |
+|---:|---:|---|---|---|
+| 0 | 4 | u32 LE | `object_count` | Number of mass-object sub-meshes in this file. File begins immediately here. |
+| 4 | … | — | `objects[object_count]` | Variable-stride per-object records (below), read sequentially to EOF. |
+
+**Per mass-object on-disk record — variable stride, read in order:**
+
+| Read # | Size | Type | Field | Notes |
+|---:|---:|---|---|---|
+| 1 | 1 | u8 | `type` | Object category/type tag. Retained in memory but the loader does not branch on it during load (see §Known unknowns — `type` byte). |
+| 2 | 4 | u32 LE | `tex_id` | **1-based local** texture index into the cell `.map` `BUILDING TEXTURES` list. Remapped to a global `bgtexture.lst` slot at grid-build time. |
+| 3 | 4 | u32 LE | `vertex_count` | Number of vertices in this object. Soft warn threshold: if greater than 3,072 the loader emits a warning containing the vertex count and the first vertex's X,Z position, but loading continues; the object is not clamped or rejected. |
+| 4 | `vertex_count × 32` | bytes | `vertices` | Raw block of 32-byte render-vertex records (see §Render vertex layout). |
+| 5 | 4 | u32 LE | `index_count` | Number of u16 indices (= 3 × triangle count). |
+| 6 | `index_count × 2` | bytes | `indices` | Raw block of u16 LE vertex indices (triangle list). |
+
+No alignment padding between fields or between records. No end-of-file trailer; the file ends after
+the last object's index block.
+
+### Render vertex layout — 32 bytes
+
+**FVF: 0x112 (D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX1)**, confirmed from the building draw
+passes. Index format: D3DFMT_INDEX16 (u16). Primitive type: D3DPT_TRIANGLELIST. Vertex stride:
+32 bytes (global constant).
+
+| Sub-offset | Size | Type | Field | Notes |
+|---:|---:|---|---|---|
+| 0 | 12 | 3×f32 LE | `position` (x, y, z) | **World-absolute** coordinates. Used directly to compute the per-object AABB at load. |
+| 12 | 12 | 3×f32 LE | `normal` (x, y, z) | Surface normal; used by the fixed-function lighting path. |
+| 24 | 8 | 2×f32 LE | `uv` (u, v) | Texture coordinates. The building draw applies no v-flip transform (unlike `.skn`/`.xobj`). Whether `.bud` UVs are already in D3D top-left convention is an open question — see §Known unknowns. |
+
+> **FVF confirmation.** The building draw calls `SetFVF` with the constant 0x112 (274 decimal) and
+> uses a vertex stride of 32 bytes. This is distinct from the textured-quad/decal format which uses
+> FVF 0x102 (XYZ | TEX1) with stride 20 bytes (pos 12 + uv 8). Confirmed from static analysis of
+> the building draw passes.
+
+> **World-absolute vertices.** The loader copies vertex data verbatim into the draw staging buffer
+> without any per-object or per-cell world transform. The global building tree batches objects from
+> multiple cells into a single draw call, so world-space positions must be pre-baked at export.
+
+### In-memory BudObject — 116 bytes
+
+Each mass-object is represented in memory as a 116-byte structure. The loader allocates an array
+of `object_count` such structs (plus a 4-byte count prefix) and default-constructs each before
+reading. The selected load-relevant fields are listed here; the **full authoritative 116-byte layout
+(all fields, padding, constructor defaults, and lifecycle notes) is in
+`Docs/RE/structs/bud_object.md`**.
+
+> **Wave-3 reconciliation (2026-06-28).** The upper half of this struct (+70..+115), previously
+> described in this table as a geometric LOD block, is corrected here. `structs/bud_object.md` is now
+> the authority for the full layout. The fields renamed below (`anim_class`, `anim_vertex_buffer`,
+> `sway_amp`, `sway_vfactor`, `near_far_flag`) supersede the former names (`lod_class`,
+> `lod_vertex_buffer`, `lod_step`, `lod_factor`, `far_lod_flag`) everywhere in this spec.
+
+| Offset | Size | Type | Field | Source / role |
+|---:|---:|---|---|---|
+| 0 | 4 | u32 | `tex_id` | On load: the `.bud` local 1-based index. Overwritten at grid-build time with the global `bgtexture.lst` slot. Default-constructed as `−1`. |
+| 4 | 4 | ptr | `vertex_buffer` | Heap pointer to the 32-byte vertex array. |
+| 8 | 4 | u32 | `vertex_count` | |
+| 12 | 4 | ptr | `index_buffer` | Heap pointer to the u16 index array. |
+| 16 | 4 | u32 | `index_count` | |
+| 20 | 12 | 3×f32 | `aabb_min` (x, y, z) | Computed at load from vertex positions (world coords). Constructor seeds this block as an inverted-AABB (min = +1, max = −1 per axis). |
+| 32 | 12 | 3×f32 | `aabb_max` (x, y, z) | Computed at load. Degenerate-axis fix: if `min == max` on any axis, `max += 2.0`. |
+| 48 | 4 | u32 | `vertex_byte_size` | `vertex_count × 32`, cached for the draw memcpy. |
+| 52 | 1 | u8 | `type` | The `type` byte from disk (read #1). No branch on this value during load. |
+| 56 | 4 | f32 | `dist_sq` | Per-frame squared XZ distance from the AABB midpoint to the camera. |
+| 60 | 1 | u8 | `flag_60` | Role unverified in build f61f66a9 foliage/mass-object cluster: no read-site or non-zero write-site found. The frame-cull path writes `dist_sq` (+56) and `culled_flag` (+61) only. The `near_far`-partition role (0.7 × budget) described in prior revisions may apply to a static-building draw path outside the examined cluster. Previously named `far_lod_flag`, then `near_far_flag`. See `Docs/RE/structs/bud_object.md §Full offset table`. |
+| 61 | 1 | u8 | `culled_flag` | Per-frame: set when `dist_sq > budget`; the object is skipped that frame. |
+| 64 | 4 | f32 | `budget` | Squared draw-distance cull threshold (see §AABB and draw-distance budget). Default-constructed as 1,000,000. |
+| 70 | 1 | u8 | `anim_class` | **Animation-style class byte (NOT geometric LOD).** Assigned by `BudObject_InitSwayBuffer` from a TerrainManager per-texture table indexed by the global `tex_id`. Values 10–14 → sway family 1; 20–24 → sway family 2; all others (e.g. 1) → static, no sway buffer. Previously named `lod_class`. |
+| 72 | 4 | ptr | `anim_vertex_buffer` | **Full-size scratch vertex buffer** (`32 × vertex_count` bytes), allocated when `anim_class` is in the range 10–14 or 20–24. Rebuilt every frame with wind-sway displacement applied. NOT a decimated or LOD buffer. Previously named `lod_vertex_buffer`. |
+| 80 | 4 | f32 | `sway_dir` | Sway direction/velocity sign; toggles between +100.0 and −100.0 as the oscillation phase reaches its bounds. Default: +100.0. |
+| 92 | 4 | f32 | `sway_amp` | Sway amplitude and step parameter. A value of 0.0 means no animation. Computed by `BudObject_InitSwayBuffer` from the object's vertical AABB extent. Previously named `lod_step`. |
+| 96 | 4 | f32 | `sway_vfactor` | Sway vertical multiplier applied to the Y displacement component. Class-dependent. Previously named `lod_factor`. |
+| 100 | 4 | f32 | `sway_intensity` | Sway intensity / damping factor. Updated each frame, scaled toward the `AmbientSoundManager`-driven target. Default (constructor): 1.0. |
+| 104 | 12 | 3×f32 | `centroid` | **Corrected (2026-06-29).** Computed by `BudObject_InitSwayBuffer` as `0.5 × (vtx[0].normal + vtx[2].normal)` componentwise — half the sum of the normal-slot vectors of vertices 0 and 2 of the raw source vertex buffer. NOT 0.5 × AABB midpoint. Reused by `BudObject_SwayAnimate_A` as a horizontal amplitude factor. Full layout: `Docs/RE/structs/bud_object.md`. |
+
+See `Docs/RE/structs/bud_object.md` for the complete field table including padding bytes at +54–+55, +62–+63, and +71, the fields at +44, +53, +68, +69, +76, +80, +84, and +88, and full constructor / clear defaults.
+
+### Draw constants
+
+| Constant | Value | Meaning |
+|---|---:|---|
+| Vertex stride | 32 bytes | Global constant; matches FVF 0x112. |
+| FVF | 0x112 (274) | D3DFVF_XYZ \| D3DFVF_NORMAL \| D3DFVF_TEX1. |
+| Index format | 101 | D3DFMT_INDEX16 (u16 indices). |
+| Primitive type | 4 | D3DPT_TRIANGLELIST. |
+| Section vertex cap | 6,144 | Batch flushed before accumulating beyond this count. |
+| Section index cap | 24,576 | Batch flushed before accumulating beyond this count. |
+| Per-object soft vertex warn | >3,072 | Warning logged; load continues. |
+| Texture cap per cell | 128 | Maximum local texture ids in the `BUILDING TEXTURES` table. |
+| Degenerate-AABB fix | +2.0 | Per-axis correction when `aabb_min == aabb_max`. |
+| Near/far render-pass split | 0.7 × budget | `flag_60` (+60): role unverified in foliage/mass-object cluster of build f61f66a9 — the frame-cull path writes only `dist_sq` (+56) and `culled_flag` (+61); a separate static-building path may be the consumer. See `structs/bud_object.md §Open items`. |
+| Budget tier: small prop | 90,000 | = 300² squared draw units; metric <8. |
+| Budget tier: medium prop | 250,000 | = 500²; metric <16. |
+| Budget tier: standard | 1,000,000 | = 1,000²; metric <32. |
+| Budget tier: large | 2,250,000 | = 1,500²; metric <64. |
+| Budget tier: extra-large | 3,240,000 | = 1,800²; metric ≥64. |
+
+### AABB and draw-distance budget
+
+Computed at load time from the vertex array:
+
+1. Initialize an inverted bounding box, then walk every vertex `position` to find `aabb_min` and
+   `aabb_max`. Apply the degenerate-axis fix (`+2.0`) on any axis where `min == max`.
+2. Compute `metric = max(distance(aabb_max, aabb_min) × 0.6,  aabb_max.y − aabb_min.y)`, i.e. the
+   larger of 60% of the box diagonal and the box height.
+3. Select the squared cull distance (`budget`) by `metric`: `<8 → 90,000`, `<16 → 250,000`,
+   `<32 → 1,000,000`, `<64 → 2,250,000`, `≥64 → 3,240,000`. Larger objects cull from a greater
+   camera distance.
+
+### Per-frame cull and render-pass partition
+
+Each frame, for every object in the building tree:
+
+```
+mid        = (aabb_min + aabb_max) × 0.5
+dist_sq    = (mid.x − cam.x)² + (mid.z − cam.z)²    // XZ-plane only; Y (height) is ignored
+culled     = dist_sq > budget
+near_far   = (dist_sq ≤ budget) AND (dist_sq > 0.7 × budget)
+```
+
+`culled` is written to `culled_flag` (+61); `dist_sq` is written to `BudObject +56`. The
+destination for `near_far` is `flag_60` (+60), whose role is unverified in the foliage/mass-object
+cluster of build f61f66a9 (no confirmed read-site in the complete examined cluster — a static-building
+draw path may be the consumer). Both near and far passes draw full geometry (no vertex reduction).
+The camera XZ position is read from the render-globals structure each frame.
+
+### Texture binding chain
+
+The `.bud` per-object `tex_id` (a 1-based local index) is resolved at grid-build time:
+
+```
+bud tex_id (1-based local)
+  → validated: 1 ≤ local ≤ cell.building_tex_count  (invalid → clamped to 1 with error log)
+  → global = cell.building_tex_table[local − 1]      (populated from .map BUILDING TEXTURES block)
+  → BudObject.tex_id := global                        (field overwritten in place)
+  → TexturePool entry at global bgtexture.lst slot    (see formats/bgtexture_lst.md)
+  → data/map000/texture/<name>.dds
+```
+
+This joins the documented terrain-texture chain (see `CLAUDE.md` §Recovered asset mappings and
+`formats/bgtexture_lst.md`). The cell's building texture table is populated from the `.map`
+`BUILDING { TEXTURES { … } }` block at descriptor parse time.
+
+### Coordinate handedness
+
+Source geometry is D3D9 left-handed, Y-up (engine-wide convention). Vertex positions are
+world-absolute in that frame. For the Godot importer:
+
+- Apply **world Z-negation** `(x, y, z) → (x, y, −z)` once at import.
+- Do **not** apply the mesh-local X-negation used for `.skn` character meshes — that convention
+  applies only to character-mesh-local coordinates.
+- After Z-negation the triangle winding order is reversed. The importer must compensate (reverse
+  winding or select the matching cull face) to prevent the buildings rendering inside-out. Confirm
+  against a real sample before shipping (see §Known unknowns — winding).
+
+---
+
+## Cell descriptor: `.map` — text layout grammar
+
+### Identification
+
+- **Extension:** `.map`
+- **Format:** ASCII, whitespace-tokenized; not binary. Lines beginning with `#` are comments; block
+  delimiters are literal `{` and `}` tokens.
+- **Role:** per-cell master layout descriptor. Lists the binary geometry files (`.bud`, `.ted`,
+  `.exd`, `.upd`, `.sod`, FX layers) and their associated texture tables. Referenced by the cell
+  loader at cell load time before any binary blob is opened.
+
+### Grammar
+
+Each named section follows the pattern `SECTION_NAME { DATAFILE <path> TEXTURES { <pairs> } }`.
+Observed section names and roles:
+
+| Section | Role | Has TEXTURES block |
+|---|---|---|
+| `TERRAIN` | Ground terrain geometry (`.ted`) | Yes |
+| `EXTRA_TERRAIN` | Additional terrain layer (`.exd`) | Yes |
+| `UP_TERRAIN` | Upper terrain layer (`.upd`) | Yes |
+| `BUILDING` | Static building/prop geometry (`.bud`) | Yes |
+| `FX1`–`FX7` | Terrain FX layers | Yes |
+| `SOLID` | Collision geometry (`.sod`) | No (DATAFILE only) |
+
+The `BUILDING` section in detail:
+
+```
+BUILDING {
+    DATAFILE  <relative path to the .bud file>
+    TEXTURES {
+        <local_id_1>  <global_bgtexture_lst_id_1>
+        <local_id_2>  <global_bgtexture_lst_id_2>
+        ...
+    }
+}
+```
+
+In the `TEXTURES` block each pair is two integers: the first is the local texture id and the second
+is the global `bgtexture.lst` slot. The loop continues while the first integer is positive; a `}`
+token or a non-positive first integer terminates the block. Maximum 128 entries per cell.
+
+> **Cross-subsystem reconciliation note.** Prior analysis (RECON-2) described `.ted` as
+> export-only / not loaded at runtime. The building-pipeline RE shows the `TERRAIN` section of the
+> `.map` feeds a `.ted` geometry blob to a runtime terrain loader at cell load time. This is a
+> conflict to be resolved by the terrain analyst; it is flagged here and in §Known unknowns and
+> does not affect any `.bud` fact.
+
+---
+
+## Building draw pipeline (overview)
+
+### Cell load path
+
+At cell load time, the cell master loader (`Terrain_LoadCellFiles`) reads the per-cell base path
+and dispatches to `Map_LoadCellDescriptor`, which parses the `.map` token grammar via
+`Map_ParseDescriptor`. Each named section in the descriptor triggers a dedicated binary loader:
+
+| `.map` section | Binary loader | File loaded |
+|---|---|---|
+| `TERRAIN` | `Ted_LoadGeometryBlob` | `.ted` ground geometry |
+| `EXTRA_TERRAIN` | `Exd_DecodeTriangles` | `.exd` extra terrain layer |
+| `UP_TERRAIN` | `Up_DecodeTriangles` | `.upd` upper terrain layer |
+| `BUILDING` DATAFILE | `Bud_LoadBuildingBlob` | `.bud` building geometry |
+| `BUILDING` TEXTURES | `BuildingSection_AddTextureId` | — (populates cell building texture table) |
+| `FX1`–`FX7` | `Fx{n}_DecodeGroups` | terrain FX layer files |
+| `SOLID` | `Sod_LoadCollisionBlob` | `.sod` collision geometry |
+
+After all sections are dispatched, `Map_BuildMassObjectGrid` executes the post-load finalisation
+pass (see §Grid build below).
+
+### Grid build (Map_BuildMassObjectGrid)
+
+After descriptor parsing, `Map_BuildMassObjectGrid` performs three post-load operations on the
+cell's mass objects:
+
+1. **Texture remap:** for each `BudObject`, the local 1-based `tex_id` read from disk is validated
+   and replaced in place with the corresponding global `bgtexture.lst` slot drawn from the cell's
+   building texture table (see §Texture binding chain).
+2. **Spatial binning:** each object is placed into one cell of a 16×16 spatial grid (64 world-space
+   units per grid-cell, XZ plane). Per-grid-cell minimum and maximum Y values are tracked and updated
+   as each object is binned, providing fast height-range queries over the cell.
+3. **Sway buffer initialisation:** for each object, `BudObject_InitSwayBuffer` is called. The function
+   queries the `anim_class` byte (BudObject offset +70) from a TerrainManager per-texture table
+   indexed by the global texture id. The class byte selects the sway variant: values 10–14 (sway
+   family 1) and 20–24 (sway family 2) each allocate a full-size scratch `anim_vertex_buffer` and
+   compute `sway_amp`, `sway_vfactor`, and `centroid`; all other values (e.g. 1) leave the object
+   static with no scratch buffer. This is a wind-sway animation system, not geometric LOD. See
+   `Docs/RE/structs/bud_object.md §Wind-sway animation system` for the full initialisation detail.
+
+### Draw passes
+
+Two draw passes per frame consume building geometry, both using FVF 0x112 with a 32-byte vertex
+stride:
+
+1. **Opaque world pass** — handles near buildings via a quadtree traversal with per-object near/far
+   render-pass selection (full geometry in both cases). A second per-object sub-pass applies a
+   projected lightmap/shadow texture on stage 1 using a texture-matrix path (D3DTS_TEXTURE1,
+   transform index 17). This second sub-pass is why a single UV set in the vertex suffices: stage 1
+   uses generated texture coordinates, not a second UV attribute.
+2. **Main cull-and-render-pass batcher** — the primary pass that computes per-object squared XZ
+   distance, sets the cull and near/far render-pass flags, and merges visible objects into
+   section-sized batches for a single indexed draw call per batch.
+
+### Batch merge
+
+The main batcher iterates the global building tree and accumulates objects into a staging buffer.
+For each object:
+
+- Skip if the object's `culled_flag` is set.
+- Flush the current batch before accumulating if the running index total plus the object's
+  `index_count` would reach or exceed 24,576, or if the running vertex total plus `vertex_count`
+  would reach or exceed 6,144. An object exceeding an entire section capacity by itself is skipped.
+- Copy the object's u16 indices into the staging index region, rebasing each index by adding the
+  current accumulated vertex count.
+- Copy the object's 32-byte vertices into the staging vertex region verbatim (no transform).
+- Flush remaining geometry at the end of the tree traversal.
+
+The staging buffer is partitioned: a vertex region (6,144 vertices × 32 bytes = 196,608 bytes)
+immediately followed by an index region (24,576 × 2 bytes = 49,152 bytes); total 245,760 bytes.
+
+### Multitexture render states
+
+The opaque building pass configures two texture stages: stage 0 carries the diffuse building
+texture (MODULATE-class color operation, alpha-test enabled, depth-write enabled, cull mode
+clockwise); stage 1 is a projected lightmap/shadow texture driven by a texgen path
+(D3DTS_TEXTURE1, transform index 17, `TEXCOORDINDEX`/`TEXTURETRANSFORMFLAGS` setup). The exact
+D3DTSS and D3DSAMP enum values are a remaining deliverable for the render-state analyst and should
+be confirmed against a live session before porting.
+
+---
+
 ## Enumerations / flags
 
-None identified in these formats.
+None identified in `.xobj`, `.skn`, or `.bnd` formats. The `.bud` `type` field (one byte per
+mass-object) is read and stored but the loader does not branch on it; its value semantics are
+unconfirmed (see §Known unknowns — `type` byte).
 
 ---
 
 ## Known unknowns
+
+### `.bud` / building mesh open questions
+
+- **`type` byte (BudObject +52):** read from disk and retained in memory, but the building loader
+  does not branch on it during load. Likely a content/category tag consumed by a different system
+  (collision, LOD class, sub-mesh category). Trace readers of this field to resolve.
+  `[unverified]`
+- **UV v-flip:** the building draw applies no `1−v` transform (unlike `.xobj`/`.skn`). Confirm
+  whether `.bud` UVs are stored already in D3D top-left convention, or whether the textures appear
+  flipped without correction. `[sample-unverified]` — requires a real `.bud` sample.
+- **Winding order after Z-negation:** indices are stored in their authored winding; the Godot
+  importer must reverse winding after the world Z-negation to prevent inside-out rendering.
+  Confirm against a real sample before shipping. `[sample-unverified]`
+- **Sample byte-verification:** all `.bud` facts in this spec are static-analysis only. No `.bud`
+  sample has been extracted and walked. Two-witness against a real VFS `.bud` (extract to an
+  external path; walk `object_count`, per-object stride, 32-byte vertex field order) before marking
+  this section `[sample-verified]`. `[sample-unverified]`
+- **`.map` / `.ted` runtime-load conflict:** the `TERRAIN` section of the cell `.map` feeds a
+  `.ted` geometry blob to the runtime terrain loader at cell load time, contradicting the RECON-2
+  reading that `.ted` is export-only. Cross-reference with `formats/terrain.md` and resolve with
+  the terrain analyst. `[cross-subsystem conflict]`
+
+### `.xobj` / `.skn` / `.bnd` open questions
 
 - **`.xobj` `slot_id` (token 1):** the discard behaviour is confirmed; the value is confirmed to
   match the filename numeric prefix. Whether a non-matching `slot_id` is an error or is
@@ -558,21 +908,35 @@ None identified in these formats.
 | `.bnd` multi-bone skeletons exist | RESOLVED — 327 multi-bone `.bnd` files; player rigs g1–g4 (82–89 bones); largest 244 bones. |
 | `.bnd` trailing 4 bytes present-in-all? | RESOLVED (corpus) — present in 236/349 files; absent (exact end) in 113. Always all-zero, content-independent → old-serializer name terminator. Parser ignores it (§File trailer). Only the exact tool provenance remains unverified. |
 | `.bnd` multi-bone byte-level cross-check | RESOLVED — performed on the `g1.bnd` player rig (`actor_id` 1, 84 bones): the 84 records × 36 bytes walk exactly to the bone-array end (then the +4 trailer), and bone 1 (`self_id` 1, `parent_id` 0) reads a non-identity quaternion of magnitude exactly 1.0 in XYZW order — the 36-byte stride and XYZW order are now confirmed on a real multi-bone rig, not just on identity single-bone props (§Quaternion component order). |
+| LOD / decimated buffer construction | RESOLVED (wave-3, 2026-06-28) — the buffer at +72 is a **full-size scratch vertex buffer** for per-frame wind-sway vertex animation, not a decimated LOD mesh. The build path copies the full vertex buffer and computes oscillation parameters (`sway_amp`, `sway_vfactor`, `centroid`). No vertex reduction occurs anywhere. Authority: `Docs/RE/structs/bud_object.md §Wind-sway animation system`. |
+| `lod_class` source table | RESOLVED (wave-3, 2026-06-28) — renamed `anim_class`. Assigned by `BudObject_InitSwayBuffer` from a TerrainManager per-texture table indexed by the global `tex_id`. Values 10–14 = sway family 1; 20–24 = sway family 2; all other values = static (no sway buffer). Authority: `Docs/RE/structs/bud_object.md`. |
+| `centroid` formula (prior: "0.5 × AABB midpoint") | RESOLVED (deep-cartography, 2026-06-29) — corrected to `0.5 × (vtx[0].normal + vtx[2].normal)` componentwise (half-sum of the normal-slot vectors of vertices 0 and 2 of the raw source vertex buffer). Authority: `Docs/RE/structs/bud_object.md §Full offset table`. |
+| Sway family-2 amp scale direction | RESOLVED (deep-cartography, 2026-06-29) — confirmed **DIVIDE** by `2 << (anim_class − 20)`, same direction as family 1. Authority: `Docs/RE/specs/bud_loader.md §6`. |
+| Sway oscillator type | RESOLVED (deep-cartography, 2026-06-29) — confirmed **linear triangle-wave ping-pong**; no trigonometric call in any of the three sway-animator variants. Authority: `Docs/RE/structs/bud_object.md §Wind-sway animation system`. |
+| Grid query path | RESOLVED (deep-cartography, 2026-06-29) — `MassObjectGrid_SampleCellMaxHeight` queries by cell-index lookup + per-object plane sampling; the only `dist_sq` in the system is the per-frame draw cull, NOT a grid search. Authority: `Docs/RE/specs/bud_loader.md §5.2`. |
 
 ---
 
 ## Cross-references
 
+- **BudObject in-memory layout (authoritative):** `Docs/RE/structs/bud_object.md` — full 116-byte
+  field table, padding, constructor defaults, wind-sway animation system, draw dispatch, and AABB/budget
+  rules. This file (mesh.md) documents the on-disk `.bud` container; `bud_object.md` documents the
+  runtime struct that the loader populates from it.
 - Related formats: `formats/pak.md` (container), `formats/animation.md` (`.mot` clips that drive
   these skeletons), `formats/texture.md` (co-referenced assets), `formats/bindlist.md` (the
   authoritative registry of all 349 `.bnd` skeletons keyed by `actor_id` — the resolution target for
   `.skn` `id_b`)
+- Building / terrain texture chain: `formats/bgtexture_lst.md` (the global texture index used by
+  the `.bud` texture binding chain); `formats/terrain.md` (`.ted` ground geometry and cell
+  coordinate system; also the target of the `.map`/`.ted` runtime-load reconciliation note)
 - Deform / skinning math: `specs/skinning.md` (linear-blend skinning, inverse-bind bake, pose
   composition, quaternion/handedness conventions, Godot import guidance, canonical test specimens)
 - Canonical names: see `Docs/RE/names.yaml` (`XobjFile`, `SkinFile`, `BindPoseFile`, `SknFace`,
   `SknCorner`, `SknVertex`, `SknWeight`, `BndBone`; the `id_b` skeleton-pointer vs `skin.txt col2`
-  class-tag split is owned by Tier-1)
-- Provenance: see `Docs/RE/journal.md`. This `id_b` skeleton-pointer / class-tag split was promoted
-  under CAMPAIGN VFS-MASTERY (two-witness: loader + black-box). Re-verified under CAMPAIGN 10 Block D
-  against build `263bd994` + a fresh VFS sample set (rigid + weighted `.skn`, player-rig `.bnd`,
-  `bindlist.txt`) on 2026-06-16 — all offsets/strides/counts re-confirmed, zero conflicts.
+  class-tag split is owned by Tier-1). Proposed names from the `.bud` recovery — `BudFile`,
+  `BudObject`, `building_tex_table` — are pending registration in `names.yaml` by the RE orchestrator.
+- Provenance: see `Docs/RE/journal.md`. The `.bud` building-mesh section was promoted from dirty-room
+  static analysis on build `f61f66a9` (2026-06-28); no sample byte-verification yet. The
+  `id_b` skeleton-pointer / class-tag split was promoted under CAMPAIGN VFS-MASTERY. Re-verified
+  under CAMPAIGN 10 Block D against build `263bd994` + a fresh VFS sample set on 2026-06-16.

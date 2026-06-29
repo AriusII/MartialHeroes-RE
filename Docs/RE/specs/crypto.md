@@ -30,6 +30,7 @@
   live off the `0/0` wire at runtime).
 - **conflicts: none.** No constant or structure recovered this campaign contradicts the spec; the
   earlier Campaign-7 re-confirmation and the Section 6b debugger-verified facts are all consistent.
+- **Consolidated 2026-06-29:** §11 (FLINT/LINT object layout, digit-buffer internals, sliding-window Montgomery modexp, error taxonomy, exception hierarchy) folded from `bignum_flint.md` scrub; all §11 facts are static-hypothesis at f61f66a9; no wire facts changed.
 
 > Provenance note: `capture_verified` (end-to-end Wireshark round-trip) is still **false** — every
 > claim here is static-IDA confirmed, not yet exercised against a captured stream. "verification:
@@ -993,4 +994,155 @@ CryptoAPI SHA-1 path (`CryptHashData` cluster above) than a raw RC4 implementati
 
 **Status: RC4 not present in the client binary as a standalone implementation.**
 
+---
+
+## 11. RSA Substrate: FLINT/LINT Bignum Library Internals
+
+> **Provenance (§11 only):** these subsections describe internal mechanics of the binary's
+> multi-precision integer library. They are **static-hypothesis at f61f66a9** — recovered by
+> static analysis on the current anchor but not yet confirmed via a live debugger session.
+> They have **no wire effect**; their purpose is to document the substrate that implements the
+> RSA modexp of §6.3 and the bignum import/export of §6.2, so that a faithful clean-room
+> implementation can verify round-trip correctness against the original library behavior.
+> The wire protocol (§§1–9) and the call-graph mapping (§10) are unaffected by these details.
+
+### 11.1 LINT/CLINT Object and Digit-Buffer Layout
+
+The binary's multi-precision integer type (`LINT`) wraps a C-style `CLINT` structure. At the
+C++ object level the LINT layout is **8 bytes**:
+
+| Offset | Size | Type | Role |
+|--------|------|------|------|
+| +0x00 | 4 B | `unsigned short *` | Pointer to the digit buffer (`n_l` array). |
+| +0x04 | 4 B | `int` (signed) | Error status: 0 = OK, 128 = overflow, 512 = uninitialized. |
+
+The status values 0, 128, and 512 align with the full error taxonomy in §11.3 and with the
+references to status 512 already noted in §9.2 and status 128 in §6 respectively.
+
+**Digit buffer (`n_l`) internal layout.** The digit buffer is an array of 16-bit words
+(`unsigned short`), stored little-endian (least significant digit first), with a leading
+length word at index 0:
+
+| Index | Byte offset | Role |
+|-------|-------------|------|
+| `n_l[0]` | 0 | **Length word** (16-bit): count of active 16-bit digits currently representing the value. |
+| `n_l[1]` | 2 | **Least Significant Digit (LSD)**. |
+| `n_l[2 .. n_l[0]]` | 4 .. | Remaining digits in ascending order of significance. |
+
+Buffer sizing (standard 4096-bit capacity):
+
+- `CLINTMAXDIGIT = 256` words maximum.
+- Buffer allocation: **257 words = 514 bytes (`0x202` bytes)**, accommodating `n_l[0]` through
+  `n_l[256]`. This corresponds to the `0x202`-byte scrub buffer already documented in §8.1
+  (`Bignum word buffer: 0x202-byte fixed buffer, scrubbed before free`) — the two observations
+  are consistent.
+
+**Odd-modulus test** (required by Montgomery arithmetic, enforced at modexp entry): the
+expression `*n_l && (n_l[1] & 1)` must hold — the length word must be non-zero AND the least
+significant bit of the LSD must be set. An even modulus causes the modexp routine to return
+error code 2048 (`LINT_Emod`; see §11.3).
+
+### 11.2 Sliding-Window Montgomery Modular Exponentiation
+
+The `c = m^e mod n` operation of §6.3 is implemented internally as **sliding-window
+exponentiation with Montgomery reduction**. The observable algorithm steps
+(static-hypothesis, f61f66a9):
+
+**Arithmetic primitive guard pattern.** All four basic arithmetic primitives (`Flint_Mul`,
+`Flint_DivRem`, `Flint_ModMul`, `Flint_ModSqr`) share the same guard pattern before
+operating: check both input operands for error status 512 (uninitialized); raise
+`LINT_Init` (error code 512) on an uninitialized input. If the arithmetic helper returns an
+overflow signal the object's error status is set to 128 (`LINT_OFL`). `Flint_DivRem` raises
+error code 32 (`LINT_DivByZero`) when the divisor is zero. `Flint_ModMul` raises error code
+2048 (`LINT_Emod`) when the modulus is invalid or the Montgomery inverse cannot be computed.
+`Flint_Mul` and `Flint_ModMul` detect the self-squaring case and route to dedicated squaring
+helpers rather than the general-case multiplier. These are internal behaviors with no direct
+wire effect; they govern how the RSA modular exponentiation raises exceptions.
+
+**Modexp algorithm steps:**
+
+1. **Precondition checks:** gated on the uninitialized-status check (error code 512) for both
+   base and modulus inputs.
+2. **Modulus validation:** verifies the modulus is odd and non-zero via the odd-modulus test
+   (§11.1). An even modulus causes the routine to return an error that the caller translates to
+   a `LINT_Emod` exception (error code 2048).
+3. **Montgomery constant setup:** computes the 16-bit Montgomery constant
+   `n0' = -M^(-1) mod 2^16` from the modulus using the Montgomery inverse helper.
+4. **Window size selection:** selects the optimal window size `k` (1 ≤ k ≤ 8) from the
+   exponent bit-length.
+5. **Precomputation table:** allocates a contiguous buffer for `2^(k-1) - 1` entries. Computes
+   odd powers of the base in Montgomery representation (`base`, `base^3`, `base^5`, …,
+   `base^(2^k - 1)` mod M) using the Montgomery squaring and Montgomery multiplication helpers.
+6. **Sliding-window loop:** traverses the exponent bits from MSB to LSB. Non-zero bits are
+   grouped into windows of size `k` and multiplied by the corresponding precomputed odd power.
+   Montgomery squaring is applied for all zero bits and at step transitions.
+7. **Montgomery post-conversion:** multiplies the accumulated result by 1 (the Montgomery unit)
+   to convert out of Montgomery representation.
+8. **Cleanup:** zeroes and frees the precomputation table and temporary buffers before returning.
+   On success the caller (`Flint_ModExp2`) clears the result object's error status.
+
+### 11.3 Error Taxonomy and Exception Class Hierarchy
+
+The bignum library routes all runtime failures through a centralized error handler. When
+invoked, it either delegates to a registered C++ exception callback (the typical path, which
+translates the code into a C++ `throw`) or, if no callback is registered, formats a diagnostic
+message and calls `abort()`. The callback receives: error code, function name string, argument
+index, and source line number.
+
+**Complete error code taxonomy (static-hypothesis, f61f66a9):**
+
+| Error code | Label | C++ exception class | Meaning |
+|------------|-------|---------------------|---------|
+| 16 (0x10) | File I/O Error | `LINT_File` | Error in file I/O. |
+| 32 (0x20) | Division by Zero | `LINT_DivByZero` | Division by zero. |
+| 64 (0x40) | Out of Memory | `LINT_Heap` | Error in `new` / heap allocation. |
+| 128 (0x80) | Overflow | `LINT_OFL` | Arithmetic overflow. |
+| 256 (0x100) | Underflow | `LINT_UFL` | Arithmetic underflow. |
+| 512 (0x200) | Uninitialized Argument | `LINT_Init` | Argument uninitialized or invalid value. |
+| 1024 (0x400) | Invalid Base | `LINT_Init` | Base value invalid. |
+| 2048 (0x800) | Modulus is Even | `LINT_Emod` | Montgomery requires an odd modulus. |
+| 4096 (0x1000) | Null Pointer | `LINT_Nullptr` | Argument is a null pointer. |
+| *other* | Unexpected Error | `LINT_Mystic` | Unexpected error. |
+
+Codes 512 and 128 are already referenced in §9.2 and §6; this table is the complete
+enumeration. Codes 2048 (`LINT_Emod`) and 512 (`LINT_Init`) are raised by the modexp path
+documented in §11.2.
+
+**Exception class hierarchy (static-hypothesis, f61f66a9).** The library defines a custom
+exception hierarchy rooted at `LINT_Base`. All subclasses occupy **16 bytes** in memory:
+
+```
+LINT_Base
+  └─ LINT_Error
+       ├─ LINT_File  ──► LINT_Emod
+       ├─ LINT_Init  ──► LINT_Nullptr
+       ├─ LINT_Heap  ──► LINT_Mystic
+       ├─ LINT_OFL   ──► LINT_DivByZero
+       └─ LINT_UFL
+```
+
+Two constructor layouts are used (all 16-byte footprint):
+
+**Layout A — standard exceptions** (`LINT_File`, `LINT_Heap`, `LINT_OFL`, `LINT_UFL`,
+`LINT_Emod`, `LINT_DivByZero`):
+
+| Offset | Size | Field |
+|--------|------|-------|
+| +0x00 | 4 B | Virtual table pointer (class-specific). |
+| +0x04 | 4 B | `error_code` (copied from the error-code argument). |
+| +0x08 | 4 B | Constant 0. |
+| +0x0c | 4 B | `line_number`. |
+
+**Layout B — argument-indexed exceptions** (`LINT_Init`, `LINT_Nullptr`, `LINT_Mystic`):
+
+| Offset | Size | Field |
+|--------|------|-------|
+| +0x00 | 4 B | Virtual table pointer (class-specific). |
+| +0x04 | 4 B | `error_code`. |
+| +0x08 | 4 B | `argument_index` (index of the offending argument). |
+| +0x0c | 4 B | `line_number`. |
+
+These struct field offsets are internal library layout; they have no wire effect and need not
+be reproduced in `Network.Crypto`. They are recorded so that a debugger-assisted session can
+identify LINT exceptions by their in-memory footprint.
 

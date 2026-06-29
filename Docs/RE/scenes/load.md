@@ -17,6 +17,9 @@ verification: re-confirmed 2026-06-21 directly from the doida.exe binary (IDB SH
   character_creation.md §5 Latch B (network-client create in-flight marker); one byte, two roles.
   Validation checklist updated correspondingly. IDB SHA 263bd994; no structural drift.
   CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected.
+  2026-06-29 consolidation: vertex tables (background + gauge), v_bottom fill formula with animated-max
+  clarification, render-state near/far, DDS-pixel-dims and vertex-stride GAPs folded from
+  scenes/loading.md absorbed into this master.
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 ida_reverified: 2026-06-27
 
@@ -386,6 +389,38 @@ scene's 2D draw set (the authoritative ordered corpus is in §6 + `resource_pipe
 > the "empty groove" beneath the gauge is baked into the bg art (the bg quad covers the full screen
 > incl. the groove — only the fill quad animates).
 
+### 5A.3a Vertex layout tables (static at construction; implementation reference)
+
+Both quads use **FVF `0x102` (`D3DFVF_XYZ | D3DFVF_TEX1`)**, 20-byte stride, drawn as a triangle
+strip (2 primitives). Positions are in centered-origin orthographic space: `halfW = 0.5 × screenW`,
+`halfH = 0.5 × screenH`.
+
+**Background quad** — positioned at construction; never mutated per frame:
+
+| Vertex | X | Y | Z | U | V |
+|---|---|---|---|---|---|
+| V0 (top-left) | `−halfW` | `−halfH` | 1.0 | 0.0 | 0.0 |
+| V1 (top-right) | `+halfW` | `−halfH` | 1.0 | 1.0 | 0.0 |
+| V2 (bottom-right) | `+halfW` | `+halfH` | 1.0 | 1.0 | 0.75 |
+| V3 (bottom-left) | `−halfW` | `+halfH` | 1.0 | 0.0 | 0.75 |
+
+V-max 0.75 samples the top 75 % of the DDS (the 1024×768 design region; pixel dimensions
+sample-unverified — §9 item 5).
+
+**Progress-gauge quad** — V0/V1 (top pair) are set at construction and never touched; V2/V3 (bottom
+pair) are overwritten each frame by the fill formula (§5A.4):
+
+| Vertex | X | Y | Z | U | V (at construction) |
+|---|---|---|---|---|---|
+| V0 (top-left) | `xScale × −499` | `yScale × −363` | 1.0 | ≈ 0.7539 | ≈ 0.4326 |
+| V1 (top-right) | `xScale × −170` | `yScale × −363` | 1.0 | ≈ 0.9688 | ≈ 0.4326 |
+| V2 (bottom-right) | `xScale × −170` | `yScale × −140` | 1.0 | ≈ 0.9688 | ≈ 0.9688 † |
+| V3 (bottom-left) | `xScale × −499` | `yScale × −140` | 1.0 | ≈ 0.7539 | ≈ 0.9688 † |
+
+† V2/V3 V-values shown are the constructor defaults (full-bottom static position). Each frame the
+fill formula overwrites them with `v_bottom = 0.4326 + (fill / 1024)` (maximum ≈ 0.6504 at full
+progress) — the animated ceiling does **not** reach 0.9688 (see §5A.4).
+
 ### 5A.4 Dynamic / modal / sub-state behaviour
 
 Load is a **passive, dual-thread progress screen** with **no buttons, no in-scene modal, and no
@@ -394,8 +429,9 @@ only *releases* the transition.
 
 - **Two worker mechanisms.** (A) The boot data-loader thread sequentially loads the corpus, accumulates
   VFS bytes, then on completion **sleeps 500 ms** and clears `busy_flag` @ +0x200. (B) The render/tick
-  callback (started ABOVE_NORMAL) runs each frame: ortho-2D projection sized to the live backbuffer,
-  identity world/view, Z/lighting/cull off, alpha-blend on; bind the bg DDS to stage 0; **draw quad 1
+  callback (started ABOVE_NORMAL) runs each frame: ortho-2D projection sized to the live backbuffer
+  (near=0.0, far=1.0), identity world/view, Z/lighting/cull off, alpha-blend on; bind the bg DDS to
+  stage 0 (shared by both quads — **no render-state change between the two draws**); **draw quad 1
   (background) unconditionally**; read `VFS_GetProgress()`; **if progress > 0, size and draw quad 2
   (the gauge)**; tick cursor/effects/sound; `Sleep(100 ms)` (≈10 FPS); present.
 - **Gauge fill is VERTICAL (top→down) — GAP-1, the load-bearing fidelity correction.** With FVF 0x102,
@@ -404,9 +440,11 @@ only *releases* the transition.
   bottom vertices** (object words +164 / +184) and their **V texcoord** (words +176 / +196): the fill
   grows **downward from a fixed top edge**. Math proof: `bottom_y = top_y + width · yScale`; at
   progress 100 (`width = 223`) `bottom = yScale·−140`, exactly the ctor's static bottom edge.
-  - **Magnitude:** `width = min(223 · progress / 100, 223)` reference units; `U-extent =
-    min(width / 1024, 223/1024 = 0.21777344)`. (The 223 cap and the 1024×768 reference are unchanged
-    from §5; only the **axis** is corrected.)
+  - **Magnitude:** `fill = min(223 · progress / 100, 223)` reference units; **V-range animated:**
+    `v_bottom = 0.4326 + (fill / 1024)`, maximum `0.4326 + 223/1024 ≈ 0.6504`. The animated maximum
+    does **not** reach the ctor-default V ≈ 0.9688 — that constant is the static bottom position at
+    construction, not the fill ceiling. (The 223 cap and the 1024×768 reference are unchanged
+    from §5; only the **axis** is corrected from the prior "horizontal/U-extent" reading.)
   - Because `progress` is the near-static integer quotient of §1 (a tiny corpus over the 9,395,240
     denominator), the gauge advances by at most a hair and **never fills** — it is decorative.
 - **Completion is flag-driven, never bar-driven.** When the render callback observes `busy_flag`
@@ -548,6 +586,9 @@ divergence — the corpus had only ~10 entries instead of the full 48 — was **
 - [ ] The loading screen renders the full-screen BG (`rand()%3` of the three DDS) and a **vertical
       top→down fill** bar — fixed X extents, only the bottom-vertex Y + V-texcoord grow, max 223
       ref-units (§5A.4) — then advances after the 500 ms grace.
+- [ ] Background quad V-texcoord clamps to 0..0.75 (the 1024×768 design region of the DDS); gauge
+      V animates `v_bottom = 0.4326 + (fill / 1024)`, ceiling ≈ 0.6504 at full progress — never
+      reaches the ctor-default 0.9688 (§5A.3a / §5A.4).
 - [ ] The loading screen is a `LoadHandler` **direct-draw** object (two raw quads), **not** a
       `GUWindow`/`GUComponent` widget tree: no buttons, edit-box, panel, modal, toast, or `actionId`,
       and it renders **no text** (§5A).
@@ -579,6 +620,13 @@ divergence — the corpus had only ~10 entries instead of the full 48 — was **
 3. **Boot-table order dependencies (minor).** No mandatory data dependency between the 48 tables was
    confirmed; before any parallelisation, a per-loader dependency audit is needed to prove the order
    is non-load-bearing (`resource_pipeline.md §7.2 / §8 item 2`).
+4. **Vertex stride byte-exactness (debugger-pending).** FVF `0x102` (`D3DFVF_XYZ | D3DFVF_TEX1`)
+   implies 20 bytes per vertex; the §5A.1 layout table notes the exact byte stride as
+   DEBUGGER-PENDING. A live `DrawPrimitiveUP` dump would confirm the stride and the in-memory field
+   offsets of each vertex block (`background_quad_verts` at object word +40, gauge at word +120).
+5. **DDS pixel dimensions (sample-unverified).** 1024×1024 is inferred from the V=0.75 constant
+   (`768 / 1024 = 0.75`); the actual pixel dimensions of `loading.dds` / `loading06.dds` /
+   `loading08.dds` are not byte-confirmed. See §5A.3 and §5A.3a.
 
 ---
 
@@ -589,7 +637,7 @@ divergence — the corpus had only ~10 entries instead of the full 48 — was **
   (loading-screen sub-init, BG `rand()%3`, cue `920100100`, ~10 FPS), §2.4 (progress meter +
   `9,395,240` denominator), §2.5 (`OPENNING/SKIP` gate + reload re-read), §2.6 + §8 item 5 (state-2
   entered twice; replay vs cache open item), §6.2 / §7.6 (missing-file tolerance).
-- `Docs/RE/specs/client_architecture.md` — §3 (the `GameState` 0..7 scene machine; 2 = Load; SKIP
+- `Docs/RE/specs/client_workflow.md` — §3 (the `GameState` 0..7 scene machine; 2 = Load; SKIP
   edge 2→4), §6 (boot corpus + loading screen + near-static bar), §12 (verification status).
 - `Docs/RE/specs/frontend_layout_tables.md §5` — loading-screen layout (BG + fill-bar geometry, cue,
   grace) as wired in the Godot `LoadingWindow`.

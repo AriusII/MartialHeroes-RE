@@ -7,6 +7,8 @@
 > that implement these passes are documented in `formats/shaders.md`; this spec describes the
 > *pipeline that binds and orders them*. Every render-pipeline constant an engineer cites must
 > reference this file: `// spec: Docs/RE/specs/rendering.md`.
+>
+> **Companion spec:** `Docs/RE/specs/render_pipeline.md` is the authority for the per-pass sequence and frame draw-loop ordering; when this spec and `render_pipeline.md` describe the same pass behaviour or device-step ordering, `render_pipeline.md` prevails.
 
 > **Verification banner**
 > - **verification:** *confirmed* for the device-step / Present / device-lost routine, the
@@ -22,10 +24,12 @@
 >   earlier ×0.5 derivation was an FP-stack artifact, not a real code-side halving; particle/UI
 >   vertex strides upgraded to CONFIRMED; apply-site for 9-state character tint pinned. See §6.3,
 >   §5.2, §6.7.) *(2026-06-21: the glow `.psh` question is RESOLVED — see the C5 note below and §6.4.)*
->   *capture/debugger-pending* for the present-time blend bytes (ONE/ZERO), the matrix major-order /
+>   *capture/debugger-pending* for the matrix major-order /
 >   up-axis, any on-screen colour verdict, and the front-end blend final confirmation (§4.2, CYCLE 11
 >   DOWNGRADED to DEBUGGER-PENDING — see §4.2 CYCLE 11 re-open note); in-game HUD per-quad
->   opt-in stays CONFIRMED. *(2026-06-21 ASSET-FIDELITY re-walk: the 18-slot render-state cache
+>   opt-in stays CONFIRMED. *Present-blit blend (ONE/ZERO, opaque copy) upgraded to
+>   static-confirmed by wave-5 walk of `Renderer_DrawScene_OffscreenRT_0` — see §6.3 and
+>   `Docs/RE/specs/post_processing.md §8.1`.* *(2026-06-21 ASSET-FIDELITY re-walk: the 18-slot render-state cache
 >   mechanism is re-confirmed, and the UI/HUD row split into in-game-HUD vs. front-end-overlay entry
 >   paths. 2026-06-22: §4.2 front-end blend reconciled — global ONE/ONE additive binary-won,
 >   opaque-panel SRCALPHA hypothesis refuted — see §4.2. CYCLE 11: front-end verdict DOWNGRADED to
@@ -36,8 +40,10 @@
 > - **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > - **readiness:** IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 > - **evidence:** [static-ida, sample-vfs]
-> - **cycle7_additions:** glow blur uses a **fixed pass-loop count of 16** (single small 2×2 box blur,
->   one power-shader pass — NOT a multi-tap pyramid) — §6.4; the **toon ramp light-direction constant
+> - **cycle7_additions:** glow blur was described as using a **fixed pass-loop count of 16** (single
+>   small 2×2 box blur, one power-shader pass) — §6.4; `[open-question]` wave-5 static analysis
+>   (`Docs/RE/specs/post_processing.md §6.2`) found **no loop** in either draw routine — see §6.4
+>   for the correction; the **toon ramp light-direction constant
 >   is (−1.0, 0.0, 0.0)** — §5.1a / §6.5; cel **edge/outline REFUTED** (no outline/edge-detect shader
 >   in the full shader set — only a ramp-shade pipeline) — §6.5 (reaffirmed HIGH); background/fallback
 >   **clear colour 0xFF505050** dark-grey ARGB — §2.0.1 (reaffirmed).
@@ -58,6 +64,13 @@
 >   The shipped client therefore binds `power1dx8.psh` for glow and `finaldx8.psh` for the composite.
 >   A config that names `power2dx8.psh` would only load if such a file existed in the VFS (a
 >   **DATA-PENDING** question about the data files, not an IDA question about the binary). See §6.4.
+> - **wave-5-reconciliation (2026-06-28):** (W1) §6.3 present-blit blend upgraded to static-confirmed
+>   per `Docs/RE/specs/post_processing.md §8.1`; (W2) §6.1 TEX2 allocation base corrected to
+>   1024-base (not backbuffer-base) per `post_processing.md §4.1` — `[open-question]` above
+>   1024×1024; (W3) §6.4 "16-loop / 2×2 box blur" claim downgraded to `[open-question]` per
+>   `post_processing.md §6.2` (no loop in draw routines); (W4) §4.1 cross-linked
+>   `Docs/RE/structs/render_state.md §7` for `GRSTransparency` coupling matrix; (W5) §5.1a
+>   cross-linked `Docs/RE/specs/character_rendering.md §3.1/§4`.
 
 ---
 
@@ -195,6 +208,8 @@ device-lost / device-restored callbacks (or rely on the engine's automatic resou
 ## 2. Per-frame scene draw loop
 
 **Confidence: CONFIRMED.**
+
+> **Authority deferral.** The authoritative per-pass sequence and device-step ordering are in `Docs/RE/specs/render_pipeline.md`; when this section and `render_pipeline.md` disagree on draw-loop order or pass details, `render_pipeline.md` prevails.
 
 The scene-draw fork (the routine the device-step calls per scene, §2.0) reads the offscreen-enable
 flag on the scene/post object. If set, it runs the **offscreen render-to-texture / post-process
@@ -344,7 +359,10 @@ source/destination blend, set fill mode, set fog enable, set Z compare function,
 state, set sampler state). Cull mode is owned by its dedicated cache slot. Note: in the FX overlay
 the per-bucket Z-write toggle is driven **imperatively** by the enable/disable-Z-write setters (it is
 not routed through a depth-mask cache slot), which is why Z-write must be read per bucket rather than
-assumed from a slot default — see §4.2.
+assumed from a slot default — see §4.2. The `GRSTransparency` slot (id 15 in the 18-slot hierarchy)
+acts as a cross-slot master override: when active it forces alpha-blend ON and Z-write OFF regardless
+of the `GRSBlending` (slot 1) and `GRSDepthMask` (slot 5) settings — confirmed coupling matrix in
+`Docs/RE/structs/render_state.md §7`.
 
 ### 4.2 Per-bucket render-state matrix
 
@@ -517,6 +535,11 @@ skinned actors. This matters for Godot fidelity.
 > For a Godot port this means the cel material's per-frame inputs are the **light direction and the
 > luma weights / material constants**, with the geometry transform supplied the ordinary way — do
 > not model the cel VS as consuming a hand-uploaded MVP matrix.
+>
+> *Cross-link: `Docs/RE/specs/character_rendering.md §3.1/§4` confirms the per-part programmable
+> draw detail: `SetStreamSource` with stride 32 (step 8 of §3.1), `DrawIndexedPrimitive` with
+> primitive type 4 (`TRIANGLELIST`, step 9), and BT.601 luma coefficients at VS register c9
+> (`character_rendering.md §4.1`).*
 
 ### 5.2 Vertex declaration / FVF per object type
 
@@ -559,7 +582,16 @@ the *downscaled* size (backbuffer ÷ the glow divisors) **with no fallback**.
 |---------------|------------|------|
 | TEX0 — scene capture | backbuffer dims (1024×1024 retry) | The cel/scene RT the whole world is drawn into; also the composite destination and the present source. |
 | TEX1 — bright / edge extract | backbuffer dims (1024×1024 retry) | A plain copy of the scene RT (no thresholding — see §6.4). Consumed only by the composite. |
-| TEX2 — bloom blur | downscaled (backbuffer ÷ the glow divisors, default ÷2 each); no fallback | The blurred, downsampled glow buffer. |
+| TEX2 — bloom blur | **1024 / divX × 1024 / divY** (allocation uses a 1024 base, not backbuffer-base; render region is backbuffer / divX × backbuffer / divY — `[open-question]` above 1024×1024, see note below; `Docs/RE/specs/post_processing.md §4.1`); no fallback | The blurred, downsampled glow buffer. |
+
+> **`[open-question]` TEX2 allocation base vs. render region (`Docs/RE/specs/post_processing.md §4.1`).**
+> Wave-5 static analysis shows the `D3DXCreateTexture` call for TEX2 allocates from a **1024 base**
+> (`1024/divX × 1024/divY`), not backbuffer ÷ divisors. The blur-pass orthographic projection is
+> **backbuffer-scaled** (`backbuffer W / divX × backbuffer H / divY`). These agree when the backbuffer
+> does not exceed 1024 in either dimension; for higher backbuffer sizes the render region exceeds the
+> allocated texture. Confirm via debugger (breakpoint the TEX2 `D3DXCreateTexture` call) before porting
+> to resolutions above 1024×1024. The §6.3 description "TEX2 is rendered at backbuffer ÷ divisor"
+> refers to the **render region**, not the **allocated size**.
 
 The toon ramp LUT (`data/shader/toonramp.bmp`) is loaded into a separate slot for the cel pass — see
 `formats/shaders.md`. A separate shadow-map render target (built from a shadow texture asset, sized
@@ -606,8 +638,8 @@ The composite/blur pixel shaders are documented in `formats/shaders.md`
 
 **Downsample divisors (CONFIRMED).** Default **(2, 2)**. They are config-driven from the external
 display-config globals (the glow range X / Y settings), with a **hardcoded fallback of 2** applied
-per axis when the configured value is zero or absent. TEX2 is rendered at `backbuffer ÷ divisor` on
-each axis.
+per axis when the configured value is zero or absent. TEX2 **render region** is `backbuffer / divisor` on each axis (allocation uses a 1024 base —
+see §6.1 `[open-question]` note and `Docs/RE/specs/post_processing.md §4.1`).
 
 > **Config source (SAMPLE-VERIFIED) — `data/script/display.lua` glow range.** The shipped
 > `data/script/display.lua` sets `DISPLAY_GLOW_RANGE_X = 1` and `DISPLAY_GLOW_RANGE_Y = 1`
@@ -636,11 +668,16 @@ the composited TEX0 to the backbuffer as a straight **opaque copy** — **source
 ZERO**, not an additive (ONE / ONE) blend (alpha-blend is enabled, but the ONE / ZERO factor pair
 makes it a copy). The additive "glow add" math is performed **inside the composite pixel shader into
 TEX0** (pass 4); the present (pass 5) merely copies that result to the backbuffer, so **do not re-add
-at present time**. The present-stage path was re-confirmed this lane, but the **exact present-time
-blend bytes (the ONE / ZERO pair) were NOT re-read** — that specific factor pair is
-**capture/debugger-pending** (or a dedicated blend-byte read on the present stage).
+at present time**. The present-stage blend bytes are **static-confirmed** by wave-5 walk of
+`Renderer_DrawScene_OffscreenRT_0` (`Docs/RE/specs/post_processing.md §8.1`):
+`D3DRS_SRCBLEND` = **D3DBLEND_ONE (value 2)**, `D3DRS_DESTBLEND` = **D3DBLEND_ZERO (value 1)**.
+Alpha-blend is enabled but the ONE/ZERO factor pair makes this an opaque copy. The glow
+contribution is accumulated entirely inside the composite pixel shader (pass 4) and must not
+be re-added at present time.
 
 ### 6.4 Bright-pass threshold and power-chain depth (CONFIRMED) — with `display.lua` CONFLICT
+
+> **Authority deferral (blur-loop and TEX2 allocation).** The authoritative account of blur-loop count and TEX2-allocation specifics (allocation base vs. render region) is `Docs/RE/specs/post_processing.md`; when this section and `post_processing.md` disagree on those items, `post_processing.md` prevails. The recovered values below are unchanged.
 
 **Bright-pass threshold: there is NONE (CONFIRMED).** The bright/edge-extract pass (pass 2) clears
 TEX1 to opaque black and performs a **plain fixed-function copy** of the scene RT into TEX1 at full
@@ -654,16 +691,19 @@ scalars (c0 / c1) and the external glow-shader's own multiply, **not** from a br
 downscaled quad, then clears the pixel shader) — there is **no** `power2 → power4` multi-tap chain in
 the code path.
 
-> **Glow is a single small box blur with a fixed pass-loop count of 16 (CYCLE 7).** The post-process
-> engine constructor stores a fixed **pass-loop count of `16`** alongside the default glow blur
-> **range (2, 2)** (§6.3 downsample divisors). The shape recovered is therefore a **single small 2×2
-> box blur driven by a fixed 16-iteration loop and a single power-shader pass** (`power1dx8.psh` by
-> default, §6.5) — **not** a multi-level Gaussian pyramid and not a `power2/power4` tap escalation.
-> Confidence: the single-blur-pass structure and the stored `16` / range-`(2,2)` immediates are
-> CONFIRMED; the precise way the 16 loop count drives the box-blur taps inside the pass is MED-HIGH
-> (the loop count is an immediate; its exact per-tap consumption inside the bound `.psh` lives in the
-> external shader, `formats/shaders.md`). For a Godot port a single half-res box-ish blur is the
-> faithful equivalent — do not stack a multi-level pyramid (§8). The glow pixel shader is the single **editable-filename** shader, whose default
+> **`[open-question]` Blur loop claim revised — CYCLE 7 vs. wave-5 static analysis.** The CYCLE 7
+> reading attributed a **fixed pass-loop count of 16** and a "2×2 box blur" structure to the blur
+> routines. Wave-5 static analysis of both `Renderer_GlowExtractDownsample` and
+> `Renderer_GlowBlurDownsampled` (`Docs/RE/specs/post_processing.md §6.1–6.2`) found **exactly one
+> `DrawPrimitiveUP` call per routine** (single `TRIANGLEFAN, 2 primitives`), with **no loop, no
+> multi-tap offset accumulation, and no tap-weight array** in either function. The confirmed blur
+> mechanism is: (1) bilinear minification of TEX0 into TEX2 (sampler MINFILTER = LINEAR) and
+> (2) the glow pixel shader (`power1dx8.psh` by default, §6.5) applying a power-law scalar falloff.
+> The integer immediate `16` (if present in the constructor) may reside in a different, unwalked
+> code path or be structurally unused; RE-domain must walk the constructor to locate it before
+> treating it as a draw-loop counter. **For a Godot port: a single bilinear-downsample + glow PS
+> pass is the confirmed structure — do not implement a multi-pass blur loop (§8).** Cross-link:
+> `Docs/RE/specs/post_processing.md §6.2`. The glow pixel shader is the single **editable-filename** shader, whose default
 filename slot is pre-filled with the `power1dx8` path and can be overwritten **only** by an external
 display-config string (a dedicated power-shader key). That a stock client only ever loads `power1dx8`,
 and that a byte-level search finds **zero** `power2` / `power4` literals, was established in a prior
@@ -859,9 +899,10 @@ Notes:
   byte-verified in a prior pass but **NOT re-walked this lane**; they live in the post-scene FX-overlay
   body and the cache class hierarchy. Re-confirm-pending: a focused follow-up should re-read the
   byte-exact source/destination blend pairs and the per-bucket Z-write directly there.
-- **Present-stage blend bytes (the ONE / ZERO opaque-blit pair, §6.3)** — structurally consistent with
-  an opaque copy, but the present-time blend-state bytes were not re-read this lane.
-  CAPTURE/DEBUGGER-PENDING (or a dedicated blend-byte read on the present stage).
+- **Present-stage blend bytes (the ONE / ZERO opaque-blit pair, §6.3)** — RESOLVED: static-confirmed
+  by `Docs/RE/specs/post_processing.md §8.1` (wave-5 walk of `Renderer_DrawScene_OffscreenRT_0`).
+  SrcBlend = D3DBLEND_ONE (value 2), DestBlend = D3DBLEND_ZERO (value 1) — opaque copy of TEX0 to
+  backbuffer. See §6.3.
 - **Composite c0 / c1 producer site (§6.3)** — the upload is confirmed, but the site that *writes* the
   two scalars onto the scene/post object (and thus the ×0.5 half-scaling and the 1.0 defaults) was not
   opened; the values are read pre-computed. STATIC-HYPOTHESIS.

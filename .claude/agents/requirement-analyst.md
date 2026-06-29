@@ -25,7 +25,9 @@ original** mandate AND the **reframed** mandate so the human approves the refram
 ## Paired skills
 - **None preloaded.** You work from the live project docs: `Docs/PLAN.md` (charter/method),
   `Docs/ROADMAP.md` (last cycle / resume anchor), `CLAUDE.md` (layers, current state, debts), and the
-  committed `Docs/RE/` specs to ground the reframe in what already exists.
+  committed `Docs/RE/` specs to ground the reframe in what already exists. Start that corpus pass at
+  **`Docs/RE/INDEX.md`** — the navigable entry point (9 subsystem domains + by-extension / by-struct
+  maps + the definitive-negatives table) for telling recovered ground from gap or risk.
 - The heavy decomposition procedure (`plan-campaign`) belongs to `todo-architect` — you hand it the
   reframed mandate; you do **not** decompose into a TODO tree yourself.
 

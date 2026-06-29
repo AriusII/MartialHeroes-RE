@@ -1,6 +1,6 @@
 ---
 name: ida-recon
-description: Use when starting analysis of the legacy Martial Heroes client (doida.exe; Main.exe historical) and you need a baseline census — segments, imports, exports, entry points, strings, and named globals — before drilling into any single function. Produces a pinned SHA-256 and a navigable map of the binary. Includes a STRING-HUNT mode that censuses the full string + import table and tags candidate subsystems (networking, asset I/O, crypto, UI, scripting, config) by string + import evidence — the fastest way to locate a subsystem's entry point before reading any function.
+description: Use when starting analysis of the legacy Martial Heroes client (doida.exe; Main.exe historical) and you need a baseline census — segments, imports, exports, entry points, strings, and named globals — before drilling into any single function. Leads with mcp__ida__survey_binary + the domain_* census family; tags subsystems via recipe_import_usage/recipe_string_to_code. Use first, before reading any function. Produces a pinned SHA-256 and a navigable map of the binary. Includes a STRING-HUNT mode that censuses the full string + import table and tags candidate subsystems (networking, asset I/O, crypto, UI, scripting, config) by string + import evidence — the fastest way to locate a subsystem's entry point before reading any function.
 allowed-tools: mcp__ida__*, Read, Write
 model: sonnet
 effort: high
@@ -35,22 +35,27 @@ you should fill the gaps from guesswork: STOP and report.
    9.3 MCP server at `http://127.0.0.1:13337/mcp` with the target IDB open. If it is red, STOP and
    surface the hint: `claude mcp add --transport http ida http://127.0.0.1:13337/mcp`. Do not
    fabricate a census from memory.
-2. **Discover the exec tool name at runtime.** The exact `mcp__ida__*` tool names depend on the
-   running build. List the available `mcp__ida__*` tools and pick the script-execution tool
-   (commonly named like `mcp__ida__execute_script`, `mcp__ida__run_python`, or `mcp__ida__eval`).
-   You will hand it the bundled IDAPython snippet's source as a string. If no exec tool exists,
-   fall back to typed tools (`list_segments` / `list_imports` / `list_strings` / `list_names`) and
-   assemble the same JSON shape by hand.
+2. **Lead with `survey_binary`.** Call `mcp__ida__survey_binary` first — it is the one-shot baseline
+   (segments / imports / entry points / counts / SHA) and the lead tool of any new investigation. Fill
+   the gaps with the typed `domain_*` census family: `mcp__ida__domain_segments`,
+   `mcp__ida__domain_imports`, `mcp__ida__domain_entry_points`, `mcp__ida__domain_strings`,
+   `mcp__ida__list_globals`, `mcp__ida__list_funcs`, and `mcp__ida__func_profile` for per-function
+   role summaries.
+3. **Script-exec for the JSON dump.** When you want the bundled snippet's exact JSON shape, run it via
+   `mcp__ida__py_exec_file` (multi-statement) / `mcp__ida__py_eval` (one-liner), persisting reusable
+   probes with `mcp__ida__save_script` / `read_script` / `list_scripts`. Each probe emits exactly one
+   `RESULT_JSON <json>` line per the harness contract — see the `ida-python-lib` skill. If no
+   script-exec tool exists, assemble the same JSON shape by hand from the `domain_*` tools above.
 
 ## Mode A — baseline census (steps)
 
 1. Read the bundled IDAPython snippet `${CLAUDE_SKILL_DIR}/scripts/recon_dump.py` (also reachable as
    `scripts/recon_dump.py` relative to this skill). It is real, runnable IDAPython using
    `idautils` / `idaapi` / `ida_*`.
-2. Feed the snippet's **full source text** to the discovered MCP script-exec tool. The snippet
-   writes nothing to disk by itself inside IDA's restricted context — instead it builds one JSON
-   document and prints it to stdout as a single line prefixed with `RECON_JSON:`. Capture that line
-   from the tool's return value.
+2. Feed the snippet's **full source text** to `mcp__ida__py_exec_file`. The snippet writes nothing to
+   disk by itself inside IDA's restricted context — instead it builds one JSON document and prints it
+   to stdout as a single line prefixed with `RESULT_JSON ` (the harness contract — see `ida-python-lib`).
+   Capture that line from the tool's return value.
 3. Parse the JSON. Confirm it contains `binary.sha256` (64 hex chars), `segments`, `imports`,
    `exports`, `entrypoints`, `strings`, and `globals`. If `sha256` is empty the snippet could not
    read the input file path — re-run with the input file available to IDA.
@@ -73,27 +78,32 @@ next to the scripting bridge. This mode enumerates every string (and the imports
 keyword buckets, and lists the function that references each interesting string — so you jump straight
 to the subsystem you need. It is the natural second move after Mode A, and the input to `ida-explore`.
 
-1. **Run the census.** Read `${CLAUDE_SKILL_DIR}/scripts/string_hunt.py` (its classifier helper
-   `${CLAUDE_SKILL_DIR}/scripts/lib_classify.py` ships alongside). Its CONFIG defines keyword
-   **buckets** (network / asset_io / crypto / ui / scripting / config / debug) as keyword lists — add
-   or tweak buckets for the question at hand. Run it via the exec tool. It enumerates ASCII + UTF-16
-   strings, classifies each into buckets by substring match, records the referencing function per
-   matched string, and folds in the import table (so `recv`/`CreateFileA`/`ADVAPI32` land in their
-   buckets too).
-2. **Note the encoding.** Game text in this client is **CP949** (Korean). The snippet flags strings
+1. **Lead with the recipes.** Before the snippet, run the purpose-built recipes:
+   `mcp__ida__refresh_strings_cache` to warm the cache, then `mcp__ida__recipe_import_usage` (which
+   imports anchor which functions) and `mcp__ida__recipe_string_to_code` (which strings tie to which
+   code) to tag subsystems by import + string evidence in one shot. Supplement freeform queries with
+   `mcp__ida__search_text` / `mcp__ida__find_regex` over the string/symbol space.
+2. **Run the census snippet for the full table.** Read `${CLAUDE_SKILL_DIR}/scripts/string_hunt.py`
+   (its classifier helper `${CLAUDE_SKILL_DIR}/scripts/lib_classify.py` ships alongside). Its CONFIG
+   defines keyword **buckets** (network / asset_io / crypto / ui / scripting / config / debug) as
+   keyword lists — add or tweak buckets for the question at hand. Run it via `mcp__ida__py_exec_file`.
+   It enumerates ASCII + UTF-16 strings, classifies each into buckets by substring match, records the
+   referencing function per matched string, and folds in the import table (so
+   `recv`/`CreateFileA`/`ADVAPI32` land in their buckets too).
+3. **Note the encoding.** Game text in this client is **CP949** (Korean). The snippet flags strings
    that are not clean ASCII so you do not misread mojibake; treat CP949 text as opaque data, never
    transcribe long runs of it.
-3. **Read the buckets.** The output is a per-bucket table: matched string (truncated), its data EA,
+4. **Read the buckets.** The output is a per-bucket table: matched string (truncated), its data EA,
    and the referencing function. Skim for the obvious anchors — a format extension, an error message,
    an API name — that pin a subsystem's entry point. *Decision: if a bucket is empty but the subsystem
    must exist (e.g. crypto with no keyword hits), pivot to import evidence (`WSAStartup`,
    `CryptAcquireContext`) or run `ida-py`'s `snippets/find_bitops_loops.py` — the cipher is often
    constant-driven with no strings. If a string has many referencers, it is a shared log/format string,
    not a subsystem anchor — prefer single-referencer strings as entry points.*
-4. **Save it.** The snippet best-effort-writes `Docs/RE/_dirty/static/strings.<label>.md`; confirm the
+5. **Save it.** The snippet best-effort-writes `Docs/RE/_dirty/static/strings.<label>.md`; confirm the
    path or save the Markdown yourself. Keep the full table in `_dirty/` only, with the SHA-256 tag and
    `> DIRTY` banner.
-5. **Hand off.** Summarize which subsystems are clearly present and the single best anchor
+6. **Hand off.** Summarize which subsystems are clearly present and the single best anchor
    string/function per subsystem, then feed those anchors to `ida-explore` (xref fan-in / cluster
    triage) or `ida-opcode-map` / `ida-crypto-hunt`. Resolve `sub_…` referencing functions to proposed
    canonical names for `ida-annotate`'s names-sync mode; never rename here.

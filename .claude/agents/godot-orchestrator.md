@@ -1,7 +1,7 @@
 ---
 name: godot-orchestrator
-description: MUST BE USED for a multi-facet objective on 05.Presentation/MartialHeroes.Client.Godot/ — wire the C# core that csharp-port-orchestrator produced INTO Godot, with ultra-fine project/architecture mastery, Godot best practices, the recovered coordinate conventions, and the godot MCP. Strictly passive rendering, ZERO game-rule authority. For a single scene/script, delegate straight to the matching Godot engineer.
-tools: Agent(godot-world-engineer, godot-ui-engineer, godot-character-specialist, render-reviewer, code-reviewer), Read, Write, Grep, Glob, Bash(godot *), Bash(dotnet *)
+description: MUST BE USED for a multi-facet objective on 05.Presentation/MartialHeroes.Client.Godot/ — wire the C# core that csharp-port-orchestrator produced INTO Godot, with ultra-fine project/architecture mastery, Godot best practices, the recovered coordinate conventions, and the godot MCP driven through `render-reviewer` (not directly). Strictly passive rendering, ZERO game-rule authority. For a single scene/script, delegate straight to the matching Godot engineer.
+tools: Agent(godot-world-engineer, godot-ui-engineer, godot-character-specialist, render-reviewer, code-reviewer, test-engineer), Read, Write, Grep, Glob, Bash(godot *), Bash(dotnet *)
 model: opus
 effort: high
 skills: godot-run-headless

@@ -16,7 +16,7 @@
 > particleEmitter walk reaches its `num_frames == 0` tail over 146 variable-length entries, and every
 > manifest / `.xdb` size formula is byte-exact. The Section B `.eff` geometry shape and Section F
 > link-tables remain at their prior sample-verified status (not re-walked this pass).
-> CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME (JointXEffectManagerB_ExpireForActor deque-walk behavior; no structural change).
+> CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME (JointXEffectManagerB_ExpireForActor deque-walk behavior; no structural change). Render-path CODE-CONFIRMED additions 2026-06-28: `field_unknown_a` resolved as `blend_mode` (§A.4.0/§A.5); Vec3 curve passes 2/3/4 confirmed as per-keyframe diffuse R/G/B (§A.4.2); keyframe interpolation model settled (§G.3); mesh-element FVF and vertex format confirmed (§G.2); geometry build by emitter_type confirmed (§G.4); transparent-pass state and draw order confirmed (§G.7–§G.8); GPU particle and SwordLight render paths confirmed (§G.9–§G.10); Section G added.
 > **ida_reverified:** 2026-06-27 (CYCLE 14 re-anchor, f61f66a9); prior: 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); the `particleEmitter.eff` 52-byte sub-record ROLES resolved to CODE-CONFIRMED on 2026-06-21 (ASSET-FIDELITY, §E.2.2 / §E.2.4); a static re-walk of the `.xeff` body loader on 2026-06-21 re-confirmed every Section A claim and upgraded two mechanisms to CODE-CONFIRMED — the animated keyframe count is the element count of the already-built texture-handle vector (== `tex_count`, A.4.4), and the boot-path `xeffect.lst` reader reads the documented `u32 count` + 30-byte records end-to-end (A.9). No structural change. CYCLE 12 Block B (2026-06-22, IDB SHA 263bd994): weapon bone-slot attach confirmed — when `bone_name_mode = 1` (CATALOG mode), the AnimCatalog resolves bone ids for slots 902..905; which slot maps to which hand/weapon is DEFERRED (debugger-pending). Recorded in §A.16.2. CYCLE 12 Block C (2026-06-24, IDB SHA 263bd994): byte-walk of a 4th `.xeff` file (34,000 B, 8 blocks) and all 146 `particleEmitter.eff` entries both returned RESIDUAL = 0, independently re-confirming the structural models. ONE CORRECTION applied: the `xeffect.lst` 30-byte name record includes the `.xeff` extension (3625 of 3669 records end in `.xeff`); the loader concatenates `data/effect/xeff/` + record-name verbatim — it does NOT append an extension. The prior "without extension" claim (A.9) is corrected. `xobj.lst` (effect/xobj.lst, 32 records, 34-byte stride, 1,092 bytes) added to §A.11 as a newly confirmed structured companion list.
 > **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > **evidence:** [static-ida, vfs-sample]
@@ -26,6 +26,8 @@
 > so this is NOT a conflict; (2) the `.fx` terrain-layer `type_tag == group_count` claim is OUT-OF-LANE
 > (owned by `terrain_layers.md`) and was NOT re-walked here — see the Terrain FX section, status
 > capture/debugger-pending → terrain.
+> **wave-3 reconciliation (2026-06-28):** §E corrected against `Docs/RE/structs/particle_emitter.md` (CYCLE 14 deep-struct pass, static-confirmed): entry+0x10 renamed from `max_particles` to `blend_additive_flag` (R1); sub-record field labels at +0x02/+0x04 swapped to `spawn_delay`/`lifetime` (R2). Runtime object layouts (ParticleEffect 60 B, GParticleBuffer 248 B, GParticle_State 32 B, GParticle_Render 20 B) are authoritative in `Docs/RE/structs/particle_emitter.md` — §E.5 cross-references that spec.
+> **Deepening pass (2026-06-29):** §E.2.4 alpha-fade floor (0.05f) upgraded to STATIC-CONFIRMED with exact special case (`qfield == 1` → factor = 0.0); cross-referenced to `Docs/RE/structs/particle_emitter.md §9` (CLOSED). No structural change.
 
 ---
 
@@ -39,7 +41,7 @@
 | Endianness | Little-endian throughout |
 | Magic / signature | None — format identified by file extension and directory only |
 | Anti-magic | If `effect_id` at offset 0 equals `0x46464558` the client treats the file as invalid |
-| Field semantics | The six per-keyframe / per-static float parameters are now resolved (emission velocity Vec3 + billboard size Vec3); emitter type enum resolved for values 0/1/2; `resource_id` resolved as a resource selector; time units resolved as milliseconds. `field_unknown_a` remains unresolved. See per-field confidence below. |
+| Field semantics | All fixed-head fields resolved. Emission velocity Vec3 + billboard size Vec3 confirmed; emitter type enum confirmed for values 0/1/2; `resource_id` confirmed as resource selector; time units confirmed as milliseconds. `blend_mode` (formerly `field_unknown_a`) CODE-CONFIRMED as per-element blend-mode selector (§A.4.0 / §G.1). Vec3 curve passes 2/3/4 CODE-CONFIRMED as per-keyframe diffuse R/G/B (§A.4.2 / §G.2). See §G for render-path detail. |
 
 **HEADER CORRECTED (2026-06-14):** The file header is **8 bytes** (`effect_id` u32 + `sub_effect_count` u32). A prior revision wrongly described a 32-byte header by treating the leading fields of the first sub-effect block as header members. The value at file offset `0x08` is **not** a header field: it is the first element's `emitter_type` (the block starts immediately after the 8-byte header). All parser engineers must treat the header as 8 bytes and parse every sub-effect block — including block 0 — with the same element read sequence. See A.2 for the corrected layout and the Correction history note at the end of Section A.
 
@@ -71,7 +73,7 @@
 |------|-------|
 | `loader_confirmed` | **SAMPLE-VERIFIED (two-witness, build 263bd994) — variable-length entry sequence** (loader read-order, byte-symmetric with the writer, AND a byte-walk of the real `particleEmitter.eff`, 116,652 B: **146 variable-length entries walked to a clean `num_frames == 0`/EOF tail with no desync**). The file is a SEQUENCE of variable-length entries — each a 28-byte entry header + (`num_frames` × 52-byte sub-record) + 64-byte trailing texture name — and the read loop terminates when an entry header's `num_frames` is 0 (or fewer than 28 bytes remain). There is NO file-level magic check (the first dword is data — `entry_id = 10001`, the value the old flat model misread as "magic 0x2711"). The earlier "16-byte header + 2,243 × 52-byte flat records" model is REFUTED (see E.0 Correction). |
 | Endianness | Little-endian |
-| Field semantics | Entry-header fields CONFIRMED/HIGH (`entry_id`, `num_frames` = live particle count, `sprite_size_x/y`, `max_particles`, trailing texture name). The 52-byte sub-record is **fully typed AND its roles are now CODE-CONFIRMED** (2026-06-21): 4 × u16 timers/size (`life_bonus`, `lifetime`, `spawn_delay`, `size_init`), an RGBA8 colour quad at +0x08, position xyz + `size_rate` (f32), four signed colour-rate i16, and velocity xyz + `velocity_damp` (f32). A sub-record is a per-particle spawn+Euler-integration descriptor (NOT a keyframe). See §E.2.2 / §E.2.4. |
+| Field semantics | Entry-header fields CONFIRMED/HIGH (`entry_id`, `num_frames` = live particle count, `sprite_size_x/y`, `blend_additive_flag` at entry+0x10 (CODE-CONFIRMED, CYCLE 14; R1 — see §E.2.1 and `Docs/RE/structs/particle_emitter.md` §8), trailing texture name). The 52-byte sub-record is **fully typed AND its roles are now CODE-CONFIRMED** (2026-06-21): 4 × u16 timers/size (`life_bonus`, `spawn_delay`, `lifetime`, `size_init`) (R2 — +0x02/+0x04 order corrected; see §E.2.2 and `Docs/RE/structs/particle_emitter.md` §8), an RGBA8 colour quad at +0x08, position xyz + `size_rate` (f32), four signed colour-rate i16, and velocity xyz + `velocity_damp` (f32). A sub-record is a per-particle spawn+Euler-integration descriptor (NOT a keyframe). See §E.2.2 / §E.2.4. |
 | Note | This is a distinct `.eff` sub-type at `data/effect/particle/particleEmitter.eff` (VFS-lowercased `particleemitter.eff`); must NOT be parsed with the Section B geometry parser. Entry-record selection is by **raw `entry_id` equality** to a `.xeff` element's `resource_id` (no `−10000` subtraction) — see E.4 and A.4.0. |
 
 ---
@@ -185,7 +187,7 @@ they map to the in-memory dword order, which differs.)
 | +0x00 | 4 | u32 LE | `emitter_type` | 0 = billboard, 1 = mesh-particle, 2 = directional billboard (A.12). For block 0 this is the value at file offset `0x08` formerly mislabelled `type_flag`. |
 | +0x04 | 4 | u32 LE | `resource_id` | Dispatch gate, NOT an index base: `< 10000` = direct index into the shared mesh table (24-byte stride, §A.11 / §E.4); `≥ 10000` = GPU particle id selected by **raw equality** (NO `−10000` subtraction) against the `particleEmitter.eff` entry map (Section E.4). |
 | +0x08 | 4 | u32 LE | `anim_flag` | Consumed as a boolean (value ≠ 0) by the element constructor. |
-| +0x0C | 4 | u32 LE | `field_unknown_a` | Bulk-read, not field-decoded; no read-site isolated. Keep as an opaque dword. Semantics **DBG-pending** (live-debugger confirmation required) — do NOT invent a meaning. |
+| +0x0C | 4 | u32 LE | `blend_mode` | **Per-element blend-mode selector (CODE-CONFIRMED, render path).** Values: 1 = standard alpha (SRCALPHA/INVSRCALPHA); 3 = opaque/overwrite (ONE/ZERO); all other values including 0 = additive (SRCALPHA/ONE). Consumed solely by the mesh-element draw routine; see §G.1. Formerly `field_unknown_a` / `element_flags`. |
 | +0x10 | 4 | u32 LE | `element_dword2` | Written ahead of `tex_count` in the in-memory record (reverse of file order); bulk-read, not field-decoded. Keep as an opaque dword. Role beyond that ordering is **DBG-pending** (live-debugger confirmation required) — do NOT invent a meaning. |
 | +0x14 | 4 | u32 LE | `tex_count` | This element's entry count; drives the name table, the keyframe count, and (low byte) the UV-scroll flags (A.13). For block 0 this is the value at file offset `0x1C` formerly mislabelled `first_entry_count`. Observed range across samples: 1–41. |
 
@@ -216,9 +218,9 @@ Follows the name table. Contains exactly four consecutive float-curve arrays, ea
 
 Each pass reads `u32 curve_count` then `curve_count × f32`.
 
-**CURVE SEMANTICS DOWNGRADED TO DBG-PENDING (CAMPAIGN VFS-MASTERY — two-witness: loader read-order + black-box byte-walk).** At the loader level, passes 2/3/4 are NOT three independent named channels: they are one **generic component-major Vec3 curve**. The loader walks the same destination Vec3 array three times — pass 2 writes component `+0` of each Vec3, pass 3 writes component `+4`, pass 4 writes component `+8` (Vec3 stride 12). **The loader assigns NO colour or scale meaning to these three components**; it simply scatters the three passes into the three lanes of a Vec3 array. Pass A (formerly "pass 1") is a separate single-float track, stored inverted as `1.0 − file_value` (A.6).
+**CURVE SEMANTICS — loader assigns no meaning; render-side is CODE-CONFIRMED diffuse RGB (2026-06-28).** At the loader level, passes 2/3/4 are NOT three independent named channels: they are one **generic component-major Vec3 curve**. The loader walks the same destination Vec3 array three times — pass 2 writes component `+0` of each Vec3, pass 3 writes component `+4`, pass 4 writes component `+8` (Vec3 stride 12). **The loader assigns NO colour or scale meaning to these three components**; it simply scatters the three passes into the three lanes of a Vec3 array. Pass A (formerly "pass 1") is a separate single-float track, stored inverted as `1.0 − file_value` (A.6).
 
-The earlier reading that labelled passes 2/3/4 as the per-keyframe **DIFFUSE R/G/B multiplier** is a **render-side interpretation**, not parser-provable: it describes how the render path consumes the Vec3 lanes, not what the file loader knows. That interpretation is therefore **DBG-pending** — the RGB-vs-XYZ (colour vs scale) semantic of the three Vec3 components must be confirmed against the live render path before it can be promoted as CONFIRMED.
+**Render-side semantics (CODE-CONFIRMED, 2026-06-28):** the three Vec3 components ARE per-keyframe diffuse R, G, B colour. The render path samples the Vec3 curve, multiplies each component by 255, and writes the result as the B/G/R bytes of the per-vertex D3DCOLOR diffuse; the alpha track (pass A) is written as the diffuse A byte. This CODE-CONFIRMS the "diffuse RGB" reading as a render fact. See §G.2 and §G.3 for the full per-vertex assembly.
 
 What IS settled at the loader level (CONFIRMED, two-witness):
 - The curve section is exactly four count-prefixed `f32` arrays.
@@ -231,7 +233,7 @@ What IS settled at the loader level (CONFIRMED, two-witness):
   within a single block. A parser must read each pass's own `u32` count prefix and never assume the
   four counts are equal or equal to `tex_count`.
 
-The render-side observations that motivated the "diffuse RGB" reading (e.g. distinct per-effect triplets folded into the sprite's per-vertex diffuse) are retained as **render-domain notes for the presentation lane**, tagged DBG-pending here; do not promote them as a loader fact. The element's real SIZE/scale is the keyframe `size_x/y/z` floats (positions 4–6 of the 9-float keyframe, A.4.4), independent of this curve section. The in-memory model's `ScaleX/Y/Z` fields therefore hold this Vec3 curve regardless of whether its render meaning turns out to be colour or scale (a field-naming follow-up).
+The element's billboard/particle SIZE is the separate keyframe `size_x/y/z` floats (positions 4–6 of the 9-float keyframe, A.4.4), independent of this curve section. The in-memory Vec3 curve (formerly labelled `ScaleX/Y/Z`) holds per-keyframe diffuse RGB — a field-naming follow-up for `names.yaml` (propose `diffuse_r/g/b`).
 
 ### A.4.3 Track header (9 bytes, fixed)
 
@@ -321,14 +323,14 @@ For `sub_effect_count > 1`, sub-effects follow sequentially, and EVERY block —
 
 **Confidence: PARSER-CONFIRMED + RUNTIME-TRACED (no element-bearing sample verification)**
 
-This is the in-memory layout the loader builds; it is provided so an engineer understands the runtime's view. **File read order differs from in-memory dword order** for `tex_count` and `field_unknown_a` (the loader writes them in reverse relative to file order). On disk, fields appear strictly in the read order given in A.4.
+This is the in-memory layout the loader builds; it is provided so an engineer understands the runtime's view. **File read order differs from in-memory dword order** for `tex_count` and `blend_mode` (formerly `field_unknown_a`) — the loader writes them in reverse relative to file order. On disk, fields appear strictly in the read order given in A.4.
 
 | Dword | Byte offset | Type | Field | Source / Notes |
 |---|---|---|---|---|
 | [0] | +0x00 | u32 | `emitter_type` | from element's emitter class |
 | [1] | +0x04 | u32 | `resource_id` | < 10000 = mesh index; ≥ 10000 = particle id |
 | [2] | +0x08 | u8 bool | `anim_flag` | low byte; upper 3 bytes unused |
-| [3] | +0x0C | u32 | `field_unknown_a` (`element_flags`) | Bulk-read; no semantic read-site found. Semantics **DBG-pending** — keep opaque, do not assign a meaning |
+| [3] | +0x0C | u32 | `blend_mode` | **Per-element blend-mode selector (CODE-CONFIRMED, 2026-06-28).** 1 = alpha (SRCALPHA/INVSRCALPHA); 3 = opaque (ONE/ZERO); else (including 0) = additive (SRCALPHA/ONE). See §A.4.0 and §G.1. Formerly `field_unknown_a`. |
 | [4] | +0x10 | u32 | `tex_count` | drives keyframe count; low byte also tested as UV-scroll flags (A.10) |
 | [5..7] | +0x14..+0x1C | ptr×3 | texture-handle vector | resolved texture handles (no file bytes) |
 | [8] | +0x20 | u32 | `alpha_key_count` | curve-pass-1 count |
@@ -466,7 +468,7 @@ At runtime, bits 0 and 1 of the low byte of the in-memory `tex_count` dword are 
 - bit 0 set → scroll U by `phase_ms mod 5000 / 5000.0` (5-second loop)
 - bit 1 set → scroll V by the same ratio
 
-This appears to be an intentional dual use of the frame-count field; intent unverified. Confidence: MEDIUM.
+The scroll offsets are written to vertex U (+0x10) and V (+0x14) directly inside the per-frame geometry build. The baseline WRAP sampler addressing (§G.7) tiles the scroll seamlessly. Period confirmed as 5000 ms (`XEFF_UV_SCROLL_PERIOD_MS`). Confidence: **CODE-CONFIRMED** (render-path trace; see §G.5).
 
 ## A.14 Named Constants
 
@@ -484,6 +486,9 @@ This appears to be an intentional dual use of the frame-count field; intent unve
 | `XEFF_EMITTER_BILLBOARD` | 0 | `emitter_type`: flat billboard sprite |
 | `XEFF_EMITTER_MESH` | 1 | `emitter_type`: mesh-particle object |
 | `XEFF_EMITTER_DIRECTIONAL` | 2 | `emitter_type`: directional billboard |
+| `XEFF_BLEND_ALPHA` | 1 | `blend_mode`: SRCALPHA/INVSRCALPHA — standard alpha transparency |
+| `XEFF_BLEND_OPAQUE` | 3 | `blend_mode`: ONE/ZERO — opaque/overwrite (no blending) |
+| `XEFF_BLEND_ADDITIVE` | 0 (all values ≠ 1 and ≠ 3) | `blend_mode`: SRCALPHA/ONE — additive; 0 is the common default |
 | `XEFF_RESOURCE_PARTICLE_THRESHOLD` | 10000 | `resource_id ≥ this` → GPU particle descriptor id |
 | `XEFF_UV_SCROLL_PERIOD_MS` | 5000 | Loop period for UV-scroll flags |
 | `XEFF_INVALID_MAGIC` | 0x46464558 | `effect_id` sentinel; file invalid if header equals this |
@@ -908,7 +913,7 @@ clean tail with no desync. Entry-header fields CONFIRMED/HIGH; the 52-byte sub-r
 remain UNRESOLVED except one colour-like quad (DBG-pending).**
 
 > **Sample-walk witness (SAMPLE-VERIFIED, build 263bd994):** entry 0 carries `entry_id = 10001`,
-> `num_frames = 10`, `sprite_size = (64.0, 1.0)`, `max_particles = 1`; entries 1.. continue with
+> `num_frames = 10`, `sprite_size = (64.0, 1.0)`, `blend_additive_flag = 1` (entry+0x10; R1 correction); entries 1.. continue with
 > contiguous ids `10002, 10003, …`. Each entry body of `28 + num_frames × 52 + 64` bytes consumes
 > the file exactly across all 146 entries — the variable-length model is byte-exact.
 
@@ -972,22 +977,21 @@ trailing name (E.2.3).
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | 0x00 | 4 | u32 LE | `entry_id` | Map key for this entry. A GPU-particle id in the `≥ 10000` space (first observed entry = 10001). Selected at spawn by raw equality to a `.xeff` element's `resource_id` (E.4). | CONFIRMED |
-| 0x04 | 4 | u32 LE | `num_frames` | Sub-record count for this entry AND the loop terminator (`0` ends the read loop). Drives the 52-byte sub-record array length. **This is also the live particle count** — the per-particle rings and the simulation loop are sized by `num_frames`, NOT by `max_particles` (0x10); see the note below. | CONFIRMED |
+| 0x04 | 4 | u32 LE | `num_frames` | Sub-record count for this entry AND the loop terminator (`0` ends the read loop). Drives the 52-byte sub-record array length. **This is also the live particle count** — the per-particle rings and the simulation loop are sized by `num_frames`, not by the field at 0x10 (`blend_additive_flag`; R1); see the note below. | CONFIRMED |
 | 0x08 | 4 | f32 LE | `sprite_size_x` | Per-emitter sprite size; fed to the GPU particle buffer's sprite-size setter. "x then y" axis naming is HIGH, not CONFIRMED (the setter's internal axis assignment was not traced). | HIGH |
 | 0x0C | 4 | f32 LE | `sprite_size_y` | Second sprite-size float; fed to the same sprite-size setter. | HIGH |
-| 0x10 | 4 | u32 LE | `max_particles` | Carried into the runtime emitter object and asserted non-zero by the loader, but on the render path the per-particle rings and the simulation loop are sized by `num_frames` (0x04), not by this field — in an observed entry the two differ (num_frames = 10, max_particles = 1). Whether `max_particles` ever bounds the vertex/index-buffer capacity at runtime is **DBG-pending**. | HIGH (carried + asserted; ring sizing uses num_frames) |
+| 0x10 | 4 | u32 LE | `blend_additive_flag` | **Additive-blend gate** passed to the `ParticleEffect` constructor and stored at `ParticleEffect+0x30`. Non-zero = additive blend (SRCALPHA/ONE); zero = alpha blend (SRCALPHA/INVSRCALPHA). Asserted non-zero by the loader for valid entries. The per-particle ring and simulation-loop count is `num_frames` (0x04), not this field. **(R1 correction from `Docs/RE/structs/particle_emitter.md` §8: formerly labelled `max_particles` in this spec.)** | CODE-CONFIRMED (CYCLE 14) |
 | 0x14 | 4 | u32 LE | `tex_handle_slot` | **OVERWRITTEN at load** with the resolved texture handle (from the trailing 64-byte name). The on-disk value is a saved slot id and is **ignored on load**; the trailing name is authoritative. | MEDIUM (disk value unused) |
 | 0x18 | 4 | u32 LE | `subrecord_array_ptr` | **OVERWRITTEN at load** with the pointer to the newly-allocated 52-byte sub-record array. The on-disk value is a stale/placeholder pointer, never consumed. | MEDIUM (disk value unused) |
 
-- **Mandatory-field assert:** the loader asserts that the resolved texture handle, `max_particles`,
+- **Mandatory-field assert:** the loader asserts that the resolved texture handle, `blend_additive_flag`,
   and the sub-record array pointer are all present (non-zero) — confirming those three are required
-  for a valid entry. (The live ring/loop count is `num_frames`, not `max_particles`; size the rings
-  by `num_frames` and merely carry `max_particles`.)
+  for a valid entry. (The live ring/loop count is `num_frames`; size the rings by `num_frames`.)
 - **Engineer note:** treat the two trailing dwords (0x14, 0x18) as *ignored on read*. Resolve the
   texture from the 64-byte name; do not consume the on-disk slot/pointer.
 - **Cross-witness (CYCLE 7):** the entry-header field set (`entry_id`, the two sprite-size f32, and
-  `max_particles`) is independently corroborated by the `tool/effect/particle_%d.txt` text serializer
-  sibling, which reads the same header fields in the same order before its 52-byte sub-record loop.
+  the dword at +0x10) is independently corroborated by the `tool/effect/particle_%d.txt` text serializer
+  sibling, which reads the same header fields in the same order before its 52-byte sub-record loop. (The +0x10 field is `blend_additive_flag` per R1.)
 
 ### E.2.2 Sub-record (52 bytes / 0x34) — per-particle / per-frame descriptor
 
@@ -1020,8 +1024,8 @@ values at +0x1C..+0x22 are **signed per-second colour deltas**, not indices.
 | Rec offset | Size | Type | Field | Notes | Confidence |
 |-----------:|-----:|------|-------|-------|------------|
 | +0x00 | 2 | u16 LE | `life_bonus` | Added once to the active-lifetime at init (`life += this`). | CODE-CONFIRMED |
-| +0x02 | 2 | u16 LE | `lifetime` | Base active-lifetime set at (re)spawn; counts down each step. | CODE-CONFIRMED |
-| +0x04 | 2 | u16 LE | `spawn_delay` | Initial / respawn delay set at (re)spawn; counts down, then the particle spawns. | CODE-CONFIRMED |
+| +0x02 | 2 | u16 LE | `spawn_delay` | Initial / respawn delay set at (re)spawn; counts down before the particle activates. Seeds `GParticle_State+0x0A`. **(R2 correction from `Docs/RE/structs/particle_emitter.md` §8: formerly labelled `lifetime` in this spec.)** | CODE-CONFIRMED (CYCLE 14) |
+| +0x04 | 2 | u16 LE | `lifetime` | Base active-lifetime set at (re)spawn; counts down each step until the particle dies or respawns. Seeds `GParticle_State+0x0C`. **(R2 correction from `Docs/RE/structs/particle_emitter.md` §8: formerly labelled `spawn_delay` in this spec.)** | CODE-CONFIRMED (CYCLE 14) |
 | +0x06 | 2 | u16 LE | `size_init` | Initial particle size, copied to the render state at spawn. | CODE-CONFIRMED |
 | +0x08 | 1 | u8 | `color_r` | Initial red of the RGBA8 quad, copied to the render state at spawn. Default constructor zeroes it. | CONFIRMED |
 | +0x09 | 1 | u8 | `color_g` | Initial green. Default constructor zeroes it. | CONFIRMED |
@@ -1062,25 +1066,24 @@ values at +0x1C..+0x22 are **signed per-second colour deltas**, not indices.
 |-----------:|-----:|------|-------|-------|------------|
 | +0x00 | 64 | char[64] | `texture_name` | Read immediately after the sub-record array; NUL-padded ASCII/CP949. **The stored string is the FULL texture path, used verbatim** (loader-resolved, CAMPAIGN VFS-MASTERY): the texture manager looks it up by an **exact string compare** — no directory prefix is prepended and no extension is stripped or appended. The resolved handle is written back into the entry header's `tex_handle_slot` (0x14). A name that does not resolve falls back to a default texture slot. | CONFIRMED (loader-resolved) |
 
-### E.2.4 Global brightness modulation of alpha (CODE-CONFIRMED)
+### E.2.4 Global brightness modulation of alpha (STATIC-CONFIRMED 2026-06-29)
 
 After a particle's alpha rate is accumulated each step, the resulting alpha is scaled by a global
 display-brightness factor derived from the client brightness option: the factor is `0.05 + 0.95 ×
-(brightness_option / 100)`, clamped so that the lowest brightness setting drives the factor to 0. The
-`0.05` floor is a fixed constant. This is the GPU-particle expression of the same "alpha scaled by a
-global brightness option" behaviour noted for the `.xeff` path (`specs/effects.md §17.3`), now pinned
-to this sub-system with the exact floor. A faithful re-implementation applies this alpha scale after
-the per-step colour-rate accumulation, before the colour is written to the vertex diffuse.
+(brightness_option / 100)`, where `brightness_option` is `qfield` from the graphics-quality singleton
+at dword index 28 (`+0x70`). The `0.05` floor constant is fixed and confirmed byte-exact from the
+binary. **Special case:** when `brightness_option == 1`, the factor is exactly **0.0** (particles
+rendered fully transparent regardless of colour rates). This is the GPU-particle expression of the same
+"alpha scaled by a global brightness option" behaviour noted for the `.xeff` path
+(`specs/effects.md §17.3`), now pinned to this sub-system with the exact formula and special case.
+A faithful re-implementation applies this alpha scale after the per-step colour-rate accumulation,
+before the colour is written to the vertex diffuse alpha byte. See `Docs/RE/structs/particle_emitter.md §9`
+(CLOSED item).
 
 ## E.3 Known unknowns (Section E)
 
-- **52-byte sub-record — WIDTHS AND ROLES RESOLVED (roles CODE-CONFIRMED 2026-06-21; see §E.2.2).**
-  All 19 fields are now typed (4 × u16 + RGBA8 quad + 4 × f32 + 4 × u16 + 4 × f32) — the two prior
-  "opaque slice" runs are fully decomposed (E.2.2), proven by the `tool/effect/particle_%d.txt` text
-  serializer. The colour quad at +0x08 is CONFIRMED RGBA8 (genuine alpha). What remains open is the
-  **semantic role** of the 18 non-colour fields: they are likely per-frame velocity / size / time /
-  index by analogy to §A.16, but that is NOT proven and is **DBG-pending** (live-debugger
-  confirmation against the runtime particle simulation required). Do not invent these roles.
+- **52-byte sub-record — WIDTHS AND ROLES FULLY RESOLVED (CODE-CONFIRMED, 2026-06-21 / CYCLE 14; see §E.2.2).**
+  All 19 fields are typed and their runtime roles are CODE-CONFIRMED by the spawn routine and per-tick integrator (4 × u16 + RGBA8 quad + 4 × f32 + 4 × u16 + 4 × f32). Field labels at +0x02/+0x04 were corrected in CYCLE 14 (R2): +0x02 = `spawn_delay`, +0x04 = `lifetime` (formerly reversed — see `Docs/RE/structs/particle_emitter.md` §8 R2). No open simulation-role gap remains.
 - **`sprite_size_x` / `sprite_size_y` axis mapping.** CONFIRMED to feed the sprite-size setter; the
   "x then y" vs "width/height" naming is HIGH, not CONFIRMED.
 - **On-disk values of the two overwritten dwords (0x14, 0x18).** Ignored on load; what the writer
@@ -1120,6 +1123,8 @@ This file feeds the separate GPU particle sub-system (`ParticleEffectManager`). 
 behavior of that sub-system (boot load sequence, spawn validation, GPU particle-buffer geometry), see
 `specs/effects.md §11`. The `.xeff` → particle bridge and the `resource_id` dispatch gate are in
 `specs/effects.md §17.2`. Engineers cite this section as `// spec: Docs/RE/formats/effects.md §E`.
+
+**Runtime object layouts** (ParticleEffect 60 B, GParticleBuffer 248 B, GParticle_State 32 B, GParticle_Render 20 B, and the full in-memory 28-byte entry + 52-byte spawn sub-record field map) are authoritative in `Docs/RE/structs/particle_emitter.md`. That spec is the reference for the field-to-struct-offset wiring; §E above covers the on-disk byte format only. Two corrections from that struct pass are folded here: R1 (entry+0x10 = `blend_additive_flag`, not `max_particles`) and R2 (sub-record +0x02 = `spawn_delay`, +0x04 = `lifetime` — label order was reversed in the prior edition of this spec).
 
 ---
 
@@ -1298,6 +1303,252 @@ is unchanged and reinforced.
 
 ---
 
+# Section G: Render-Side Runtime — Effects Transparent Pass
+
+> This section documents the render-path behavior of the effects subsystem, complementing the
+> parser-focused Sections A–F. All facts are CODE-CONFIRMED from the draw routines unless noted
+> `[debugger-confirm]`. D3D9 render-state values and blend enum values are identified by their
+> well-known D3D9 names; the raw integer values appear in §G.11.
+> Engineers implementing the Godot port cite this section as
+> `// spec: Docs/RE/formats/effects.md §G.*`.
+
+## G.1 Per-Element Blend-Mode Selector — `blend_mode` (element +0x0C) (CODE-CONFIRMED)
+
+The `blend_mode` dword at element in-memory offset +0x0C (§A.4.0 / §A.5, formerly `field_unknown_a`)
+is the per-element blend-mode selector, read by the mesh-element draw routine for each drawn element:
+
+| `blend_mode` value | Src blend | Dest blend | Resulting blend |
+|---:|---|---|---|
+| 1 | SRCALPHA | INVSRCALPHA | Standard alpha transparency |
+| 3 | ONE | ZERO | Opaque / overwrite (no blending) |
+| any other (0, 2, 4, …) | SRCALPHA | ONE | **Additive** (including the common value 0) |
+
+This is the single render consumer of that dword. Raw D3DBLEND enum integers are in §G.11.
+
+## G.2 Mesh-Element Vertex Format (CODE-CONFIRMED)
+
+The mesh-element draw path (and billboard and SwordLight paths) uses a 24-byte vertex record under
+FVF `0x142` (D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1):
+
+| Offset | Size | Type | Field | Notes |
+|---:|---:|---|---|---|
+| +0x00 | 12 | f32×3 | position | World-space XYZ |
+| +0x0C | 4 | D3DCOLOR | diffuse | Byte order in memory: B, G, R, A (D3DCOLOR ARGB pack) |
+| +0x10 | 4 | f32 | U | Texture coordinate U |
+| +0x14 | 4 | f32 | V | Texture coordinate V |
+
+The geometry tick writes diffuse as `B = round(colorB × 255)`, `G = round(colorG × 255)`,
+`R = round(colorR × 255)`, `A = round(alpha × 255)`, where `colorR/G/B` are the sampled Vec3 curve
+(passes 2/3/4 — per-keyframe diffuse RGB, §A.4.2) and `alpha` is the sampled alpha track (pass A,
+stored inverted per §A.6).
+
+Mesh-element draw call: `DrawIndexedPrimitive` with `D3DPT_TRIANGLELIST`, stride 24,
+`PrimitiveCount = index_count / 3`.
+
+## G.3 Keyframe Interpolation Model (CODE-CONFIRMED)
+
+The keyframe sampler resolves a phase time `p` as follows:
+
+- Frame index `f = (p − anim_base_time) / anim_stride`; fractional part `t = (p mod anim_stride) / anim_stride`.
+- Frame `f` is clamped to the last valid frame; the next frame is `f + 1`.
+
+| Channel | Interpolation method |
+|---|---|
+| Texture handle | **STEPPED** — frame `f`'s texture; handle index clamped to its count |
+| Alpha (pass A track) | **LINEAR** — `alpha[f] × (1 − t) + alpha[f+1] × t`; default 1.0 when count is 0 |
+| Diffuse RGB (Vec3 curve, passes 2/3/4) | **LINEAR** Vec3 lerp; default (1, 1, 1) when count is 0 |
+| Velocity Vec3 (in-memory keyframe +0x04) | **LINEAR** Vec3 lerp |
+| Size Vec3 (in-memory keyframe +0x10) | **LINEAR** Vec3 lerp |
+| Rotation quaternion (in-memory keyframe +0x1C) | **SLERP** |
+
+This confirms the 44-byte in-memory keyframe layout (`XEFF_KEYFRAME_STRIDE`):
+
+| Offset | Size | Type | Field |
+|---:|---:|---|---|
+| +0x00 | 4 | u32 | index/time prefix |
+| +0x04 | 12 | f32×3 | velocity Vec3 |
+| +0x10 | 12 | f32×3 | size Vec3 |
+| +0x1C | 16 | f32×4 | rotation quaternion |
+
+## G.4 Geometry Build by `emitter_type` (CODE-CONFIRMED)
+
+The geometry tick branches on `emitter_type` (§A.12):
+
+**emitter_type 0 — billboard:** four corner vertices at half-extents `±0.5 × size_x` and
+`±0.5 × size_y`. Corners are oriented by the camera view matrix with translation cleared
+(camera-facing quad). Each corner is then rotated by the effect instance orientation quaternion,
+the per-keyframe velocity × effect_scale is added, and the world origin is added.
+
+**emitter_type 2 — directional billboard:** identical to type 0 but a fixed +π/2 (90°) yaw
+pre-rotation is composed first. Confirms §A.12 value 2's fixed 90° Y pre-rotation. The static-state
+branch also reads the extra Euler rotation (§A.4.6).
+
+**emitter_type 1 — mesh particle:** per source mesh vertex (stride 24): copy source position, scale
+X/Y/Z by the keyframe size Vec3, rotate by the keyframe rotation quaternion then by the effect
+orientation quaternion, add velocity × effect_scale, add world origin; write the per-vertex diffuse
+from the sampled RGBA.
+
+All three paths write per-vertex diffuse from the sampled RGBA (§G.2).
+
+**Coordinate note:** geometry is built in world space directly; the Godot port's world-Z negation
+applies at the effect's world transform, not inside the per-vertex build.
+
+## G.5 UV Scroll (CODE-CONFIRMED)
+
+The keyframe-slot flag byte (`tex_count` low byte, §A.13) is tested during the geometry tick:
+- Bit 0 set: scroll U — `U += (phase mod 5000) / 5000.0` written to every vertex U (+0x10).
+- Bit 1 set: scroll V — `V += (phase mod 5000) / 5000.0` written to every vertex V (+0x14).
+
+Period: 5000 ms (`XEFF_UV_SCROLL_PERIOD_MS`). The baseline WRAP sampler addressing (§G.7)
+tiles the scroll seamlessly.
+
+## G.6 Distance Cull (CODE-CONFIRMED)
+
+Geometry build is skipped when the squared XZ-plane distance from the local player to the effect
+origin exceeds the per-instance render-distance² threshold (instance scratch offset +124). The
+effect still ticks its phase; only the geometry build and draw are skipped.
+
+## G.7 Transparent-Pass Baseline Device State (CODE-CONFIRMED)
+
+All effect sub-systems draw in the **transparent/particles pass** — the final world pass after
+opaque geometry. The pass driver establishes this baseline state before any sub-system draw:
+
+| D3DRS name | D3DRS value | Setting |
+|---|---:|---|
+| CULLMODE | 22 | D3DCULL_NONE — double-sided |
+| ZWRITEENABLE | 14 | Off (depth write disabled) |
+| ZENABLE | 7 | On (depth test reads depth) |
+| ALPHATESTENABLE | 15 | Off |
+| LIGHTING | 137 | Off — effects are unlit/self-illuminated |
+| Fog | — | Off |
+| ALPHABLENDENABLE | 27 | On |
+| TEXTUREFACTOR | 60 | 0xFF505050 (opaque ~31% grey; set once via lazy-init guard) — `[debugger-confirm]` whether any effect stage references D3DTA_TFACTOR at runtime |
+
+**Texture stage 0:** COLOROP = MODULATE(4), COLORARG1 = TEXTURE(2), COLORARG2 = DIFFUSE(0);
+ALPHAOP = MODULATE(4), ALPHAARG1 = TEXTURE(2), ALPHAARG2 = DIFFUSE(0). Stages 1 and 2:
+COLOROP/ALPHAOP = DISABLE(1). Result: colour and alpha = texture × per-vertex diffuse.
+
+**Sampler 0 and 1:** MIN/MAG/MIP filter = LINEAR (trilinear); ADDRESSU/ADDRESSV = WRAP.
+
+**FVF:** `SetFVF(0x142)` — 24-byte vertex, XYZ | DIFFUSE | TEX1 (§G.2).
+
+## G.8 Draw Order Within the Transparent Pass (CODE-CONFIRMED)
+
+| Step | Sub-system | Notes |
+|---:|---|---|
+| 1 | XEffect manager (user effects) | `XEffect_DrawElements` for mesh elements (`resource_id < 10000`) |
+| 2 | MapXEffect manager (ambient/world effects) | Same draw routine as step 1 |
+| 3 | JointEffect manager A | Bone-attached effects |
+| 4 | JointEffect manager B | Bone-attached effects |
+| 5 | SwordLight | Weapon/mob blade trails (§G.10) |
+| 6 | Sky/weather particles | Rain/snow/sky particles |
+| 7 | GPU particle list | `particleEmitter.eff` / `resource_id ≥ 10000` particle systems (§G.9) |
+| 8 | Lens-flare halo | Additive, drawn last |
+
+**Division of labour:** a `.xeff` element's mesh sub-elements (`resource_id < 10000`) are drawn
+in steps 1–4 by `XEffect_DrawElements`. Particle sub-elements (`resource_id ≥ 10000`) are bridged
+into the GPU particle list and drawn in step 7. The mesh-element draw routine explicitly skips
+elements with `resource_id ≥ 10000`.
+
+**Per-sub-system blend overrides:**
+
+| Step | Src/Dest blend | Notes |
+|---|---|---|
+| 1–4 XEffect mesh | Per element (§G.1) | alpha / opaque / additive chosen per element |
+| 5 SwordLight | SRCALPHA / INVSRCALPHA + MODULATE2X | Trail with brightness boost (§G.10) |
+| 6 Sky/weather | SRCALPHA / INVSRCALPHA + MODULATE2X | Standard alpha |
+| 7 GPU particles | SRCALPHA/INVSRCALPHA or SRCALPHA/ONE | Additive when `blend_additive_flag` (entry+0x10 of `particleEmitter.eff`) is non-zero; stored at `ParticleEffect+0x30` and read by `ParticleEffectList_DrawAll`. CODE-CONFIRMED (CYCLE 14; see §E.2.1 R1 and `Docs/RE/structs/particle_emitter.md` §8). |
+| 8 Lens flare | SRCALPHA / ONE | Additive |
+
+## G.9 GPU Particle Draw (CODE-CONFIRMED)
+
+GPU particle draw has two render paths selected by a per-buffer flag at buffer creation:
+
+**Path A — Hardware point-sprite** (flag clear):
+- Render states set: POINTSPRITEENABLE, POINTSIZE, POINTSIZE_MIN, POINTSIZE_MAX, POINTSCALEENABLE,
+  POINTSCALE_A/B/C — distance-attenuated point-sprite sizing.
+- `DrawPrimitive` with `D3DPT_POINTLIST` — 1 vertex per particle.
+- Source particle-render record (20 bytes): pos f32×3 (+0), size f32 (+12), D3DCOLOR (+16).
+- POINTSPRITEENABLE and POINTSCALEENABLE restored to 0 after draw.
+
+**Path B — CPU billboard-quad fallback** (flag set):
+- Each live particle expanded to 4 corner vertices × 24 bytes; size clamped to
+  `[POINTSIZE_MIN, POINTSIZE_MAX]`, half-extent = `size × 0.5`. Corners built from a per-frame
+  camera-facing quad basis (updated each frame).
+- The particle's D3DCOLOR copied verbatim into each corner's diffuse.
+- `DrawIndexedPrimitive` with `D3DPT_TRIANGLELIST`: 4 vertices per particle,
+  **2 triangles per particle** (PrimitiveCount = 2 × particleCount).
+
+`[debugger-confirm]` which path runs on the target device. Check the buffer FVF: point-sprite path
+uses FVF `0x062` (XYZ | DIFFUSE | PSIZE), stride 20; quad path uses FVF `0x142`, stride 24.
+
+Both paths share the per-frame particle simulation (§E.2.2 / §E.2.4) and a shared dynamic vertex buffer.
+
+## G.10 SwordLight Trails (CODE-CONFIRMED)
+
+- **Depth bias:** near/far depth-range pulled forward by 0.59 (clamped to [0, 1]) via a temporary
+  viewport copy; blade trails draw in front of nearby geometry. Original viewport restored after draw.
+- **FVF:** 0x142 (24-byte vertex, §G.2); indexed TRIANGLELIST;
+  `PrimitiveCount = index_count / 3`.
+- **Two trail lists:** item/weapon trails (with their own texture) then mob trails (separate texture).
+  Per active trail: geometry is uploaded, then `DrawIndexedPrimitive` issues the draw.
+- **Blend state:** SRCALPHA/INVSRCALPHA + **MODULATE2X** (COLOROP 5) — trail rendered with a
+  brightness boost vs the main MODULATE baseline.
+
+`[debugger-confirm]` whether any per-element COLOROP override exists within the XEffect mesh draw
+(none observed in static analysis — the baseline MODULATE appears to hold throughout steps 1–4).
+
+## G.11 D3D9 Enum Reference for This Spec
+
+**D3DRS (SetRenderState) indices used by the effects render path:**
+
+| D3DRS name | Value |
+|---|---:|
+| ZENABLE | 7 |
+| ZWRITEENABLE | 14 |
+| ALPHATESTENABLE | 15 |
+| SRCBLEND | 19 |
+| DESTBLEND | 20 |
+| CULLMODE | 22 |
+| ALPHABLENDENABLE | 27 |
+| TEXTUREFACTOR | 60 |
+| LIGHTING | 137 |
+| POINTSIZE | 154 |
+| POINTSIZE_MIN | 155 |
+| POINTSPRITEENABLE | 156 |
+| POINTSCALEENABLE | 157 |
+| POINTSCALE_A | 158 |
+| POINTSCALE_B | 159 |
+| POINTSCALE_C | 160 |
+| POINTSIZE_MAX | 166 |
+
+**D3DBLEND values used by the effects render path:**
+
+| D3DBLEND name | Value |
+|---|---:|
+| ZERO | 1 |
+| ONE | 2 |
+| INVSRCCOLOR | 4 |
+| SRCALPHA | 5 |
+| INVSRCALPHA | 6 |
+| DESTCOLOR | 9 |
+
+**IDirect3DDevice9 virtual-table method offsets:**
+
+| Method | vtable offset |
+|---|---:|
+| SetViewport | +188 |
+| GetViewport | +192 |
+| SetRenderState | +228 |
+| SetTexture | +260 |
+| SetTextureStageState | +268 |
+| SetSamplerState | +276 |
+| DrawPrimitive | +324 |
+| DrawIndexedPrimitive | +328 |
+| SetFVF | +356 |
+
+---
+
 ## Terrain FX Layer Formats — Cross-Format Deltas
 
 > **Status (build 263bd994, 2026-06-16): OUT-OF-LANE — re-confirmation deferred to the terrain lane.**
@@ -1469,7 +1720,7 @@ The June 2026 black-box pass analyzed both known FX7 files (both exactly 35,202 
 
 ## From `.xeff` (Section A)
 
-1. **`field_unknown_a` / `element_flags` (element/in-memory +0x0C)** — bulk-read, no semantic read-site isolated. **DBG-pending** (live-debugger confirmation required). Do not assign a meaning.
+1. **`blend_mode` (element/in-memory +0x0C) — RESOLVED (CODE-CONFIRMED, 2026-06-28).** Formerly `field_unknown_a` / `element_flags`. Per-element blend-mode selector: 1 = alpha (SRCALPHA/INVSRCALPHA), 3 = opaque (ONE/ZERO), else including 0 = additive (SRCALPHA/ONE). Confirmed by render-path trace. See §A.4.0, §A.5, §G.1.
 2. **`type_flag` — RETIRED (2026-06-14).** The value at file offset 0x08 is NOT a header field; it is sub-effect block 0's `emitter_type` (values 1 = mesh-particle, 2 = directional billboard; A.2 / A.4.0 / A.12). No open question remains.
 3. **`unknown_constant = 67` — REFUTED and DELETED (CAMPAIGN VFS-MASTERY).** No read-site consumes a 4-byte field at track-header offset +1, and the two-witness review found no such header member. The four bytes are keyframe 0's u32 index prefix (A.4.3 / A.4.4). The track header is 9 bytes; the field no longer appears in this spec. No open question remains.
 4. **`emitter_type` values beyond 0, 1, 2 (e.g. `20`)** — parse-inert (only `== 2` gates the static-branch rotation read, A.4.6 / A.12); the **render meaning is DBG-pending** (live-debugger confirmation required). Do not branch on these values in the parser and do not assign a render meaning.
@@ -1512,12 +1763,7 @@ The June 2026 black-box pass analyzed both known FX7 files (both exactly 35,202 
 
 ## From `particleEmitter.eff` (Section E)
 
-1. **52-byte sub-record — widths RESOLVED (CYCLE 7), roles DBG-pending.** All 19 fields are now typed
-   (4 × u16 + RGBA8 quad at +0x08 + 4 × f32 + 4 × u16 + 4 × f32), proven by the
-   `tool/effect/particle_%d.txt` text-serializer sibling; the colour quad is CONFIRMED RGBA8 with a
-   genuine alpha byte (E.2.2). The remaining gap is the **semantic role** of the 18 non-colour fields,
-   which needs live-debugger confirmation against the runtime particle simulation and must not be
-   invented. This is the primary remaining gap.
+1. **52-byte sub-record — widths AND roles FULLY RESOLVED (CYCLE 7 widths; CYCLE 14 roles CODE-CONFIRMED).** All 19 fields are typed and their runtime roles are CODE-CONFIRMED by the spawn routine and per-tick integrator (§E.2.2). Field labels at +0x02/+0x04 were corrected in CYCLE 14 (R2: `spawn_delay` at +0x02, `lifetime` at +0x04). The prior "roles DBG-pending" note is retired. No open question remains for the 52-byte sub-record. See `Docs/RE/structs/particle_emitter.md` §6.1.
 2. **Entry-header sprite-size axis mapping** — the two header f32 at 0x08/0x0C feed the sprite-size setter (CONFIRMED), but "x then y" naming is HIGH only.
 3. **(RESOLVED, Campaign 5B)** The prior "flat 16-byte header + 2,243×52-byte records" model and the "record index = `resource_id − 10000`" guess are both RETIRED. The file is a variable-length entry sequence terminated by `num_frames == 0`, keyed by raw `entry_id`; selection is by raw-id map lookup against a `.xeff` element's `resource_id` (E.0, E.2, E.4).
 
@@ -1558,11 +1804,12 @@ The June 2026 black-box pass analyzed both known FX7 files (both exactly 35,202 
 # Cross-References
 
 - **Related formats:** `pak.md` (container), `sound_tables.md` (the other `.eff` variant), `mesh.md` (shares 32-byte vertex record convention), `terrain_layers.md` (FX layer formats; authoritative for `.fx1`–`.fx7` byte layouts)
-- **Related runtime spec:** `specs/effects.md` — the authoritative effects system behavioral spec (boot manifests, object pools, trigger dispatch table, per-frame tick math, bone attachment, damage-number renderer, sword-light sub-system)
+- **Related runtime spec:** `specs/effects.md` — the authoritative effects system behavioral spec (boot manifests, object pools, trigger dispatch table, per-frame tick math, bone attachment, damage-number renderer, sword-light sub-system). **Section G of this file** extends the render-side record: transparent-pass state, draw order, vertex format, keyframe interpolation, GPU particle paths, SwordLight depth bias, and D3D9 enum map (§G.1–§G.11).
 - **Related specs:** `specs/combat.md` (server-authoritative damage; effects here are presentation-only), `specs/skinning.md` (bone hierarchy used by bone-attached effects)
 - **Companion binary manifests:** `xeffect.lst` (3,669 records × 30 bytes, §A.9), `bmplist.lst` (1,526 records × 30 bytes, §A.10), `xobj.lst` (32 records × 34 bytes, §A.11.1) — all at `data/effect/`; see `specs/effects.md §3` for boot loading sequence
 - **Companion plain-text tables:** `totalmugong.txt`, `itemjointeff.txt`, `mobjointeff.txt`, `itemswordlight.txt`, `mobswordlight.txt` — documented in **Section F** above (all under `data/effect/`, corrected 2026-06-13 from the prior `data/script/` implication; only `effectscale.xdb` is under `data/script/`)
 - **Companion ASCII format:** `.xobj` files in `data/effect/xobj/` — plain-text primitive meshes
 - **Companion binary tables:** `effectscale.xdb` (Section D), `particleEmitter.eff` (Section E)
+- **GPU particle runtime struct layouts:** `Docs/RE/structs/particle_emitter.md` — authoritative for ParticleEffect (60 B), GParticleBuffer (248 B), GParticle_State (32 B), GParticle_Render (20 B), and the in-memory 28-byte entry + 52-byte spawn sub-record field map (including the CYCLE 14 R1/R2 field corrections folded into §E above)
 - **Glossary:** see `Docs/RE/names.yaml`
 - **Provenance:** see `Docs/RE/journal.md`

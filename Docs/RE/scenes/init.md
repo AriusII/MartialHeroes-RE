@@ -8,7 +8,7 @@ verification: independently re-confirmed 2026-06-18 directly from the doida.exe 
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 ida_reverified: 2026-06-27
 scene: Init (engine state 0)
-sources: [specs/client_runtime.md §0/§7, specs/client_architecture.md §2/§3, specs/resource_pipeline.md §1/§2]
+sources: [specs/client_runtime.md §0/§7, specs/client_workflow.md §2/§3, specs/resource_pipeline.md §1/§2]
 encoding_note: Korean config/UI text is CP949 (legacy MS-949 code page), not UTF-8.
 ---
 
@@ -31,7 +31,7 @@ client the application entry point (`WinMain`) **is** the scene machine: after a
 `while(1) switch(GameState)` over **exactly eight cases (states 0..7)** plus a `default`. The ladder
 **starts at state 0** and state 0 transitions **immediately** to **state 1 (Login)** — the first real
 interactive screen. (CODE-CONFIRMED — `specs/client_runtime.md §0.1`, `§7`;
-`specs/client_architecture.md §3`.)
+`specs/client_workflow.md §3`.)
 
 State 0 is **not** a rendered scene. No window, no Direct3D device, and no widget tree exist yet when
 state 0 begins; state 0 (and the first half of state 1) is exactly where they are brought up. State 0
@@ -378,7 +378,7 @@ A faithful port / re-derivation of Init should satisfy:
 
 ## 9. Open items / GAPs
 
-Most are inherited from `specs/client_runtime.md §0.9` / `§0.10.1` and `client_architecture.md §12`.
+Most are inherited from `specs/client_runtime.md §0.9` / `§0.10.1` and `client_workflow.md §12`.
 **Item 1 was RESOLVED statically this pass** (scene reconstruction campaign, direct binary read of the
 application entry point); the remainder are **debugger-pending** (no live capture/debugger this campaign):
 
@@ -413,7 +413,7 @@ All committed, firewall-clean (no IDA, no `_dirty/`):
   §0.3 window class, §0.4 D3D9 device, §0.5 VFS mount, §0.6 CP949/fonts, §0.7 singleton order,
   §0.8 state-0→1 transition, §0.8.2 resolution setters / promotion, §0.9 open items, §0.10
   crash-reporting SDK) and **§7** (scene lifecycle).
-- `Docs/RE/specs/client_architecture.md` — **§2** (boot & init scopes), **§3** (the GameState scene
+- `Docs/RE/specs/client_workflow.md` — **§2** (boot & init scopes), **§3** (the GameState scene
   machine 0..7), **§12** (verification status / debugger-pending list).
 - `Docs/RE/specs/resource_pipeline.md` — **§1** (the single file-open chokepoint, §1.5 mount sequence),
   **§2** (state-2 boot loading — for the Init boundary), **§3A.5** (boot font load), **§5** (thread

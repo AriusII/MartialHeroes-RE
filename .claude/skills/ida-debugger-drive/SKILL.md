@@ -1,6 +1,6 @@
 ---
 name: ida-debugger-drive
-description: Use to PILOT the LIVE IDA debugger and confirm a static RE hypothesis against ground truth in the running Martial Heroes client (Main.exe / doida.exe). Drive the maintainer's already-F9-launched debug session via the dbg_* MCP tools — set a breakpoint at a hypothesized address/function, continue until it hits on a real event (received packet, login, asset load), then read registers, memory, and packet buffers (dbg_read reads THROUGH PAGE_NOACCESS) to confirm a cipher boundary, an opcode dispatch, a struct at a live pointer, or a buffer pre/post-transform. NEVER calls dbg_start. All findings land as neutral prose under Docs/RE/_dirty/. Pairs with ida-crypto-hunt, ida-opcode-map, and ida-py.
+description: Use to PILOT the LIVE IDA debugger and confirm a static RE hypothesis against ground truth in the running Martial Heroes client (Main.exe / doida.exe). Drive the maintainer's already-F9-launched debug session via the dbg_* MCP tools — set a breakpoint at a hypothesized address/function, continue until it hits on a real event (received packet, login, asset load), then read registers, memory, and packet buffers (dbg_read reads THROUGH PAGE_NOACCESS) to confirm a cipher boundary, an opcode dispatch, a struct at a live pointer, or a buffer pre/post-transform. Surfaces the probe/trace/watch/appcall instrumentation family as the no-dbg_start runtime-capture path. NEVER calls dbg_start. All findings land as neutral prose under Docs/RE/_dirty/. Pairs with ida-crypto-hunt, ida-opcode-map, and ida-py.
 allowed-tools: mcp__ida__*, Read, Write, Bash(claude mcp *)
 model: sonnet
 effort: high
@@ -47,10 +47,46 @@ accepted). The MCP cannot dismiss that modal and a session is already active, so
 4. **The right DB.** The IDB is the Martial Heroes client (`Main.exe` / `doida.exe`), analysis
    finished. STOP on a wrong or empty database.
 
+## The debugger toolset (concrete tool roles)
+
+Breakpoints + stepping + reads, discovered at runtime on the `?ext=dbg` endpoint:
+
+- **Breakpoints:** `mcp__ida__dbg_add_bp`, `mcp__ida__dbg_set_bp_condition`,
+  `mcp__ida__dbg_set_bp_hit_count`, `mcp__ida__dbg_delete_bp`, `mcp__ida__dbg_toggle_bp`,
+  `mcp__ida__dbg_bps`.
+- **Control flow:** `mcp__ida__dbg_continue`, `mcp__ida__dbg_run_to`, `mcp__ida__dbg_step_into`,
+  `mcp__ida__dbg_step_over`, `mcp__ida__dbg_step_out`.
+- **Registers:** `mcp__ida__dbg_gpregs`, `mcp__ida__dbg_regs_named`, `mcp__ida__dbg_regs_all`.
+- **Memory:** `mcp__ida__dbg_read` (reads **THROUGH `PAGE_NOACCESS`**) — and `mcp__ida__dbg_write`
+  **only** to deliberately recover a value (never to cheat/patch).
+- **State:** `mcp__ida__dbg_stacktrace`, `mcp__ida__dbg_status`, `mcp__ida__dbg_threads` /
+  `mcp__ida__dbg_select_thread`, `mcp__ida__exception_config`.
+
+## The no-`dbg_start` runtime-capture family (prefer for bulk observation)
+
+Beyond raw breakpoints, prefer the non-intrusive runtime-capture family for bulk observation — none
+of these spawn the process, so they honor the never-`dbg_start` rule while the maintainer's F9 session
+runs: `mcp__ida__probe_net` (auto-capture every socket send/recv), `mcp__ida__probe_api_call` (log a
+specific API's calls+args), `mcp__ida__probe_add`/`mcp__ida__probe_arm`/`mcp__ida__probe_drain`/`mcp__ida__probe_stats`
+(install/arm/harvest lightweight probes at an EA), `mcp__ida__trace_calls`/`mcp__ida__trace_summary`
+(what got called and how often), `mcp__ida__watch_field`/`mcp__ida__watch_region` (catch WHO writes a
+struct member/region), `mcp__ida__run_until` (advance to an interesting state),
+`mcp__ida__appcall`/`mcp__ida__appcall_inspect` (invoke the client's own decryptor on captured
+ciphertext — the definitive crypto confirmation), `mcp__ida__read_struct_live` (decode a struct at a
+live pointer), `mcp__ida__hierarchy_runtime_overlay` (map observed runtime calls onto the static call
+graph), `mcp__ida__memory_scan` (find a live buffer/key in RAM), `mcp__ida__stop_context` (snapshot
+runtime state). HARD RULE unchanged: NEVER `dbg_start`/`dbg_attach`/`dbg_detach`/`dbg_exit` — those are
+maintainer-only.
+
+> **Anti-cheat caveat (XTrap).** An XTrap-protected client may resist a live debugger — prefer
+> breakpoints on your own hypothesized handler EAs over API-level breakpoints, and lean on the capture
+> oracle (`probe_net`/`appcall`/`pcap`) when dynamic stepping is hostile.
+
 ## Operating loop
 
 `confirm-live → breakpoint → continue-to-event → read-ground-truth → (diff / step) → cleanup → record`.
-Re-enter at *breakpoint* for the next hypothesis in the same live session.
+Re-enter at *breakpoint* for the next hypothesis in the same live session. Record each confirmed
+hypothesis in-IDB with `mcp__ida__journal_note` (paired with the `_dirty/` write below).
 
 ## Steps
 

@@ -20,14 +20,17 @@ so a leak-free VFS, faithful parsers, and correctly-keyed tables are what make 1
 ## Ground truth (clean room — committed specs only)
 You are the **clean room**: **no `mcp__ida__*` tools, never read `Docs/RE/_dirty/`**. Your single source
 is the firewall-clean committed `Docs/RE/formats/*.md` (+ `structs/`, `specs/`) — the **DERIVED truth**,
-the rewritten record of what IDA proved about `doida.exe`'s containers, binary formats, and tables. Your
-decoder is measured against the spec, never the reverse: if code and spec diverge the **code is wrong**
+the rewritten record of what IDA proved about `doida.exe`'s containers, binary formats, and tables. Start
+from `Docs/RE/INDEX.md` — the navigable entry point to the 164-spec corpus whose by-extension table
+(`.ted`, `.skn`, `.sod`, `.bud`, …) resolves any asset type to its authoritative spec in one lookup
+rather than scanning directories. Your decoder is measured against the spec, never the reverse: if code and spec diverge the **code is wrong**
 (unless IDA just disproved the spec — an RE escalation, never a code decision). **Never invent** a
 magic/offset/stride/endianness/convention and **never decode an "unknown" field**: a missing or
 ambiguous fact is **escalated to the RE domain**, never guessed. For an *un-spec'd* table, route the
 discovery→promotion chain (`re-asset-format-analyst` recovers it into `_dirty/`, `spec-author` promotes it
-to a committed `formats/*.md`), then implement. **Every** magic/offset/stride/column/enum cites
-`// spec: Docs/RE/formats/...` — a constant you can't cite is one you must not write.
+to a committed `formats/*.md`), then implement. **Every** magic/offset/stride/column/enum traces to its
+source spec, cited in the spec/journal/PR — **NEVER as a C# comment; C# files carry zero comments (project
+mandate)** — a constant whose spec basis you cannot establish is one you must not write.
 
 ## Paired skills
 - **dotnet-build-test** *(preloaded)* — per-project `dotnet build` + xUnit loop (fixture-driven, no real archive).
@@ -69,10 +72,12 @@ discovery→promotion chain.
 - **Truncation:** validate declared count/stride vs buffer length; throw a typed exception, never an OOB read.
 
 **Done when:**
-- [ ] Container/parser/table loads per spec with every magic/offset/stride/column/enum cited; one entry
-      reads as a `ReadOnlyMemory<byte>` slice without paging the archive; lifetime/disposal is provably safe.
+- [ ] Container/parser/table loads per spec with every magic/offset/stride/column/enum traced to its source
+      spec in the spec/journal/PR (never as a C# comment — zero comments in `.cs`); one entry reads as a
+      `ReadOnlyMemory<byte>` slice without paging the archive; lifetime/disposal is provably safe.
 - [ ] Parsers carry **no** rendering dep (neutral type names, no engine vocabulary); Mapping emits valid
-      GLB (chunk alignment, accessor min/max) + PNG (signature/IHDR/CRC) with every convention translation cited.
+      GLB (chunk alignment, accessor min/max) + PNG (signature/IHDR/CRC) with every convention translation
+      recorded in the spec/journal/PR.
 - [ ] CP949 registered once; fixed-stride `.arr` records use `[StructLayout(Pack=1)]`; synthetic fixtures
       round-trip; references stay downward (Vfs none; Parsers→Vfs; Mapping→Parsers); no `using Godot;`.
 
@@ -90,7 +95,8 @@ get a column or an axis flip wrong and the right model wears the wrong skin or t
 
 ## Hard rules
 - **Clean room only:** no IDA, never read `_dirty/`; implement from committed `formats/`/`structs/`/`specs/`
-  + the C# tree; cite every constant; a missing/"unknown" fact is **escalated to RE**, never invented.
+  + the C# tree; record every constant's spec basis in the spec/journal/PR — NEVER as a C# comment (zero
+  comments in `.cs`, project mandate); a missing/"unknown" fact is **escalated to RE**, never invented.
 - **Respect the downward DAG (01←02←03←04←05):** `Vfs` depends on no one; `Parsers` → `Vfs`; `Mapping` →
   `Parsers`. No upward/sideways edge; any format-only NuGet (glTF/PNG) stays confined to `Mapping`.
 - **Engine-free below 05:** never `using Godot;` (the converters must run headless and on a future server).

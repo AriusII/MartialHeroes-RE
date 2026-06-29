@@ -1,7 +1,7 @@
 ---
 verification: static-hypothesis
 evidence: [multi-modal-static-probes]
-ida_anchor: 263bd994
+ida_anchor: f61f66a9
 date: 2026-06-24
 method: >
   Candidate clusters surfaced by targeted static probes across the full doida.exe function
@@ -22,7 +22,7 @@ note: >
 > **Verification banner**
 > - verification: static-hypothesis (probe-derived coverage estimates; individual subsystems
 >   carry their own stronger verification status as noted in the linked specs)
-> - ida_anchor: 263bd994
+> - ida_anchor: f61f66a9
 > - date: 2026-06-24
 > - binary: doida.exe, ~25,792 total functions; ~5,110 named at probe time; ~18,781 autonamed
 >   (unnamed) — approximately 20 % of functions carry a committed canonical name at this snapshot.
@@ -35,7 +35,7 @@ note: >
 
 ## 1. Purpose and method
 
-This document records, as of IDB SHA **263bd994** (2026-06-24), which subsystems of `doida.exe`
+This document records, as of IDB SHA **f61f66a9** (2026-06-24), which subsystems of `doida.exe`
 are covered by committed `Docs/RE/` specs and which remain gaps. It is the intake point for
 future RE prioritisation. It does not supersede any individual spec.
 
@@ -138,7 +138,7 @@ material function-level gap not covered by the current spec. Ordered by priority
 | SEED-128 block cipher + streaming modes + two consumers | ~18 | 16-round Feistel core (already named); streaming-mode wrappers and two call-site consumers identified | `specs/crypto.md §7.2` acknowledges SEED but leaves call-site subsystem unpinned | `@re-crypto-analyst` pin both consumers in the spec; close the open item in `specs/crypto.md §7.2` |
 | FLINT++ bignum / RSA math library | ~213 | RTTI LINT_Base / LINT_Error / LINT_File and ten exception subclasses; ~213 named Flint_BignumHelper_* functions; the bignum substrate behind the login RSA handshake | `specs/crypto.md` pins the RSA modexp path but treats the bignum library as a black box; Montgomery reduction, modular arithmetic helpers unmapped | `@re-crypto-analyst` document the Montgomery modexp entry point and key helper primitives; extend `specs/crypto.md` |
 | In-game MainHandler input / event dispatch (click-to-move / click-to-attack) | ~18 | Input/event router, click-action dispatch (move vs. attack decision), click-target resolver — identified in the actor-world probe | `specs/ui_event_dispatch.md` + `specs/input_ui.md` cover the spec-level behavior; the function cluster is mostly unnamed — naming gap | `@ida-toolsmith` name the router and dispatcher functions; `@re-validator` breakpoint the click dispatch to confirm move-vs-attack branch live |
-| GHTex / GTexture texture-resource wrapper (object model) | ~70 | GHTex ctor + vtable install + pool enrol; GTextureManager registry; lazy VFS-or-disk load into a handle; ref-counted static-handle acquisition; per-panel/per-effect GHTex allocation | No spec exists for the GHTex / GHandle class layout and lifecycle; `specs/rendering.md` covers the draw side; `formats/texture.md` + `specs/vfs_overview.md` cover the load path only | `@re-struct-analyst` recover the GHTex object layout; produce `structs/ghtex.md` |
+| GHTex / GTexture texture-resource wrapper (object model) | ~70 | GHTex ctor + vtable install + pool enrol; GTextureManager registry; lazy VFS-or-disk load into a handle; ref-counted static-handle acquisition; per-panel/per-effect GHTex allocation | GHTex / GHandle class layout and lifecycle now specced in `structs/texture_manager.md`; `specs/rendering.md` covers the draw side; `formats/texture.md` + `specs/vfs_overview.md` cover the load path. COVERED/RELOCATED | No further action required; see `structs/texture_manager.md` |
 | dotoonshading cel pixel-shader loader (orphan) | ~2 | Loads `data/shader/dotoonshading.psh` and `data/shader/dotoonshading2.psh` via the VFS-first assembler path; zero direct callers (virtual-dispatched or device-restore callback); separate from the named cel/glow initializer | `formats/shaders.md` documents the five-shader cel set by role but does not name `dotoonshading.psh` / `dotoonshading2.psh` — filename discrepancy and orphan loader are unresolved | `@re-asset-format-analyst` confirm whether `dotoonshading.psh` is one of the five named cel shaders under a different filename, or a sixth shader; update `formats/shaders.md` |
 | IME text-composition + candidate-window manager (partial) | ~30 | 32-slot candidate array, char-validity mask engine, ~25 functions not yet pinned to spec offsets; text-field HWND registration call site pending | `specs/input_ui.md §1c/§4/§5` covers behavior and five offsets; about half the object layout and all function-level names are missing | `@re-struct-analyst` complete the IME context struct; `@ida-toolsmith` name the major IME methods |
 | Unmapped GU panel / window subclasses (residual HUD tail) | ~40 | ~35 autonamed panel-subclass functions with unnamed vtables; child-widget builders using known GU primitives but no class name resolved | `specs/ui_system.md §12.6` notes ~101 unlabelled builders; panel-slot roster partial in §1.9 | `@re-function-analyst` correlate vtable addresses to the §1.9 panel-slot roster and name the residual builders |
@@ -148,11 +148,11 @@ material function-level gap not covered by the current spec. Ordered by priority
 | Cluster | Approx. functions | Evidence basis | Gap description | Suggested RE next step |
 |---|---|---|---|---|
 | Shadow projection + actor blob-shadow stamp | ~7 | Perspective projection matrix (pi/8 FOV, aspect 1.0, far 10000), depth-bias matrix, LookAtLH light-view pass, per-actor blob-shadow quad draw | `specs/rendering.md §3.2` notes the blob-shadow pass at behavior level; the projective-shadow matrix recipe (numeric constants) and light-view pass are not pinned in the spec | `@re-function-analyst` extract the exact matrix constants and pin them in `specs/rendering.md §3.2` |
-| Third-party XTrap (XTrapVa.dll) integration | ~30 | XTrap directory enumeration, LoadLibrary of XTrapVa.dll, GetProcAddress, telemetry packet builder (XlXf V1 frame) | Not in any committed spec; `specs/crypto.md §7.1` only alludes to vendor integration; packet shape and DLL-load path unmapped | `@re-function-analyst` document the DLL-load and telemetry-packet path; extend `specs/crypto.md` or produce a brief `specs/xtrap_integration.md` |
+| Third-party XTrap (XTrapVa.dll) integration | ~30 | XTrap directory enumeration, LoadLibrary of XTrapVa.dll, GetProcAddress, telemetry packet builder (XlXf V1 frame) | DLL-load path and telemetry-packet details now covered in `specs/anticheat.md`. COVERED/RELOCATED | No further action required; see `specs/anticheat.md` |
 | Anti-tamper self-integrity module-image check | ~11 | Maps the EXE image, builds a keyed reference block, two trailing-blob memcmps, on failure ships a status packet via the XlXf V1 builder | `specs/connection_topology.md §4` covers the relay endpoint; `specs/crypto.md §6a/§7.1` covers page-guard; the module-image self-check mechanics are not pinned | Document as a subsection of `specs/crypto.md` or extend `specs/anticheat.md` once produced |
 | Cal3D-style skeletal animation / skin runtime engine (Core* family) | ~80 | RTTI CoreActor / CoreAnimation / CorePose / CoreSkin / CoreTrack / CorePoseManager / CoreSkinManager / SkinWeight::CoreSkin; runtime evaluation functions unnamed | `specs/skinning.md` + `formats/animation.md` cover the on-disk formats and the asset-resolution chain; the Core* runtime pose-blend, track keyframe sampling, and bone interpolation internals are unmapped | `@re-struct-analyst` map the CorePose + CoreTrack evaluation internals; extend `specs/skinning.md` with a runtime-engine section |
 | Embedded OLE/IE web container (CWebContainer / cash-shop bridge) | ~25 | RTTI CWebContainer + CWebEventSink + full OLE COM site shim hierarchy (IOleClientSite / IOleInPlaceSite / IDispatch / IUnknown variants) | Only referenced as a UI panel slot in `specs/ui_system.md`; OLE hosting behavior, browser-event dispatch, and cash-shop URL loading are unmapped | `@re-function-analyst` document the OLE site hosting path and navigation entry point; produce a brief `specs/cash_shop_browser.md` |
-| Diamond 3D scene-graph (GNode / GGroup / GScene / GView / GCamera / GPipeline family) | ~140 | Retained-mode scene hierarchy (GNode / GGroup / GGeometry / GGeode / GDrawable), cull/traverse render pipelines, GView render-to-surface, camera/light/particle resources | Not mapped as a standalone subsystem; partially covered by `specs/rendering.md` (draw side) and `formats/` (assets); the scene-graph node hierarchy and pipeline stack are unspecced | `@re-struct-analyst` recover the GNode / GScene object layout; produce `specs/scene_graph.md` |
+| Diamond 3D scene-graph (GNode / GGroup / GScene / GView / GCamera / GPipeline family) | ~140 | Retained-mode scene hierarchy (GNode / GGroup / GGeometry / GGeode / GDrawable), cull/traverse render pipelines, GView render-to-surface, camera/light/particle resources | Node hierarchy and pipeline stack now specced in `structs/scene_graph_nodes.md`; draw side in `specs/rendering.md`; assets in `formats/`. COVERED/RELOCATED | No further action required; see `structs/scene_graph_nodes.md` |
 | Normalized input-event emitters + cross-thread ring push (partial) | ~10 | Mouse and keyboard emitters, fixed event-record builder, cross-thread ring push; internal VK remap table (256 to internal range); key-state bitset | `specs/input_ui.md §2/§2a/§2c` confirms the event-record shape; the internal-VK remap table, bitset width, and VK-to-char shift table are not pinned — leaves a Ctrl-vs-Shift modifier ambiguity in §7 | `@re-struct-analyst` read the internal-VK remap table values; update `specs/input_ui.md §7` |
 | Inventory 3D actor-preview draw | ~5 | Skinned actor inset inside inventory / info panel: AnimMixer pose-build, skin deform-and-upload, multi-stage texture-stage program, per-bone draw loop | `specs/rendering.md §4.2` notes the 3D inventory inset; the exact texture-stage program for the inset is a function-level gap | `@re-function-analyst` extract the texture-stage program and pin it in `specs/rendering.md §4.2` |
 | Mount / vehicle visual-seat attach (naming completeness) | ~6 | Named functions confirmed consistent with `specs/world_systems.md Ch.20`; minor naming gap in the follow-spacing helpers | Specced and consistent; movement-tick sibling unnamed | `@ida-toolsmith` name the follow-spacing helper functions |
@@ -267,8 +267,8 @@ The following gaps require new RE work and a new or extended committed spec befo
 can proceed. They are listed here as formal escalations from this coverage audit to the RE domain
 (via the main session / `docs-tooling-orchestrator`):
 
-1. **Anti-cheat agent internals** (`specs/anticheat.md` does not exist) — HIGH
-2. **GHTex / GTexture object layout** (`structs/ghtex.md` does not exist) — HIGH
+1. **Anti-cheat agent internals** — RELOCATED: now specced in `specs/anticheat.md`. No further escalation.
+2. **GHTex / GTexture object layout** — RELOCATED: now specced in `structs/texture_manager.md`. No further escalation.
 3. **SEED-128 consumer call sites** (open item in `specs/crypto.md §7.2`) — HIGH
 4. **RC4 keying path** (new finding vs `specs/crypto.md §7.1`) — HIGH
 5. **GXProtect class triad and orchestration flow** (behavioral only in `specs/crypto.md §7.1`) — HIGH
@@ -276,8 +276,8 @@ can proceed. They are listed here as formal escalations from this coverage audit
 7. **FLINT++ bignum internals** (black box in `specs/crypto.md`) — HIGH
 8. **Cal3D Core* runtime pose-blend / keyframe sampling** (not in `specs/skinning.md`) — MEDIUM
 9. **Embedded OLE/IE web container** (absent from specs) — MEDIUM
-10. **Diamond 3D scene-graph node hierarchy** (absent from specs) — MEDIUM
-11. **XTrap DLL integration path and telemetry packet shape** (absent from specs) — MEDIUM
+10. **Diamond 3D scene-graph node hierarchy** — RELOCATED: now specced in `structs/scene_graph_nodes.md`. No further escalation.
+11. **XTrap DLL integration path and telemetry packet shape** — RELOCATED: now specced in `specs/anticheat.md`. No further escalation.
 12. **Shadow projection matrix constants** (not pinned in `specs/rendering.md §3.2`) — MEDIUM
 13. **Internal VK remap table values** (open in `specs/input_ui.md §7`) — MEDIUM
 14. **Screenshot capture subsystem** (absent from specs) — LOW
@@ -322,10 +322,10 @@ cell-master emits; all paths are path-template driven.
 
 | Extension | Role | Spec | Coverage |
 |---|---|---|---|
-| `.map` | Per-cell scene and section descriptor; emits DATAFILE/BUILDING tokens for sub-asset expansion | `formats/terrain.md`, `formats/terrain_scene.md`, `formats/cell_pre.md` | WELL |
+| `.map` | Per-cell scene and section descriptor; emits DATAFILE/BUILDING tokens for sub-asset expansion | `formats/terrain.md`, `formats/terrain_scene.md`, `formats/authoring_sidecars.md` | WELL |
 | `.mud` | Per-cell tile/sound master; fixed 32,768-byte body (64×64 grid at 8 bytes per slot) | `formats/mud.md` | WELL |
 | `.ted` | Terrain heightfield plus per-cell texture-index grid | `formats/terrain.md` | WELL |
-| `.ted.post` | Terrain authoring sidecar; write-only export target (same 46,987-byte stride as `.ted`) | `formats/cell_post.md`, `formats/authoring_sidecars.md` | WELL |
+| `.ted.post` | Terrain authoring sidecar; write-only export target (same 46,987-byte stride as `.ted`) | `formats/authoring_sidecars.md` | WELL |
 | `.up` | Cell up-layer collision sidecar | `formats/cell_up.md` | WELL |
 | `.exd` | Cell extra-data sidecar; name-driven sibling path | `formats/cell_exd.md` | WELL |
 | `.sod` | 2D XZ collision wall segments | `formats/sod.md` | WELL |

@@ -1,11 +1,11 @@
 ---
 name: spec-author
-description: Use PROACTIVELY to cross the clean-room firewall — REWRITE (never copy) reconciled Docs/RE/_dirty/ findings into the committed, neutral specs engineers implement from: opcodes.md, packets/*.yaml, formats/*.md, structs/*.md, specs/*.md. The single legal chokepoint and the ONLY RE agent that writes committed specs; it holds NO IDA tools. Self-scrubs every Hex-Rays artifact, validates schema + that packet size == Σ field widths, and journals each promotion. Covers the whole surface — wire protocol/opcodes AND asset formats/structs/crypto/subsystem behavior. For a single promotion, delegate straight here rather than the re-orchestrator.
-tools: Read, Write, Edit, Grep, Glob
-disallowedTools: mcp__*
+description: The ONLY committed-spec writer and sole firewall crossing; reads _dirty/, rewrites (never copies) into Docs/RE/{formats,packets,structs,specs}/+opcodes.md, self-audits via clean-room-check. Use immediately after analyst findings land in _dirty/. REWRITE (never copy) reconciled Docs/RE/_dirty/ findings into the committed, neutral specs engineers implement from: opcodes.md, packets/*.yaml, formats/*.md, structs/*.md, specs/*.md. The single legal chokepoint and the ONLY RE agent that writes committed specs; it holds NO IDA tools. Self-scrubs every Hex-Rays artifact, validates schema + that packet size == Σ field widths, and journals each promotion. Covers the whole surface — wire protocol/opcodes AND asset formats/structs/crypto/subsystem behavior. For a single promotion, delegate straight here rather than the re-orchestrator.
 model: opus
 effort: high
-skills: re-promote, re-handoff
+tools: Read, Write, Edit, Grep, Glob
+disallowedTools: mcp__*
+skills: re-promote, re-handoff, clean-room-check, ida-pro-re
 color: cyan
 ---
 
@@ -87,6 +87,11 @@ binary wins — correct the spec and journal it.
   spec-promoted · implementation-ready). The banner marks **which load-bearing facts are debugger-confirmed
   vs static-only**. A spec carrying a load-bearing static-only fact is promoted **but stamped
   `NOT-YET-implementation-ready`** until `re-validator` confirms it against the live `?ext=dbg` session.
+- **clean-room-check** *(preloaded)* — your committed-output self-audit: after the rewrite, run it to
+  confirm zero Hex-Rays artifacts / addresses / pasted bytes crossed into the spec, and that every
+  magic constant traces to a `_dirty/` provenance line via the journal.
+- **ida-pro-re** *(preloaded)* — the dirty→spec→engineer firewall conventions and the never-paste list
+  you enforce on every promotion (methodology only; you hold no IDA tools).
 - Broad (the schemas/validators you conform to, run downstream by the orchestrator / quality gate):
   **opcode-catalog** (opcodes table schema), **packet-codegen** (packet YAML → C# struct), **asset-format-doc**
   (the `formats/<ext>.md` template). Conform exactly so they pass first time.
@@ -144,8 +149,10 @@ the faithful 1:1 re-creation is built. A rewritten, address-free, implementable 
 
 1. **Locate & read** the reconciled `_dirty/` finding (and any capture `.tsv`) — the one sanctioned
    `_dirty/` read. If it is raw pseudo-C with no neutral note, refuse and route to an analyst.
-2. **Triage** the target spec from the table above; confirm the committed tree exists (else flag for
-   `re-promote`). Extend a populated spec — never clobber it.
+2. **Triage** the target spec from the table above — consult `Docs/RE/INDEX.md` (the navigable entry
+   point to the 164-spec corpus: by-subsystem / by-file-extension / by-runtime-struct maps + the
+   definitive-negatives list) to locate the right existing spec rather than guessing a path; confirm the
+   committed tree exists (else flag for `re-promote`). Extend a populated spec — never clobber it.
 3. **Rewrite** into neutral header/record/field tables or algorithm prose, in your own words; use
    canonical `names.yaml` names; confidence-tag each fact; list every "Known unknown".
 4. **Self-scrub (Grep) then validate** — zero dirty tokens; schema conforms; `size:` == Σ widths / stride
