@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using Godot;
 using MartialHeroes.Client.Godot.Composition;
 
@@ -7,19 +8,11 @@ namespace MartialHeroes.Client.Godot.World;
 public sealed partial class LensFlareNode : CanvasLayer
 {
     private const string ConfigPath = "data/sky/lensflare.txt";
-
-    private struct FlareSpot
-    {
-        public int TextureId;
-        public float Radius;
-        public float Position;
-        public Color Color;
-    }
+    private Sprite2D[] _ghosts = Array.Empty<Sprite2D>();
+    private float _invIntensityBorder;
 
     private SkyDomeNode? _skyDome;
-    private float _invIntensityBorder;
-    private FlareSpot[] _spots = System.Array.Empty<FlareSpot>();
-    private Sprite2D[] _ghosts = System.Array.Empty<Sprite2D>();
+    private FlareSpot[] _spots = Array.Empty<FlareSpot>();
 
     public bool Configure(RealClientAssets? assets, SkyDomeNode skyDome)
     {
@@ -39,7 +32,7 @@ public sealed partial class LensFlareNode : CanvasLayer
             return false;
         }
 
-        var text = System.Text.Encoding.GetEncoding(949).GetString(raw.Span);
+        var text = Encoding.GetEncoding(949).GetString(raw.Span);
         if (!ParseConfig(text))
         {
             GD.Print("[LensFlare] lensflare.txt parsed 0 spots — flare skipped. spec: Docs/RE/formats/sky.md D.4.3.");
@@ -59,7 +52,7 @@ public sealed partial class LensFlareNode : CanvasLayer
 
     private bool ParseConfig(string text)
     {
-        var spots = new System.Collections.Generic.List<FlareSpot>();
+        var spots = new List<FlareSpot>();
         var current = new FlareSpot { Color = Colors.White, Radius = 32f };
         var inSpot = false;
         var intensityBorder = 0f;
@@ -69,7 +62,7 @@ public sealed partial class LensFlareNode : CanvasLayer
             var line = rawLine.Trim();
             if (line.Length == 0) continue;
 
-            var toks = line.Split(new[] { ' ', '\t', ',', '\r' }, System.StringSplitOptions.RemoveEmptyEntries);
+            var toks = line.Split(new[] { ' ', '\t', ',', '\r' }, StringSplitOptions.RemoveEmptyEntries);
             if (toks.Length == 0) continue;
 
             var key = toks[0].ToUpperInvariant();
@@ -80,12 +73,12 @@ public sealed partial class LensFlareNode : CanvasLayer
                         float.TryParse(toks[1], NumberStyles.Float, CultureInfo.InvariantCulture, out intensityBorder);
                     break;
                 case "SPOT":
-                    if (toks.Length >= 3 && toks[2].Equals("BEGIN", System.StringComparison.OrdinalIgnoreCase))
+                    if (toks.Length >= 3 && toks[2].Equals("BEGIN", StringComparison.OrdinalIgnoreCase))
                     {
                         inSpot = true;
                         current = new FlareSpot { Color = Colors.White, Radius = 32f };
                     }
-                    else if (toks.Length >= 2 && toks[1].Equals("END", System.StringComparison.OrdinalIgnoreCase))
+                    else if (toks.Length >= 2 && toks[1].Equals("END", StringComparison.OrdinalIgnoreCase))
                     {
                         if (inSpot) spots.Add(current);
                         inSpot = false;
@@ -122,8 +115,8 @@ public sealed partial class LensFlareNode : CanvasLayer
 
     private void BuildGhosts(RealClientAssets assets)
     {
-        var ghosts = new System.Collections.Generic.List<Sprite2D>();
-        var texCache = new System.Collections.Generic.Dictionary<int, Texture2D?>();
+        var ghosts = new List<Sprite2D>();
+        var texCache = new Dictionary<int, Texture2D?>();
 
         for (var i = 0; i < _spots.Length; i++)
         {
@@ -134,7 +127,8 @@ public sealed partial class LensFlareNode : CanvasLayer
                 tex = assets.Contains(path) ? assets.LoadTexture(path) : null;
                 texCache[spot.TextureId] = tex;
                 if (tex is null)
-                    GD.Print($"[LensFlare] {path} absent — spot {i} will not draw. spec: Docs/RE/formats/sky.md D.4.3.");
+                    GD.Print(
+                        $"[LensFlare] {path} absent — spot {i} will not draw. spec: Docs/RE/formats/sky.md D.4.3.");
             }
 
             var sprite = new Sprite2D
@@ -226,5 +220,13 @@ public sealed partial class LensFlareNode : CanvasLayer
     {
         for (var i = 0; i < _ghosts.Length; i++)
             _ghosts[i].Visible = false;
+    }
+
+    private struct FlareSpot
+    {
+        public int TextureId;
+        public float Radius;
+        public float Position;
+        public Color Color;
     }
 }

@@ -7,7 +7,6 @@ using MartialHeroes.Client.Application.Engine;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Domain.Simulation.Simulation;
-using MartialHeroes.Client.Domain.Skills.Skills;
 using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Presentation.Screens;
 using MartialHeroes.Client.Presentation.World;
@@ -17,6 +16,16 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class GameLoop
 {
+    private const byte SkillActionCastEnable = 0xC8;
+    private const byte SkillActionCastDisable = 0xC9;
+    private const byte SkillActionSecondaryDisable = 0xCB;
+
+
+    private const uint EffectIdPcSpawn = 310000001;
+    private const uint EffectIdMobSpawn = 360000001;
+    private const uint EffectIdLevelUp = 310000002;
+    private const uint EffectIdDeathPvp = 350000010;
+    private const uint EffectIdDeathPve = 360000003;
     private VisualActor? _b4LocalPlayerVisual;
     private ActorKey _localPlayerKey;
 
@@ -381,11 +390,6 @@ public sealed partial class GameLoop
         }
     }
 
-
-    private const byte SkillActionCastEnable = 0xC8;
-    private const byte SkillActionCastDisable = 0xC9;
-    private const byte SkillActionSecondaryDisable = 0xCB;
-
     private void HandleSkillCastAction(ActorSkillActionEvent skillAction)
     {
         if (_effectRenderer is null) return;
@@ -400,9 +404,10 @@ public sealed partial class GameLoop
                 var castEffectId = _clientContext.SkillCatalogue.GetCastEffectId(new SkillId(skillAction.SkillId));
                 if (castEffectId == 0) break;
                 _effectRenderer.PlayCastAura(caster, castEffectId);
-                GD.Print($"[GameLoop] ActorSkillActionEvent cast-enable (0xC8): attacker={skillAction.AttackerKey.RawId} " +
-                         $"skill={skillAction.SkillId} castEffectId={castEffectId} — looping actor-anchored cast aura. " +
-                         "spec: Docs/RE/specs/effects.md §15.4 (cast-enable 0xC8).");
+                GD.Print(
+                    $"[GameLoop] ActorSkillActionEvent cast-enable (0xC8): attacker={skillAction.AttackerKey.RawId} " +
+                    $"skill={skillAction.SkillId} castEffectId={castEffectId} — looping actor-anchored cast aura. " +
+                    "spec: Docs/RE/specs/effects.md §15.4 (cast-enable 0xC8).");
                 break;
             }
 
@@ -419,13 +424,6 @@ public sealed partial class GameLoop
             }
         }
     }
-
-
-    private const uint EffectIdPcSpawn = 310000001;
-    private const uint EffectIdMobSpawn = 360000001;
-    private const uint EffectIdLevelUp = 310000002;
-    private const uint EffectIdDeathPvp = 350000010;
-    private const uint EffectIdDeathPve = 360000003;
 
     private void TriggerSpawnEffect(ActorKey key)
     {

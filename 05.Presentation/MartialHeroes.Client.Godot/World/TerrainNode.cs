@@ -14,6 +14,10 @@ public sealed partial class TerrainNode : Node3D
 
     private const int VertsPerPatch = QuadsPerPatch + 1;
 
+    private const string TerrainShaderPath = "res://World/Terrain.gdshader";
+
+    private static Shader? _terrainShader;
+
 
     private readonly Dictionary<(int MapX, int MapZ), TerrainCell> _cellCache = new();
 
@@ -208,7 +212,7 @@ public sealed partial class TerrainNode : Node3D
                         }
 
                         var d = cell.DiffuseColours[vi];
-                        colours[vBase + lr * vertsPerPatch + lc] = new Color(d.B / 255f, d.G / 255f, d.R / 255f, 1f);
+                        colours[vBase + lr * vertsPerPatch + lc] = new Color(d.B / 255f, d.G / 255f, d.R / 255f);
                     }
                 }
 
@@ -248,10 +252,6 @@ public sealed partial class TerrainNode : Node3D
 
         return mesh;
     }
-
-    private const string TerrainShaderPath = "res://World/Terrain.gdshader";
-
-    private static Shader? _terrainShader;
 
     private static Shader GetTerrainShader()
     {

@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using Godot;
 using MartialHeroes.Assets.Parsers.Texture.Models;
 using MartialHeroes.Client.Godot.Composition;
@@ -8,11 +10,11 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class EnvironmentNode
 {
-    private LensFlareNode? _lensFlare;
-
-    private System.Collections.Generic.Dictionary<int, ImageTexture?>? _cloudTexCache;
     private Func<int, ImageTexture?>? _cloudResolver;
+
+    private Dictionary<int, ImageTexture?>? _cloudTexCache;
     private int _dateBlock;
+    private LensFlareNode? _lensFlare;
 
     private void ApplyKeyframe(int kf, float frac)
     {
@@ -382,9 +384,10 @@ public sealed partial class EnvironmentNode
         }
 
         _synthFogColors = synth;
-        GD.Print("[Environment] fog DataLoadFlag=0 -> synthesised 48 fog colours via 0.75*sky_ambient + 0.25*sky_haze " +
-                 "(recovered 3:1 weights; exact §2.4 byte-band synth needs the raw sky byte LUT not exposed by MaterialBin — " +
-                 "engineering approximation). spec: Docs/RE/formats/environment_bins.md §2.4.");
+        GD.Print(
+            "[Environment] fog DataLoadFlag=0 -> synthesised 48 fog colours via 0.75*sky_ambient + 0.25*sky_haze " +
+            "(recovered 3:1 weights; exact §2.4 byte-band synth needs the raw sky byte LUT not exposed by MaterialBin — " +
+            "engineering approximation). spec: Docs/RE/formats/environment_bins.md §2.4.");
     }
 
 
@@ -503,11 +506,11 @@ public sealed partial class EnvironmentNode
             var dir = ClientPathResolver.ResolveClientDir();
             if (dir is null) return;
 
-            var path = System.IO.Path.Combine(dir, "DoOption.ini");
-            if (!System.IO.File.Exists(path)) return;
+            var path = Path.Combine(dir, "DoOption.ini");
+            if (!File.Exists(path)) return;
 
             var inSection = false;
-            foreach (var rawLine in System.IO.File.ReadLines(path))
+            foreach (var rawLine in File.ReadLines(path))
             {
                 var line = rawLine.Trim();
                 if (line.StartsWith('['))
@@ -561,7 +564,7 @@ public sealed partial class EnvironmentNode
             var raw = assets.GetRaw(LuaPath);
             if (raw.IsEmpty) return;
 
-            var text = System.Text.Encoding.GetEncoding(949).GetString(raw.Span);
+            var text = Encoding.GetEncoding(949).GetString(raw.Span);
             var glow = ParseLuaScalar(text, "DISPLAY_GLOW_BRIGHT_MULTI");
             var baseMul = ParseLuaScalar(text, "DISPLAY_BASE_BRIGHT_MULTI");
             if (glow is { } g) _glowGlowWeight = g;
@@ -592,8 +595,8 @@ public sealed partial class EnvironmentNode
             if (c >= 0) rhs = rhs[..c].Trim();
             rhs = rhs.TrimEnd(';').Trim();
 
-            if (float.TryParse(rhs, System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out var v))
+            if (float.TryParse(rhs, NumberStyles.Float,
+                    CultureInfo.InvariantCulture, out var v))
                 return v;
         }
 
@@ -668,7 +671,7 @@ public sealed partial class EnvironmentNode
 
             _skyDome.SetSkyTextures(starTex, null);
 
-            _cloudTexCache ??= new System.Collections.Generic.Dictionary<int, ImageTexture?>();
+            _cloudTexCache ??= new Dictionary<int, ImageTexture?>();
             _cloudResolver ??= ResolveCloudTexture;
             _skyDome.SetCloudCycle(_env.CloudCycle, _cloudResolver, _dateBlock);
             GD.Print("[SkyDome] cloud textures now resolved per-tick via cloud_cycle ping-pong (cloud{id}.dds, " +
@@ -694,7 +697,7 @@ public sealed partial class EnvironmentNode
 
     private ImageTexture? ResolveCloudTexture(int id)
     {
-        _cloudTexCache ??= new System.Collections.Generic.Dictionary<int, ImageTexture?>();
+        _cloudTexCache ??= new Dictionary<int, ImageTexture?>();
         if (_cloudTexCache.TryGetValue(id, out var cached)) return cached;
 
         ImageTexture? tex = null;

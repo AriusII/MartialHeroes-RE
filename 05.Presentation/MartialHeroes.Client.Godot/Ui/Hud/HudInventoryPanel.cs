@@ -23,25 +23,25 @@ public sealed partial class HudInventoryPanel : Control
     private const int ActionIdEquipStart = 50;
 
     private const int InvTexId = 2;
+
+    private readonly InventorySlotRecord[] _bagSlots = new InventorySlotRecord[GridCellCount];
     private readonly TextureRect[] _equipCells = new TextureRect[EquipCellCount];
-    private readonly TextureRect[] _equipIcons = new TextureRect[EquipCellCount];
     private readonly Label[] _equipCounts = new Label[EquipCellCount];
+    private readonly TextureRect[] _equipIcons = new TextureRect[EquipCellCount];
+
+    private readonly InventorySlotRecord[] _equipSlots = new InventorySlotRecord[EquipCellCount];
 
 
     private readonly TextureRect[] _gridCells = new TextureRect[GridCellCount];
-    private readonly TextureRect[] _gridIcons = new TextureRect[GridCellCount];
     private readonly Label[] _gridCounts = new Label[GridCellCount];
+    private readonly TextureRect[] _gridIcons = new TextureRect[GridCellCount];
 
 
     private ChannelReader<InventorySlotsChangedEvent>? _invSlots;
 
-    private readonly InventorySlotRecord[] _bagSlots = new InventorySlotRecord[GridCellCount];
-
-    private readonly InventorySlotRecord[] _equipSlots = new InventorySlotRecord[EquipCellCount];
+    private bool _visible;
 
     public Func<uint, Texture2D?>? ItemIconResolver { get; set; }
-
-    private bool _visible;
 
 
     public HudIconLibrary? IconLibrary { get; set; }

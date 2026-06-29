@@ -125,11 +125,6 @@ public sealed partial class CameraController : Camera3D
 
     private const int ViewOptionMax = 3;
 
-    private float _playerFacingYaw;
-
-    private Vector3 _prevPlayerPos = Vector3.Zero;
-    private bool _hasPrevPlayerPos;
-
     private float _elevation = DefaultElevationRad;
 
     private float _elevationRate;
@@ -141,13 +136,16 @@ public sealed partial class CameraController : Camera3D
 
 
     private Vector3 _focus = Vector3.Zero;
+    private bool _hasPrevPlayerPos;
 
-
-    private ViewMode _mode = ViewMode.Third;
 
     private ViewMode _modeBeforeFreeFly = ViewMode.Third;
 
     private bool _mouseCaptured;
+
+    private float _playerFacingYaw;
+
+    private Vector3 _prevPlayerPos = Vector3.Zero;
 
     private bool _rightMouseHeld;
 
@@ -166,9 +164,9 @@ public sealed partial class CameraController : Camera3D
 
     public Vector3 PlayerGodotPosition { get; set; } = Vector3.Zero;
 
-    public ViewMode CurrentMode => _mode;
+    public ViewMode CurrentMode { get; private set; } = ViewMode.Third;
 
-    public bool IsGameplayView => _mode is ViewMode.Third or ViewMode.First or ViewMode.Static;
+    public bool IsGameplayView => CurrentMode is ViewMode.Third or ViewMode.First or ViewMode.Static;
 
 
     public override void _Ready()
@@ -181,7 +179,7 @@ public sealed partial class CameraController : Camera3D
         _elevation = DefaultElevationRad;
         _yaw = 0f;
 
-        _mode = LoadPersistedView();
+        CurrentMode = LoadPersistedView();
 
         ApplyCurrentModeTransform();
 
@@ -191,7 +189,7 @@ public sealed partial class CameraController : Camera3D
             $"radius={OrbitRadius:F1}u | elev_default={Mathf.RadToDeg(DefaultElevationRad):F1}deg | " +
             $"elev_clamp=[{Mathf.RadToDeg(ElevationMinRad):F0}deg,{Mathf.RadToDeg(ElevationMaxRad):F0}deg] | " +
             $"yaw_clamp_third=[{Mathf.RadToDeg(YawMin):F1}deg,{Mathf.RadToDeg(YawMaxThird):F1}deg ({YawMaxThird:F4}rad)] | " +
-            $"mode={_mode} (OPTION_VIEW_CHAR persisted 1..3) | " +
+            $"mode={CurrentMode} (OPTION_VIEW_CHAR persisted 1..3) | " +
             "RMB=orbit wheel=elevation ESC=reset-to-Third SelectView()=view-menu Tab=devFreeFly. " +
             "spec: Docs/RE/specs/camera_movement.md §A.2.2/§A.8.");
     }
@@ -213,18 +211,18 @@ public sealed partial class CameraController : Camera3D
         _elevationRate = 0f;
         ApplyThirdPersonTransform();
 
-        GD.Print($"[Camera] Configure: focus={focus}, mode={_mode}, radius={OrbitRadius:F1}u.");
+        GD.Print($"[Camera] Configure: focus={focus}, mode={CurrentMode}, radius={OrbitRadius:F1}u.");
     }
 
     public void SetViewMode(ViewMode newMode)
     {
-        if (_mode == newMode) return;
+        if (CurrentMode == newMode) return;
 
         if (newMode == ViewMode.FreeFly)
         {
-            _modeBeforeFreeFly = _mode == ViewMode.FreeFly ? ViewMode.Third : _mode;
+            _modeBeforeFreeFly = CurrentMode == ViewMode.FreeFly ? ViewMode.Third : CurrentMode;
             SyncFlyAnglesFromCurrentBasis();
-            _mode = ViewMode.FreeFly;
+            CurrentMode = ViewMode.FreeFly;
             GD.Print("[Camera] Entered DEVELOPER FREE-FLY (non-original). Tab to return.");
         }
         else
@@ -232,10 +230,10 @@ public sealed partial class CameraController : Camera3D
             ReleaseMouse();
             _rightMouseHeld = false;
 
-            if (_mode == ViewMode.FreeFly)
+            if (CurrentMode == ViewMode.FreeFly)
                 _focus = PlayerGodotPosition;
 
-            _mode = newMode;
+            CurrentMode = newMode;
             ApplyCurrentModeTransform();
             PersistView(newMode);
             GD.Print($"[Camera] Switched to {newMode}.");
@@ -263,7 +261,7 @@ public sealed partial class CameraController : Camera3D
         if (err != Error.Ok)
             return ViewMode.Third;
 
-        var raw = (int)config.GetValue(ViewOptionSection, ViewOptionKey, ViewOptionMin).AsInt32();
+        var raw = config.GetValue(ViewOptionSection, ViewOptionKey, ViewOptionMin).AsInt32();
         var clamped = Math.Clamp(raw, ViewOptionMin, ViewOptionMax);
         return (ViewMode)clamped;
     }

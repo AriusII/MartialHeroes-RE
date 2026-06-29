@@ -6,7 +6,8 @@ public sealed class ItemSlotTable
 
     public ItemSlotTable(int capacity)
     {
-        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity), "Capacity must be greater than zero.");
+        if (capacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(capacity), "Capacity must be greater than zero.");
 
         _slots = new ItemSlotRecord[capacity];
     }

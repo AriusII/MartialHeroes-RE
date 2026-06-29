@@ -6,7 +6,8 @@ public sealed class QuickUseTable
 
     public QuickUseTable(int slotCount)
     {
-        if (slotCount <= 0) throw new ArgumentOutOfRangeException(nameof(slotCount), "Slot count must be greater than zero.");
+        if (slotCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(slotCount), "Slot count must be greater than zero.");
 
         _slots = new QuickUseSlot[slotCount];
     }

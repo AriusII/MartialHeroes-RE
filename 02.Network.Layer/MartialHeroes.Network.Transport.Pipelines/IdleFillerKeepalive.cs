@@ -11,9 +11,9 @@ public sealed class IdleFillerKeepalive
     private readonly Func<bool>? _isSendInFlight;
     private readonly IOutboundPacketSink _outbound;
     private readonly SessionId _sessionId;
+    private volatile bool _enabled;
 
     private long _lastFillMs = long.MinValue;
-    private volatile bool _enabled;
 
     public IdleFillerKeepalive(
         IOutboundPacketSink outbound,
@@ -29,11 +29,20 @@ public sealed class IdleFillerKeepalive
 
     public bool IsEnabled => _enabled;
 
-    public void Enable() => _enabled = true;
+    public void Enable()
+    {
+        _enabled = true;
+    }
 
-    public void Disable() => _enabled = false;
+    public void Disable()
+    {
+        _enabled = false;
+    }
 
-    public void NotifyActivity(long nowMs) => Volatile.Write(ref _lastFillMs, nowMs);
+    public void NotifyActivity(long nowMs)
+    {
+        Volatile.Write(ref _lastFillMs, nowMs);
+    }
 
     public ValueTask Tick(long nowMs, CancellationToken cancellationToken = default)
     {

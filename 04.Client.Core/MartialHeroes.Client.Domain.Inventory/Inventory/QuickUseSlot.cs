@@ -7,7 +7,7 @@ public readonly struct QuickUseSlot
 {
     public const int WireSize = 8;
 
-    public static readonly QuickUseSlot Empty = default;
+    public static readonly QuickUseSlot Empty;
 
     public readonly uint Occupancy;
 

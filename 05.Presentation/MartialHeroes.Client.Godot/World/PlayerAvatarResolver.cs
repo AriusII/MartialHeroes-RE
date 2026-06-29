@@ -12,8 +12,16 @@ namespace MartialHeroes.Client.Godot.World;
 
 internal static class PlayerAvatarResolver
 {
+    private const string UserJointPath = "data/char/userjoint.txt";
+    private const int UserJointColumnBase = 902;
+    private const int UserJointRowStride = 4;
+    private const int UserJointMaxRows = 41;
+    private const int UserJointColumns = 4;
     private static Dictionary<int, string>? _idBToSknPath;
     private static RealClientAssets? _idBCacheOwner;
+
+    private static int[]? _userJointTable;
+    private static RealClientAssets? _userJointOwner;
     public static CharacterVisualCatalogue? CharacterVisuals { get; set; }
 
     public static ItemScaleCatalogue? ItemScales { get; set; }
@@ -193,15 +201,6 @@ internal static class PlayerAvatarResolver
         var entry = registry.ActorMotion.GetByMotionKey((uint)appearanceKey);
         return entry?.IdleMotionId ?? 0;
     }
-
-    private const string UserJointPath = "data/char/userjoint.txt";
-    private const int UserJointColumnBase = 902;
-    private const int UserJointRowStride = 4;
-    private const int UserJointMaxRows = 41;
-    private const int UserJointColumns = 4;
-
-    private static int[]? _userJointTable;
-    private static RealClientAssets? _userJointOwner;
 
     private static IReadOnlyList<int>? LoadUserJointTable(RealClientAssets assets)
     {

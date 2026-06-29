@@ -9,7 +9,7 @@ public sealed partial class CameraController
         switch (@event)
         {
             case InputEventKey { Pressed: true } key when key.Keycode is Key.Tab:
-                if (_mode == ViewMode.FreeFly)
+                if (CurrentMode == ViewMode.FreeFly)
                     SetViewMode(_modeBeforeFreeFly);
                 else
                     SetViewMode(ViewMode.FreeFly);
@@ -17,12 +17,12 @@ public sealed partial class CameraController
                 break;
 
             case InputEventKey { Pressed: true } esc when esc.Keycode is Key.Escape:
-                if (_mode == ViewMode.FreeFly && _mouseCaptured)
+                if (CurrentMode == ViewMode.FreeFly && _mouseCaptured)
                 {
                     ReleaseMouse();
                     GetViewport().SetInputAsHandled();
                 }
-                else if (_mode != ViewMode.Third)
+                else if (CurrentMode != ViewMode.Third)
                 {
                     SetViewMode(ViewMode.Third);
                     GetViewport().SetInputAsHandled();
@@ -32,16 +32,16 @@ public sealed partial class CameraController
 
             case InputEventMouseButton mb when mb.ButtonIndex == MouseButton.Right:
                 _rightMouseHeld = mb.Pressed;
-                if (mb.Pressed && _mode == ViewMode.FreeFly)
+                if (mb.Pressed && CurrentMode == ViewMode.FreeFly)
                     CaptureMouse();
-                else if (!mb.Pressed && _mode == ViewMode.FreeFly)
+                else if (!mb.Pressed && CurrentMode == ViewMode.FreeFly)
                     ReleaseMouse();
                 GetViewport().SetInputAsHandled();
                 break;
 
             case InputEventMouseButton mb
                 when mb.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown && mb.Pressed:
-                if (_mode != ViewMode.FreeFly)
+                if (CurrentMode != ViewMode.FreeFly)
                 {
                     var sign = (mb.ButtonIndex == MouseButton.WheelUp ? 1f : -1f) * ElevationKeyPolarity;
                     _elevationRate += sign * WheelZoomScale;
@@ -73,7 +73,7 @@ public sealed partial class CameraController
         var rel = motion.Relative;
         if (rel == Vector2.Zero) return;
 
-        if (_mode == ViewMode.FreeFly)
+        if (CurrentMode == ViewMode.FreeFly)
         {
             if (_rightMouseHeld || _mouseCaptured)
             {
@@ -88,7 +88,7 @@ public sealed partial class CameraController
 
         if (!_rightMouseHeld) return;
 
-        if (_mode != ViewMode.Static)
+        if (CurrentMode != ViewMode.Static)
         {
             _yaw += rel.X * FlyMouseSensitivity;
             ApplyYawClamp();

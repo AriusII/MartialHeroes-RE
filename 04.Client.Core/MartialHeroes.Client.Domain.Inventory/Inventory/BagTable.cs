@@ -10,13 +10,13 @@ public sealed class BagTable
 
     private readonly ItemSlotRecord[] _slots = new ItemSlotRecord[HardCap];
 
-    private int _bagCount;
-
-    public int BagCount => _bagCount;
+    public int BagCount { get; private set; }
 
     public int Capacity => HardCap;
 
-    public int ActiveSize => ComputeActiveSize(_bagCount);
+    public int ActiveSize => ComputeActiveSize(BagCount);
+
+    public ItemSlotRecord this[int index] => (uint)index < HardCap ? _slots[index] : ItemSlotRecord.Empty;
 
     public static int ComputeActiveSize(int bagCount)
     {
@@ -30,10 +30,8 @@ public sealed class BagTable
     {
         if (bagCount < 0) throw new ArgumentOutOfRangeException(nameof(bagCount));
 
-        _bagCount = bagCount;
+        BagCount = bagCount;
     }
-
-    public ItemSlotRecord this[int index] => (uint)index < (uint)HardCap ? _slots[index] : ItemSlotRecord.Empty;
 
     public bool IsEmpty(int index)
     {

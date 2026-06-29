@@ -18,42 +18,42 @@ public sealed class QuestLog
 
     public byte PanelC { get; private set; }
 
-    public QuestLogEntry this[int index] => (uint)index < (uint)EntryCount ? _entries[index] : QuestLogEntry.Empty;
+    public QuestLogEntry this[int index] => (uint)index < EntryCount ? _entries[index] : QuestLogEntry.Empty;
 
     public byte SlotAFlag(int index)
     {
-        return (uint)index < (uint)FlagTableCount ? _slotAFlags[index] : (byte)0;
+        return (uint)index < FlagTableCount ? _slotAFlags[index] : (byte)0;
     }
 
     public byte SlotBFlag(int index)
     {
-        return (uint)index < (uint)FlagTableCount ? _slotBFlags[index] : (byte)0;
+        return (uint)index < FlagTableCount ? _slotBFlags[index] : (byte)0;
     }
 
     public void SetEntry(int index, in QuestLogEntry entry)
     {
-        if ((uint)index >= (uint)EntryCount) throw new ArgumentOutOfRangeException(nameof(index));
+        if ((uint)index >= EntryCount) throw new ArgumentOutOfRangeException(nameof(index));
 
         _entries[index] = entry;
     }
 
     public void SetState(int index, QuestProgressState state)
     {
-        if ((uint)index >= (uint)EntryCount) throw new ArgumentOutOfRangeException(nameof(index));
+        if ((uint)index >= EntryCount) throw new ArgumentOutOfRangeException(nameof(index));
 
         _entries[index] = _entries[index] with { State = state };
     }
 
     public void SetSlotAFlag(int index, byte value)
     {
-        if ((uint)index >= (uint)FlagTableCount) throw new ArgumentOutOfRangeException(nameof(index));
+        if ((uint)index >= FlagTableCount) throw new ArgumentOutOfRangeException(nameof(index));
 
         _slotAFlags[index] = value;
     }
 
     public void SetSlotBFlag(int index, byte value)
     {
-        if ((uint)index >= (uint)FlagTableCount) throw new ArgumentOutOfRangeException(nameof(index));
+        if ((uint)index >= FlagTableCount) throw new ArgumentOutOfRangeException(nameof(index));
 
         _slotBFlags[index] = value;
     }
@@ -80,14 +80,12 @@ public sealed class QuestLog
     public bool TryFindByQuestId(uint questId, out QuestLogEntry entry, out int index)
     {
         for (var i = 0; i < EntryCount; i++)
-        {
             if (_entries[i].QuestId == questId)
             {
                 entry = _entries[i];
                 index = i;
                 return true;
             }
-        }
 
         entry = QuestLogEntry.Empty;
         index = -1;

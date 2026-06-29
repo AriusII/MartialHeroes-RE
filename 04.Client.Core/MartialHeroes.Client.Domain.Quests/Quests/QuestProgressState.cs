@@ -7,5 +7,5 @@ public enum QuestProgressState : byte
     Active = 2,
     Completable = 3,
     Granted = 4,
-    Denied = 5,
+    Denied = 5
 }

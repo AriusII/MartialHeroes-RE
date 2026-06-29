@@ -1,3 +1,4 @@
+using System.Globalization;
 using Godot;
 using MartialHeroes.Assets.Parsers.Terrain.Models;
 
@@ -31,15 +32,17 @@ public sealed partial class RealWorldRenderer
                      "spec: Docs/RE/specs/effect-scheduling.md (ambient scheduler; self-drives in _Process).");
         }
 
-        GD.Print($"[Water] map_option*.bin carries no water data (water.md RESOLVED-NEGATIVE — no water renderer, geometry, or asset loader exists in doida.exe). " +
-                 $"Water placement is oracle-gated and OFF by default. " +
-                 $"Populate res://water_oracle.cfg with 'areaId,mapX,mapZ,Y' lines (one per cell) to enable water per maintainer visual review.");
+        GD.Print(
+            $"[Water] map_option*.bin carries no water data (water.md RESOLVED-NEGATIVE — no water renderer, geometry, or asset loader exists in doida.exe). " +
+            $"Water placement is oracle-gated and OFF by default. " +
+            $"Populate res://water_oracle.cfg with 'areaId,mapX,mapZ,Y' lines (one per cell) to enable water per maintainer visual review.");
 
         var waterEntry = ReadWaterOracle(TargetAreaId, TargetMapX, TargetMapZ);
 
         if (!waterEntry.Enabled)
         {
-            GD.Print($"[Water] area={TargetAreaId} cell=({TargetMapX},{TargetMapZ}) not in water_oracle.cfg — no water plane rendered (faithful default: area is dry).");
+            GD.Print(
+                $"[Water] area={TargetAreaId} cell=({TargetMapX},{TargetMapZ}) not in water_oracle.cfg — no water plane rendered (faithful default: area is dry).");
             return;
         }
 
@@ -76,8 +79,8 @@ public sealed partial class RealWorldRenderer
                 if (!int.TryParse(parts[1].Trim(), out var ox)) continue;
                 if (!int.TryParse(parts[2].Trim(), out var oz)) continue;
                 if (!float.TryParse(parts[3].Trim(),
-                        System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture,
+                        NumberStyles.Float,
+                        CultureInfo.InvariantCulture,
                         out var oy)) continue;
                 if (oa == areaId && ox == mapX && oz == mapZ)
                     return new WaterPlacement(true, oy);

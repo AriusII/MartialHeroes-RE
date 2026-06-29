@@ -7,6 +7,8 @@ namespace MartialHeroes.Client.Application.Handlers;
 
 public sealed partial class GamePacketHandler
 {
+    private const int PartyRosterStoreCount = 8;
+
     public void Handle(in SmsgPartyRosterEvent packet)
     {
         _eventBus.Publish(new PartyRosterEvent(packet.Event, packet.MemberSlot));
@@ -43,8 +45,6 @@ public sealed partial class GamePacketHandler
         _eventBus.Publish(new PartyMemberRemovedEvent(
             packet.RequesterId, packet.Submode, removedId, builder.MoveToImmutable()));
     }
-
-    private const int PartyRosterStoreCount = 8;
 
     private bool HandlePartyInviteState(ReadOnlySpan<byte> payload)
     {

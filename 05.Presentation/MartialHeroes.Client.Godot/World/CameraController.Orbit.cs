@@ -54,7 +54,7 @@ public sealed partial class CameraController
 
     private void ApplyYawClamp()
     {
-        var yawMax = _mode == ViewMode.Third ? YawMaxThird : YawMaxSymmetric;
+        var yawMax = CurrentMode == ViewMode.Third ? YawMaxThird : YawMaxSymmetric;
         _yaw = Mathf.Clamp(_yaw, YawMin, yawMax);
     }
 

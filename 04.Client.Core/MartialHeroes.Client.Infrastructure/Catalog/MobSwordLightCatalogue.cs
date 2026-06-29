@@ -6,8 +6,8 @@ namespace MartialHeroes.Client.Infrastructure.Catalog;
 
 public sealed class MobSwordLightCatalogue
 {
-    private readonly Dictionary<uint, int> _keyToIndex;
     private readonly SwordLightEntry[] _entries;
+    private readonly Dictionary<uint, int> _keyToIndex;
 
     public MobSwordLightCatalogue(SwordLightEntry[] entries)
     {

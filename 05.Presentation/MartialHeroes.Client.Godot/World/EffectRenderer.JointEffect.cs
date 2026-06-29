@@ -105,7 +105,7 @@ public sealed partial class EffectRenderer
         if (entry.BoneNameMode == 1 && !_jointMode1Noted)
         {
             _jointMode1Noted = true;
-            GD.Print($"[EffectRenderer] SpawnJointEffects: bone_name_mode=1 (AnimCatalog weapon-slot 902..905, " +
+            GD.Print("[EffectRenderer] SpawnJointEffects: bone_name_mode=1 (AnimCatalog weapon-slot 902..905, " +
                      "visual-class mod 40) — slot mapping unavailable here; falling back to explicit bone_id. " +
                      "spec: Docs/RE/formats/effects.md §F.4 (AnimCatalog slot resolve DBG-pending).");
         }
@@ -114,7 +114,7 @@ public sealed partial class EffectRenderer
         var effScale = ResolveBaseScale(entry.EffectId) * (entry.Scale != 0f ? entry.Scale : 1f);
 
         var subEffects = TryLoadXeff(entry.EffectId);
-        SubEffectDesc[] seArr = subEffects ?? [];
+        var seArr = subEffects ?? [];
 
         var meshInstances = new MeshInstance3D?[seArr.Length];
         var simNodes = new GpuParticleSimNode?[seArr.Length];
@@ -123,16 +123,12 @@ public sealed partial class EffectRenderer
         for (var i = 0; i < seArr.Length; i++)
         {
             var se = seArr[i];
-            allTextures[i] = LoadSubEffectTextures(se) ?? System.Array.Empty<ImageTexture?>();
+            allTextures[i] = LoadSubEffectTextures(se) ?? Array.Empty<ImageTexture?>();
 
             if (se.ResourceId >= XeffResourceParticleThreshold)
-            {
                 simNodes[i] = TryBuildParticleSimNode(se.ResourceId, Vector3.Zero);
-            }
             else
-            {
                 meshInstances[i] = BuildSubEffectMesh(se, Vector3.Zero, allTextures[i], 0, effScale);
-            }
         }
 
         var node = new JointBoundEffectNode(skinned, boneId, entry.RotSource, facing, this,
@@ -175,16 +171,16 @@ public sealed partial class EffectRenderer
 
     internal sealed partial class JointBoundEffectNode : Node3D
     {
-        private readonly Node3D _facing;
         private readonly int _boneId;
-        private readonly byte _rotSource;
-        private readonly SkinnedCharacterNode _skinned;
-        private readonly EffectRenderer _renderer;
-        private readonly SubEffectDesc[] _subEffects;
-        private readonly MeshInstance3D?[] _meshInstances;
-        private readonly GpuParticleSimNode?[] _simNodes;
-        private readonly ImageTexture?[][] _textures;
         private readonly float _effScale;
+        private readonly Node3D _facing;
+        private readonly MeshInstance3D?[] _meshInstances;
+        private readonly EffectRenderer _renderer;
+        private readonly byte _rotSource;
+        private readonly GpuParticleSimNode?[] _simNodes;
+        private readonly SkinnedCharacterNode _skinned;
+        private readonly SubEffectDesc[] _subEffects;
+        private readonly ImageTexture?[][] _textures;
         private double _elapsedMs;
 
         internal JointBoundEffectNode(

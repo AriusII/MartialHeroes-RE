@@ -8,8 +8,6 @@ public sealed partial class WaterRenderer : Node3D
 {
     public const float FallbackWaterY = 0f;
 
-    private static readonly StringName TimeParam = "time";
-
     private const string WaterShaderSource = @"
 shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_disabled;
@@ -48,6 +46,8 @@ void fragment() {
     SPECULAR  = 0.8;
 }
 ";
+
+    private static readonly StringName TimeParam = "time";
 
     private Vector3 _centre = Vector3.Zero;
     private bool _configured;

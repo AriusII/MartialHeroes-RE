@@ -1,15 +1,11 @@
-using System.Collections.Generic;
-
 namespace MartialHeroes.Client.Application.Social;
 
 public sealed class RelationStore
 {
-    public readonly record struct RelationSlot(int Field0, int Field1, int Field2, int Field3);
-
     private const int SlotCapacity = 256;
+    private readonly Dictionary<uint, byte> _pairState = new();
 
     private readonly RelationSlot[] _slots = new RelationSlot[SlotCapacity];
-    private readonly Dictionary<uint, byte> _pairState = new();
 
     public void WriteSlot(byte typeIndex, int field0, int field1, int field2, int field3)
     {
@@ -35,4 +31,6 @@ public sealed class RelationStore
     {
         _pairState[actorId] = state;
     }
+
+    public readonly record struct RelationSlot(int Field0, int Field1, int Field2, int Field3);
 }

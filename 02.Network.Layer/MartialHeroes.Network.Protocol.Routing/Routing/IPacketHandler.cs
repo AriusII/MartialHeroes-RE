@@ -208,10 +208,14 @@ public interface IPacketHandler
     void Handle(in SmsgCharActionResult packet);
 
     void Handle(in SmsgLocalPlayerRelationSlot packet)
-        => OnUnhandled(SmsgLocalPlayerRelationSlot.OpcodeId, ReadOnlySpan<byte>.Empty);
+    {
+        OnUnhandled(SmsgLocalPlayerRelationSlot.OpcodeId, ReadOnlySpan<byte>.Empty);
+    }
 
     void Handle(in SmsgRemoteActorRelationPair packet)
-        => OnUnhandled(SmsgRemoteActorRelationPair.OpcodeId, ReadOnlySpan<byte>.Empty);
+    {
+        OnUnhandled(SmsgRemoteActorRelationPair.OpcodeId, ReadOnlySpan<byte>.Empty);
+    }
 
     void OnUnhandled(uint packedOpcode, ReadOnlySpan<byte> payload);
 }

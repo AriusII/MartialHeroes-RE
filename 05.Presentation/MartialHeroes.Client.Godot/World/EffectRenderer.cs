@@ -21,18 +21,11 @@ public sealed partial class EffectRenderer : Node3D
 
     private const string ParticleEmitterEffPath = "data/effect/particle/particleemitter.eff";
 
-    private readonly Dictionary<ActorKey, LiveEffect> _live = new();
-
-
-    public Vector3 LocalPlayerGodotPos { get; set; }
-
-    public bool HasLocalPlayer { get; set; }
-
-    public float CullRadius { get; set; } = TerrainRadiusCap * ProximityRadiusScale;
-
     private const float TerrainRadiusCap = 1000f;
 
     private const float ProximityRadiusScale = 0.8f;
+
+    private readonly Dictionary<ActorKey, LiveEffect> _live = new();
 
 
     private RealClientAssets? _assets;
@@ -51,6 +44,13 @@ public sealed partial class EffectRenderer : Node3D
     private bool _particleEmitterTableAttempted;
 
     private bool _registryBuildAttempted;
+
+
+    public Vector3 LocalPlayerGodotPos { get; set; }
+
+    public bool HasLocalPlayer { get; set; }
+
+    public float CullRadius { get; set; } = TerrainRadiusCap * ProximityRadiusScale;
 
 
     public override void _Ready()
@@ -178,11 +178,9 @@ public sealed partial class EffectRenderer : Node3D
         public Node3D Anchor = null!;
 
         public uint EffectId;
-        public double ElapsedMs;
 
         public float EffectiveScale = 1f;
-
-        public float YOffset;
+        public double ElapsedMs;
 
         public MeshInstance3D?[]? MeshInstances;
 
@@ -191,6 +189,8 @@ public sealed partial class EffectRenderer : Node3D
         public SubEffectDesc[]? SubEffects;
 
         public ImageTexture?[][]? Textures;
+
+        public float YOffset;
     }
 
 
@@ -365,6 +365,7 @@ public sealed partial class EffectRenderer : Node3D
                 {
                     displaySize = rawSize;
                 }
+
                 var qw = MathF.Max(displaySize, 0.01f);
                 var qh = MathF.Max(displaySize, 0.01f);
                 mi.Scale = new Vector3(qw, qh, 1f);

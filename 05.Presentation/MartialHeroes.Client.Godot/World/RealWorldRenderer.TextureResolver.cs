@@ -143,7 +143,8 @@ public sealed partial class RealWorldRenderer
             var tex = cellMap is null ? null : ResolveSectionTextureForCell(cellMap, "TERRAIN", texByte);
             if (tex is not null && !loggedOnce)
             {
-                GD.Print($"[RealWorldRenderer] Terrain texture resolved for byte {texByte} at cell ({mapX},{mapZ}) (area {TargetAreaId}).");
+                GD.Print(
+                    $"[RealWorldRenderer] Terrain texture resolved for byte {texByte} at cell ({mapX},{mapZ}) (area {TargetAreaId}).");
                 loggedOnce = true;
             }
 
@@ -151,6 +152,7 @@ public sealed partial class RealWorldRenderer
             return tex;
         };
 
-        GD.Print($"[RealWorldRenderer] Terrain TextureResolver wired (per-cell .map, 2-hop bgtexture chain) for area {TargetAreaId}.");
+        GD.Print(
+            $"[RealWorldRenderer] Terrain TextureResolver wired (per-cell .map, 2-hop bgtexture chain) for area {TargetAreaId}.");
     }
 }

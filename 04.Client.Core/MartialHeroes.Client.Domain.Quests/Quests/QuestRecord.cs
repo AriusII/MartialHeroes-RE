@@ -76,7 +76,7 @@ public readonly struct QuestRecord
 
     public byte AcceptedFlag(int index)
     {
-        return (uint)index < (uint)AcceptedFlagsBuffer.Length ? AcceptedFlags[index] : (byte)0;
+        return (uint)index < AcceptedFlagsBuffer.Length ? AcceptedFlags[index] : (byte)0;
     }
 
     [InlineArray(6)]

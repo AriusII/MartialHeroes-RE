@@ -23,7 +23,6 @@ public sealed partial class VisualActor : CharacterBody3D
 
 
     private CellCollisionManager? _cellCollisionManager;
-    private TerrainNode? _terrainNode;
     private int _combatAppearanceKey;
 
     private RealClientAssets? _combatAssets;
@@ -49,6 +48,7 @@ public sealed partial class VisualActor : CharacterBody3D
     private Node3D? _skinnedAvatar;
 
     private SkinnedCharacterNode? _skinnedNode;
+    private TerrainNode? _terrainNode;
 
 
     private double _tickDurationSec = 1.0 / GameEngineLoop.DefaultTickRateHz;

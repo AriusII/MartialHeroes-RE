@@ -50,7 +50,8 @@ public sealed partial class GamePacketHandler
             if (actorId == 0u) continue;
 
             var rank = body[GuildMemberRanksOffset + i];
-            var name = DecodeFixedText(body.Slice(GuildMemberNamesOffset + i * GuildMemberNameStride, GuildMemberNameStride));
+            var name = DecodeFixedText(body.Slice(GuildMemberNamesOffset + i * GuildMemberNameStride,
+                GuildMemberNameStride));
             var online = body[GuildMemberOnlineOffset + i];
             var points = BinaryPrimitives.ReadInt32LittleEndian(
                 body.Slice(GuildMemberPointsOffset + i * sizeof(int), sizeof(int)));

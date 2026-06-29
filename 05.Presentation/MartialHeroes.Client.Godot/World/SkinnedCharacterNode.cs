@@ -463,7 +463,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
         if (userJointTable is null || userJointTable.Count == 0)
             return DefaultHandBoneId;
 
-        var row = ((appearanceKey % 40) + 40) % 40;
+        var row = (appearanceKey % 40 + 40) % 40;
         var column = altAttack
             ? offHand ? HandColumnAltOff : HandColumnAltMain
             : offHand

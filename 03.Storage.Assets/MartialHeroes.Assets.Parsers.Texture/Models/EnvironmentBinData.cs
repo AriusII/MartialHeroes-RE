@@ -78,14 +78,6 @@ public sealed class LightBin
 
     public required float[] StarBrightnessCurve { get; init; }
 
-    public static float[] DefaultStarBrightnessCurve()
-    {
-        var curve = new float[KeyframeCount];
-        for (var i = 0; i < KeyframeCount; i++)
-            curve[i] = 1.0f - 0.04f * (i > 24 ? KeyframeCount - i : i);
-        return curve;
-    }
-
     public required BgraColor[] DeviceAmbientKeyframes { get; init; }
 
     public required ReadOnlyMemory<byte> RawSectionE { get; init; }
@@ -107,6 +99,14 @@ public sealed class LightBin
     public required float KeyLightPositionZ { get; init; }
 
     public required ReadOnlyMemory<byte> RawBytes { get; init; }
+
+    public static float[] DefaultStarBrightnessCurve()
+    {
+        var curve = new float[KeyframeCount];
+        for (var i = 0; i < KeyframeCount; i++)
+            curve[i] = 1.0f - 0.04f * (i > 24 ? KeyframeCount - i : i);
+        return curve;
+    }
 }
 
 public sealed class StarDomeBin

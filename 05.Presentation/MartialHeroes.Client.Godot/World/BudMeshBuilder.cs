@@ -104,7 +104,7 @@ public static class BudMeshBuilder
             indices[src + 2] = obj.Indices[src + 1];
         }
 
-        var kind = kindResolver?.Invoke(obj.TexId) ?? (byte)1;
+        var kind = kindResolver?.Invoke(obj.TexId) ?? 1;
         var swaySmall = kind >= 0x0A && kind <= 0x0E;
         var swayLarge = kind >= 0x14 && kind <= 0x18;
         var solidShadow = kind == 0x02;
@@ -292,7 +292,7 @@ public static class BudMeshBuilder
                 else if (vertCount != 8 && v >= 3 && v <= 5)
                     w = secondaryRatio;
 
-                colors[v] = new Color(w, 0f, 0f, 1f);
+                colors[v] = new Color(w, 0f, 0f);
             }
 
             return colors;
@@ -303,7 +303,7 @@ public static class BudMeshBuilder
         {
             var p = obj.Vertices[v].PosY;
             var w = Math.Clamp((p - minY) / height, 0f, 1f);
-            colors[v] = new Color(w, 0f, 0f, 1f);
+            colors[v] = new Color(w, 0f, 0f);
         }
 
         return colors;

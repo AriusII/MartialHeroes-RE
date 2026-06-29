@@ -9,7 +9,7 @@ public sealed partial class CameraController
     {
         var dt = (float)delta;
 
-        if (_mode == ViewMode.FreeFly)
+        if (CurrentMode == ViewMode.FreeFly)
         {
             ProcessFreeFly(dt);
             return;
@@ -19,7 +19,7 @@ public sealed partial class CameraController
 
         UpdatePlayerFacingYaw();
 
-        if (_mode is ViewMode.Gamble or ViewMode.Event)
+        if (CurrentMode is ViewMode.Gamble or ViewMode.Event)
         {
             ApplyCurrentModeTransform();
             return;
@@ -27,15 +27,15 @@ public sealed partial class CameraController
 
 
         var anyKey = false;
-        var friction = _mode == ViewMode.Static ? FrictionStatic : FrictionDefault;
+        var friction = CurrentMode == ViewMode.Static ? FrictionStatic : FrictionDefault;
 
-        if (_mode != ViewMode.Static && global::Godot.Input.IsKeyPressed(Key.Q))
+        if (CurrentMode != ViewMode.Static && global::Godot.Input.IsKeyPressed(Key.Q))
         {
             _yawRate -= KeyboardGain;
             anyKey = true;
         }
 
-        if (_mode != ViewMode.Static && global::Godot.Input.IsKeyPressed(Key.E))
+        if (CurrentMode != ViewMode.Static && global::Godot.Input.IsKeyPressed(Key.E))
         {
             _yawRate += KeyboardGain;
             anyKey = true;
@@ -78,7 +78,7 @@ public sealed partial class CameraController
 
     private void ApplyCurrentModeTransform()
     {
-        switch (_mode)
+        switch (CurrentMode)
         {
             case ViewMode.Third:
                 ApplyThirdPersonTransform();

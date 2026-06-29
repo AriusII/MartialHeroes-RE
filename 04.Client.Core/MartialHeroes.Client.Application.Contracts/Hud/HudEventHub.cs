@@ -15,6 +15,14 @@ public sealed class HudEventHub : IHudEventHub
     private readonly Channel<CombatTextEvent> _combatTexts = CreateBounded<CombatTextEvent>(AppendCapacity);
     private readonly Channel<ExpLevelEvent> _expLevels = CreateBounded<ExpLevelEvent>(LatestWinsCapacity);
 
+    private readonly Channel<InventorySlotsChangedEvent> _inventorySlots =
+        CreateBounded<InventorySlotsChangedEvent>(AppendCapacity);
+
+    private readonly Channel<QuestCompletedEvent> _questCompleted =
+        CreateBounded<QuestCompletedEvent>(AppendCapacity);
+
+    private readonly Channel<QuestLogChangedEvent> _questLog = CreateBounded<QuestLogChangedEvent>(LatestWinsCapacity);
+
     private readonly Channel<StatAllocationView> _statAllocations =
         CreateBounded<StatAllocationView>(LatestWinsCapacity);
 
@@ -22,14 +30,6 @@ public sealed class HudEventHub : IHudEventHub
     private readonly Channel<HudVitalsEvent> _vitals = CreateBounded<HudVitalsEvent>(LatestWinsCapacity);
     private readonly Channel<HudVitalsEvent> _vitalsGauge = CreateBounded<HudVitalsEvent>(LatestWinsCapacity);
     private readonly Channel<ZoneChangedEvent> _zoneChanges = CreateBounded<ZoneChangedEvent>(LatestWinsCapacity);
-
-    private readonly Channel<InventorySlotsChangedEvent> _inventorySlots =
-        CreateBounded<InventorySlotsChangedEvent>(AppendCapacity);
-
-    private readonly Channel<QuestLogChangedEvent> _questLog = CreateBounded<QuestLogChangedEvent>(LatestWinsCapacity);
-
-    private readonly Channel<QuestCompletedEvent> _questCompleted =
-        CreateBounded<QuestCompletedEvent>(AppendCapacity);
 
     public ChannelReader<ExpLevelEvent> ExpLevels => _expLevels.Reader;
 

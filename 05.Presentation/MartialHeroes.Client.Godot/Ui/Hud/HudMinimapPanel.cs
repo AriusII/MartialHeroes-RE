@@ -32,15 +32,15 @@ public sealed partial class HudMinimapPanel : Control
     private HudAtlasLibrary? _atlas;
     private bool _collapsed;
     private int _currentAreaId = 2;
+    private ZoneType _currentZone = ZoneType.Safe;
+    private int _lastBaseCellX = int.MinValue;
+    private int _lastBaseCellZ = int.MinValue;
 
     private Control? _mosaicContainer;
     private Control? _playerBlip;
 
     private float _playerWorldX;
     private float _playerWorldZ;
-    private int _lastBaseCellX = int.MinValue;
-    private int _lastBaseCellZ = int.MinValue;
-    private ZoneType _currentZone = ZoneType.Safe;
     private ChannelReader<ZoneChangedEvent>? _zoneChanges;
 
 
@@ -156,8 +156,9 @@ public sealed partial class HudMinimapPanel : Control
         if (zoneChanged)
         {
             LoadMosaic(_currentAreaId, _playerWorldX, _playerWorldZ);
-            GD.Print($"[HudMinimapPanel] ZoneChanged → zone={_currentZone} (footer-state colour 0=yellow/1=white/2=red). " +
-                     "spec: Docs/RE/specs/minimap.md §conflicts (radar footer colour order).");
+            GD.Print(
+                $"[HudMinimapPanel] ZoneChanged → zone={_currentZone} (footer-state colour 0=yellow/1=white/2=red). " +
+                "spec: Docs/RE/specs/minimap.md §conflicts (radar footer colour order).");
         }
     }
 
@@ -199,8 +200,8 @@ public sealed partial class HudMinimapPanel : Control
         var bodyInset = (MinimapW - BodyInnerSide) / 2f;
         var scaledTile = BodyInnerSide / MosaicDim;
 
-        var fracX = ((worldX + CellBias) % CellSize) / CellSize;
-        var fracZ = ((worldZ + CellBias) % CellSize) / CellSize;
+        var fracX = (worldX + CellBias) % CellSize / CellSize;
+        var fracZ = (worldZ + CellBias) % CellSize / CellSize;
         if (fracX < 0f) fracX += 1f;
         if (fracZ < 0f) fracZ += 1f;
 

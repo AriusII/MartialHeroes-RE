@@ -80,9 +80,10 @@ public static class CelShadeMaterialFactory
             ParseDisplayLua(raw.Span);
             GD.Print("[CelShade] display.lua parsed — per-state DISPLAY_CHAR_BRIGHT_* table (×0.5 halved c0) loaded. " +
                      "spec: Docs/RE/specs/rendering.md §6.7.");
-            GD.Print($"[CelShade] glow config (spec: Docs/RE/specs/rendering.md §6.6): glowMulti={Glow.GlowBrightMulti}, " +
-                     $"baseMulti={Glow.BaseBrightMulti}, range=({Glow.GlowRangeX},{Glow.GlowRangeY}), " +
-                     $"powerShader='{Glow.PowerShader}', framerate={Glow.FrameRate} (fpsVisible={Glow.FpsCounterVisible}).");
+            GD.Print(
+                $"[CelShade] glow config (spec: Docs/RE/specs/rendering.md §6.6): glowMulti={Glow.GlowBrightMulti}, " +
+                $"baseMulti={Glow.BaseBrightMulti}, range=({Glow.GlowRangeX},{Glow.GlowRangeY}), " +
+                $"powerShader='{Glow.PowerShader}', framerate={Glow.FrameRate} (fpsVisible={Glow.FpsCounterVisible}).");
         }
         catch (Exception ex)
         {

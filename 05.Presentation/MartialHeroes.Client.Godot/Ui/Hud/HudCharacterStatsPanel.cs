@@ -27,8 +27,8 @@ public sealed partial class HudCharacterStatsPanel : Control
     private Label _charLevelLabel = null!;
     private Label _charNameLabel = null!;
     private ClientContext? _ctx;
-    private ChannelReader<StatAllocationView>? _statAllocations;
     private ChannelReader<ExpLevelEvent>? _expLevels;
+    private ChannelReader<StatAllocationView>? _statAllocations;
 
 
     private bool _visible;

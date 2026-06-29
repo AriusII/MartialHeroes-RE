@@ -47,7 +47,6 @@ public sealed partial class SkyDomeNode : Node3D
     private CloudCycleRow _activeCycleRow;
     private CloudCycleBin? _cloudCycle;
     private CloudDomeBin? _cloudDome;
-    private ImageTexture? _cloudTexture;
     private MeshInstance3D? _cloudDomeMesh1;
     private MeshInstance3D? _cloudDomeMesh2;
     private ShaderMaterial? _cloudMaterial1;
@@ -55,27 +54,32 @@ public sealed partial class SkyDomeNode : Node3D
 
     private Func<int, ImageTexture?>? _cloudResolver;
     private int _cloudRow;
-    private long _layer1LastF = long.MinValue;
-    private long _layer2LastF = long.MinValue;
+    private ImageTexture? _cloudTexture;
     private ImageTexture? _layer1Current;
+    private long _layer1LastF = long.MinValue;
     private ImageTexture? _layer1Next;
     private ImageTexture? _layer2Current;
+    private long _layer2LastF = long.MinValue;
     private ImageTexture? _layer2Next;
+
+    private MeshInstance3D? _moonBillboard;
+    private bool _moonVisible = true;
 
     private float[]? _starBrightness;
 
-    private MeshInstance3D? _moonBillboard;
+    private StarDomeBin? _starDome;
+    private ShaderMaterial? _starMaterial;
+    private MultiMesh? _starMultiMesh;
+    private MultiMeshInstance3D? _starPoints;
+    private ImageTexture? _starTexture;
     private MeshInstance3D? _sunBillboard;
     private bool _sunVisible = true;
-    private bool _moonVisible = true;
-
-    private StarDomeBin? _starDome;
-    private ImageTexture? _starTexture;
-    private MultiMeshInstance3D? _starPoints;
-    private MultiMesh? _starMultiMesh;
-    private ShaderMaterial? _starMaterial;
 
     private DirectionalLight3D? _trackedDirLight;
+
+    public Vector3 SunGlobalPosition => _sunBillboard is not null ? _sunBillboard.GlobalPosition : Vector3.Zero;
+
+    public bool SunVisible => _sunVisible && _sunBillboard is not null;
 
     public void Build(StarDomeBin? starDome, CloudDomeBin? cloudDome, CloudCycleBin? cloudCycle,
         DirectionalLight3D? dirLight = null)
@@ -120,8 +124,9 @@ public sealed partial class SkyDomeNode : Node3D
             && _moonBillboard?.MaterialOverride is ShaderMaterial moonMat)
         {
             moonMat.SetShaderParameter("albedo_tex", moonTexture);
-            GD.Print("[SkyDome] moon{n}.dds texture applied to MoonBillboard (phase fixed at moon0; no day counter in this node). " +
-                     "spec: Docs/RE/formats/sky.md D.3");
+            GD.Print(
+                "[SkyDome] moon{n}.dds texture applied to MoonBillboard (phase fixed at moon0; no day counter in this node). " +
+                "spec: Docs/RE/formats/sky.md D.3");
         }
     }
 
@@ -131,7 +136,8 @@ public sealed partial class SkyDomeNode : Node3D
         _moonVisible = moon;
         if (_sunBillboard is not null) _sunBillboard.Visible = sun;
         if (_moonBillboard is not null) _moonBillboard.Visible = moon;
-        GD.Print($"[SkyDome] billboard visibility set sun={sun} moon={moon}. spec: Docs/RE/formats/environment_bins.md 1.1 (SUN/MOON gates).");
+        GD.Print(
+            $"[SkyDome] billboard visibility set sun={sun} moon={moon}. spec: Docs/RE/formats/environment_bins.md 1.1 (SUN/MOON gates).");
     }
 
     public void SetSkyTextures(ImageTexture? star, ImageTexture? cloud)
@@ -140,7 +146,8 @@ public sealed partial class SkyDomeNode : Node3D
         {
             _starTexture = star;
             _starMaterial?.SetShaderParameter("star_tex", star);
-            GD.Print("[SkyDome] star.dds texture applied to star point sprites. spec: Docs/RE/formats/sky.md B.1a / 4.3.");
+            GD.Print(
+                "[SkyDome] star.dds texture applied to star point sprites. spec: Docs/RE/formats/sky.md B.1a / 4.3.");
         }
 
         if (cloud is not null)
@@ -150,7 +157,8 @@ public sealed partial class SkyDomeNode : Node3D
             _cloudMaterial1?.SetShaderParameter(CloudTexBParam, cloud);
             _cloudMaterial2?.SetShaderParameter(CloudTexAParam, cloud);
             _cloudMaterial2?.SetShaderParameter(CloudTexBParam, cloud);
-            GD.Print("[SkyDome] cloud fallback texture applied to both layers (overridden per-tick by the ping-pong resolver). spec: Docs/RE/formats/sky.md B.3 / F (UV scroll).");
+            GD.Print(
+                "[SkyDome] cloud fallback texture applied to both layers (overridden per-tick by the ping-pong resolver). spec: Docs/RE/formats/sky.md B.3 / F (UV scroll).");
         }
     }
 
@@ -183,10 +191,6 @@ public sealed partial class SkyDomeNode : Node3D
             : "[SkyDome] star brightness curve null — caller expected to pass LightBin.DefaultStarBrightnessCurve(). " +
               "spec: Docs/RE/formats/sky.md E.2.");
     }
-
-    public Vector3 SunGlobalPosition => _sunBillboard is not null ? _sunBillboard.GlobalPosition : Vector3.Zero;
-
-    public bool SunVisible => _sunVisible && _sunBillboard is not null;
 
     public void UpdateDomes(double clockMs, double delta)
     {
@@ -238,9 +242,9 @@ public sealed partial class SkyDomeNode : Node3D
         {
             var ca = colorsA[Math.Clamp(i, 0, colorsA.Length - 1)];
             var cb = colorsB[Math.Clamp(i, 0, colorsB.Length - 1)];
-            var r = ((ca.R + (cb.R - ca.R) * frac) / 255f) * brightness;
-            var gv = ((ca.G + (cb.G - ca.G) * frac) / 255f) * brightness;
-            var bv = ((ca.B + (cb.B - ca.B) * frac) / 255f) * brightness;
+            var r = (ca.R + (cb.R - ca.R) * frac) / 255f * brightness;
+            var gv = (ca.G + (cb.G - ca.G) * frac) / 255f * brightness;
+            var bv = (ca.B + (cb.B - ca.B) * frac) / 255f * brightness;
             _starMultiMesh.SetInstanceColor(i, new Color(r, gv, bv, alpha));
         }
     }
@@ -343,7 +347,7 @@ public sealed partial class SkyDomeNode : Node3D
 
         var opacity = 0.2126f * tint.R + 0.7152f * tint.G + 0.0722f * tint.B;
 
-        mat.SetShaderParameter(CloudTintParam, new Color(tint.R, tint.G, tint.B, 1f));
+        mat.SetShaderParameter(CloudTintParam, new Color(tint.R, tint.G, tint.B));
         mat.SetShaderParameter(CloudOpacityParam, opacity);
         mat.SetShaderParameter(CloudUvScrollParam, new Vector2(0f, scrollV));
     }
@@ -386,7 +390,8 @@ public sealed partial class SkyDomeNode : Node3D
         };
         AddChild(_starPoints);
 
-        GD.Print($"[SkyDome] StarPoints built: {StarCount} textured point sprites (Fibonacci hemisphere placement is aesthetic; dome tessellation not spec-pinned). spec: Docs/RE/formats/sky.md 4.3.");
+        GD.Print(
+            $"[SkyDome] StarPoints built: {StarCount} textured point sprites (Fibonacci hemisphere placement is aesthetic; dome tessellation not spec-pinned). spec: Docs/RE/formats/sky.md 4.3.");
     }
 
     private void BuildCloudDome()
@@ -585,7 +590,7 @@ public sealed partial class SkyDomeNode : Node3D
         var shader = new Shader { Code = ShaderSrc };
         var mat = new ShaderMaterial { Shader = shader };
         mat.RenderPriority = -127;
-        mat.SetShaderParameter(CloudTintParam, new Color(1f, 1f, 1f, 1f));
+        mat.SetShaderParameter(CloudTintParam, new Color(1f, 1f, 1f));
         mat.SetShaderParameter(CloudOpacityParam, 0f);
         mat.SetShaderParameter(CloudUvScrollParam, new Vector2(0f, 0f));
         mat.SetShaderParameter(CloudBlendParam, 0f);
@@ -791,7 +796,8 @@ public sealed partial class SkyDomeNode : Node3D
             gs += colors[i].G;
             bs += colors[i].B;
         }
+
         var inv = 1f / (colors.Length * 255f);
-        return new Color(rs * inv, gs * inv, bs * inv, 1f);
+        return new Color(rs * inv, gs * inv, bs * inv);
     }
 }

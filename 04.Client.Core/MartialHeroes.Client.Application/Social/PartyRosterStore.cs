@@ -1,5 +1,3 @@
-using System;
-
 namespace MartialHeroes.Client.Application.Social;
 
 public sealed class PartyRosterStore
@@ -20,19 +18,15 @@ public sealed class PartyRosterStore
     public void SetMembers(ReadOnlySpan<uint> members)
     {
         var count = Math.Min(members.Length, MaxMembers);
-        for (var i = 0; i < MaxMembers; i++)
-        {
-            _members[i] = i < count ? members[i] : 0u;
-        }
+        for (var i = 0; i < MaxMembers; i++) _members[i] = i < count ? members[i] : 0u;
     }
 
     public int CountActive()
     {
         var active = 0;
         for (var i = 0; i < MaxMembers; i++)
-        {
-            if (_members[i] != 0u) active++;
-        }
+            if (_members[i] != 0u)
+                active++;
 
         return active;
     }

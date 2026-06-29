@@ -8,13 +8,6 @@ internal static class FxMeshBuilder
 {
     public delegate ImageTexture? FxTextureResolver(int channel, uint texIndex1Based);
 
-    private enum FxBlend
-    {
-        Alpha,
-        Additive,
-        Multiply
-    }
-
     private static bool _blendNoteLogged;
 
     private static FxBlend BlendForChannel(int channel, bool isWater)
@@ -271,5 +264,12 @@ internal static class FxMeshBuilder
 
         mesh.SurfaceSetMaterial(0, mat);
         return mesh;
+    }
+
+    private enum FxBlend
+    {
+        Alpha,
+        Additive,
+        Multiply
     }
 }

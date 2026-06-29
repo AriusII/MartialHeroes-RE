@@ -39,6 +39,7 @@ public sealed partial class HudPlayerStatusPanel : Control
 
     private const int ManifestKey = 4;
     private Control? _condBar;
+    private ChannelReader<ExpLevelEvent>? _expLevels;
 
 
     private Control? _hpFill;
@@ -51,7 +52,6 @@ public sealed partial class HudPlayerStatusPanel : Control
 
 
     private ChannelReader<HudVitalsEvent>? _vitals;
-    private ChannelReader<ExpLevelEvent>? _expLevels;
 
 
     public void Build(HudAtlasLibrary atlas)

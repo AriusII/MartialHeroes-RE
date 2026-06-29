@@ -8,8 +8,8 @@ public sealed class BuffTable
 
     private readonly BuffDebuff[] _slots = new BuffDebuff[SlotCount];
     private readonly BuffPeriodicVisual[] _visuals = new BuffPeriodicVisual[SlotCount];
-    private long _lastTickMs;
     private bool _initialized;
+    private long _lastTickMs;
 
     public ReadOnlySpan<BuffDebuff> Slots => _slots;
 

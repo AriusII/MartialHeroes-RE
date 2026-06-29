@@ -38,7 +38,8 @@ public sealed partial class GamePacketHandler
         Relations.SetPairState(idB, reciprocal);
 
         _eventBus.Publish(new RelationUpdatedEvent(
-            new ActorKey(idA, EntitySort.PlayerCharacter), 0, packet.RelationCode, unchecked((int)idB), 0, 0, 0, false));
+            new ActorKey(idA, EntitySort.PlayerCharacter), 0, packet.RelationCode, unchecked((int)idB), 0, 0, 0,
+            false));
         _eventBus.Publish(new RelationUpdatedEvent(
             new ActorKey(idB, EntitySort.PlayerCharacter), 0, reciprocal, unchecked((int)idA), 0, 0, 0, false));
     }

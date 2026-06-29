@@ -105,9 +105,9 @@ public sealed partial class EffectRenderer
         b = Math.Clamp(b, 0f, 1f);
 
         if (r <= 0f && g <= 0f && b <= 0f)
-            return new Color(1f, 1f, 1f, 1f);
+            return new Color(1f, 1f, 1f);
 
-        return new Color(r, g, b, 1f);
+        return new Color(r, g, b);
     }
 
     private static int ResolveHandBone(int handSelector)
@@ -192,7 +192,7 @@ public sealed partial class EffectRenderer
                 BlendMode = BaseMaterial3D.BlendModeEnum.Add,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
                 VertexColorUseAsAlbedo = true,
-                AlbedoColor = new Color(1f, 1f, 1f, 1f),
+                AlbedoColor = new Color(1f, 1f, 1f),
                 AlbedoTexture = texture,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps
             };
@@ -265,8 +265,8 @@ public sealed partial class EffectRenderer
             {
                 var p = j < _count ? RingPoint(j) : last;
 
-                var prevIdx = j > 0 ? (j - 1 < _count ? j - 1 : _count - 1) : 0;
-                var nextIdx = j + 1 < _count ? j + 1 : (_count > 0 ? _count - 1 : 0);
+                var prevIdx = j > 0 ? j - 1 < _count ? j - 1 : _count - 1 : 0;
+                var nextIdx = j + 1 < _count ? j + 1 : _count > 0 ? _count - 1 : 0;
                 var prev = _count > 0 ? RingPoint(Math.Clamp(prevIdx, 0, _count - 1)) : p;
                 var next = _count > 0 ? RingPoint(Math.Clamp(nextIdx, 0, _count - 1)) : p;
 

@@ -48,12 +48,12 @@ public sealed partial class HudChatPanel : Control
 
     private readonly Queue<(string text, uint argb)> _ring = new(RingCapacity);
     private readonly StringBuilder _sb = new(4096);
+    private int _activeChannel = ChSay;
 
 
     private ChannelReader<ChatLineEvent>? _chatLines;
     private bool _dirty;
     private LineEdit _input = null!;
-    private int _activeChannel = ChSay;
 
 
     private RichTextLabel _log = null!;
@@ -294,11 +294,31 @@ public sealed partial class HudChatPanel : Control
         string? recipient = null;
         var body = line;
 
-        if (TrySplitToken(line, "party", out var rest)) { channel = ChParty; body = rest; }
-        else if (TrySplitToken(line, "guild", out rest)) { channel = ChGuild; body = rest; }
-        else if (TrySplitToken(line, "specialmisia", out rest)) { channel = ChSpecialMisia; body = rest; }
-        else if (TrySplitToken(line, "misia", out rest)) { channel = ChMisia; body = rest; }
-        else if (TrySplitToken(line, "alliance", out rest)) { channel = ChAlliance; body = rest; }
+        if (TrySplitToken(line, "party", out var rest))
+        {
+            channel = ChParty;
+            body = rest;
+        }
+        else if (TrySplitToken(line, "guild", out rest))
+        {
+            channel = ChGuild;
+            body = rest;
+        }
+        else if (TrySplitToken(line, "specialmisia", out rest))
+        {
+            channel = ChSpecialMisia;
+            body = rest;
+        }
+        else if (TrySplitToken(line, "misia", out rest))
+        {
+            channel = ChMisia;
+            body = rest;
+        }
+        else if (TrySplitToken(line, "alliance", out rest))
+        {
+            channel = ChAlliance;
+            body = rest;
+        }
         else if (TrySplitToken(line, "whisper", out rest))
         {
             channel = ChWhisper;

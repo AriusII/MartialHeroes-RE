@@ -12,9 +12,9 @@ public sealed partial class EffectRenderer
 {
     private const string EffectScaleXdbPath = "data/script/effectscale.xdb";
 
-    private EffectScaleTable? _effectScaleTable;
-
     private bool _effectScaleAttempted;
+
+    private EffectScaleTable? _effectScaleTable;
 
     private float ResolveBaseScale(uint effectId)
     {
@@ -28,8 +28,9 @@ public sealed partial class EffectRenderer
                     try
                     {
                         _effectScaleTable = EffectScaleParser.Parse(raw);
-                        GD.Print($"[EffectRenderer] effectscale.xdb loaded: {_effectScaleTable.Records.Count} records. " +
-                                 "spec: Docs/RE/formats/effects.md §D (REPLACE descriptor scale_default at parse).");
+                        GD.Print(
+                            $"[EffectRenderer] effectscale.xdb loaded: {_effectScaleTable.Records.Count} records. " +
+                            "spec: Docs/RE/formats/effects.md §D (REPLACE descriptor scale_default at parse).");
                     }
                     catch (Exception ex)
                     {

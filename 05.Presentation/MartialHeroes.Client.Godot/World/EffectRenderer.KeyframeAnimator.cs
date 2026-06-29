@@ -184,7 +184,7 @@ public sealed partial class EffectRenderer
         if (mesh is null) return;
 
         var isOpaque = se.BlendModeKind == XeffBlendMode.Opaque;
-        var blend = (se.BlendModeKind == XeffBlendMode.Alpha || isOpaque)
+        var blend = se.BlendModeKind == XeffBlendMode.Alpha || isOpaque
             ? BaseMaterial3D.BlendModeEnum.Mix
             : BaseMaterial3D.BlendModeEnum.Add;
         var transparency = isOpaque

@@ -21,10 +21,10 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
 
     private readonly object _keepaliveGate = new();
 
-    private byte[]? _keepaliveFrame;
-
 
     private readonly IConnectionSession _session;
+
+    private byte[]? _keepaliveFrame;
 
     public CryptoOutboundPacketSink(
         IConnectionSession session,

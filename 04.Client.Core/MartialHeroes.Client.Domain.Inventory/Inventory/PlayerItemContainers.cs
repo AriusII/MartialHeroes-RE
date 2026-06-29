@@ -30,7 +30,7 @@ public sealed class PlayerItemContainers
         {
             ItemPanelChunkType.Equipment => Equip.Apply(startIndex, records),
             ItemPanelChunkType.Inventory => Bag.Apply(startIndex, records),
-            _ => 0,
+            _ => 0
         };
     }
 

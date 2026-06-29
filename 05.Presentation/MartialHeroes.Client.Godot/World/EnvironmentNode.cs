@@ -32,28 +32,28 @@ public sealed partial class EnvironmentNode : Node3D
     private readonly int[] _plSelected = new int[PointLightSlots];
     private readonly float[] _plSelectedDistSq = new float[PointLightSlots];
 
-    private RealClientAssets? _assets;
-
     private int _appliedKeyframe = -1;
     private int _areaId;
+
+    private RealClientAssets? _assets;
 
     private bool _bgFallbackLogged;
 
     private DirectionalLight3D? _dirLight;
+
+    private float _displayBaseBrightMulti = 1.05f;
 
     private AreaEnvironment? _env;
 
     private Environment? _environment;
 
     private bool _fallbackDirApplied;
-
-    private float _displayBaseBrightMulti = 1.05f;
     private float _glowGlowWeight = 0.3f;
 
     private bool _hasSunDir;
+    private int _plActiveCount;
 
     private Vector3 _plCachedFocus = new(float.MaxValue, float.MaxValue, float.MaxValue);
-    private int _plActiveCount;
     private int _plFlickerDir = 1;
     private float _plFlickerRamp;
     private Vector3[]? _plGodotPos;

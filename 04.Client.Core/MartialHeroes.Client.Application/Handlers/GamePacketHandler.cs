@@ -9,6 +9,7 @@ using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Domain.Progression.Progression;
+using MartialHeroes.Client.Domain.Skills.Skills;
 using MartialHeroes.Client.Domain.Stats.Stats;
 using MartialHeroes.Network.Protocol.Core;
 using MartialHeroes.Network.Protocol.Core.Opcodes;
@@ -40,11 +41,6 @@ public sealed partial class GamePacketHandler(
 
     private byte[]? _activeFrame;
 
-    public void SetActiveFrame(byte[]? frame)
-    {
-        _activeFrame = frame;
-    }
-
     private ReadOnlySpan<byte> ActivePayload
     {
         get
@@ -60,7 +56,7 @@ public sealed partial class GamePacketHandler(
 
     public Func<SkillId, int>? CooldownDurationResolver { get; init; }
 
-    public Func<SkillId, MartialHeroes.Client.Domain.Skills.Skills.SkillDefinition?>? SkillDefinitionResolver { get; init; }
+    public Func<SkillId, SkillDefinition?>? SkillDefinitionResolver { get; init; }
 
     public ProgressionState Progression { get; private set; }
 
@@ -165,6 +161,11 @@ public sealed partial class GamePacketHandler(
         }
 
         _unhandled.Record();
+    }
+
+    public void SetActiveFrame(byte[]? frame)
+    {
+        _activeFrame = frame;
     }
 
 

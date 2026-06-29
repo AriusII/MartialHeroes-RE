@@ -13,5 +13,5 @@ public enum QuestGateResult
     TertiaryStatFailed,
     SameCategoryActive,
     SameIdActive,
-    PrerequisiteNotMet,
+    PrerequisiteNotMet
 }

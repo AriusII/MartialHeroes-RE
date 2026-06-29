@@ -40,28 +40,28 @@ public sealed partial class HudQuestWindow : Control
 
     private const int AcceptLevelGate = 26;
 
+    private readonly Button[] _activeNameButtons = new Button[ActiveRows];
+    private readonly uint[] _activeRowQuestIds = new uint[ActiveRows];
+
     private int _activeTab;
 
     private Control? _activeTabContent;
     private Control? _availableTabContent;
-    private Control? _completableTabContent;
-    private Control? _detailTabContent;
-
-    private readonly Button[] _activeNameButtons = new Button[ActiveRows];
-    private readonly uint[] _activeRowQuestIds = new uint[ActiveRows];
-    private CheckBox? _trackingCheckbox;
-    private Label? _detailBody;
-
-    private ChannelReader<QuestLogChangedEvent>? _questLog;
-    private ChannelReader<QuestCompletedEvent>? _questCompleted;
-
-    private uint _selectedQuestId;
-    private byte _npcKind;
-    private int _playerLevel;
     private bool _billingBypass;
+    private Control? _completableTabContent;
+    private Label? _detailBody;
+    private Control? _detailTabContent;
+    private byte _npcKind;
 
 
     private bool _open;
+    private int _playerLevel;
+    private ChannelReader<QuestCompletedEvent>? _questCompleted;
+
+    private ChannelReader<QuestLogChangedEvent>? _questLog;
+
+    private uint _selectedQuestId;
+    private CheckBox? _trackingCheckbox;
     private bool _trackingEnabled;
 
 
@@ -395,8 +395,9 @@ public sealed partial class HudQuestWindow : Control
         if (_trackingCheckbox is not null)
             _trackingCheckbox.ButtonPressed = _trackingEnabled;
 
-        GD.Print($"[HudQuestWindow] QuestLogChangedEvent applied: {ev.Entries.Length} entries, tracking={ev.TrackingFlag}. " +
-                 "spec: Docs/RE/specs/quests.md §6.1 (20 ids+names, tracking flag).");
+        GD.Print(
+            $"[HudQuestWindow] QuestLogChangedEvent applied: {ev.Entries.Length} entries, tracking={ev.TrackingFlag}. " +
+            "spec: Docs/RE/specs/quests.md §6.1 (20 ids+names, tracking flag).");
     }
 
     private void ApplyQuestCompleted(QuestCompletedEvent ev)

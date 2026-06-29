@@ -1,9 +1,7 @@
 using Godot;
 using MartialHeroes.Client.Application.Input;
 using MartialHeroes.Client.Godot.Autoload;
-using MartialHeroes.Client.Presentation.Helpers;
 using MartialHeroes.Shared.Kernel.Enums;
-using MartialHeroes.Shared.Kernel.Numerics;
 using GodotInputMap = Godot.InputMap;
 using GodotInput = Godot.Input;
 using AppMouseButton = MartialHeroes.Client.Application.Input.MouseButton;

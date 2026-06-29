@@ -149,7 +149,7 @@ public sealed partial class InputRouter
             return;
         }
 
-        var now = global::Godot.Time.GetTicksMsec();
+        var now = Time.GetTicksMsec();
         if (now - _lastMoveIssueMs < ClickReissueThrottleMs) return;
 
         if (!TryGroundPlanePick(screenX, screenY, out var tgtX, out var tgtZ, out var godotHit)) return;
@@ -211,7 +211,7 @@ public sealed partial class InputRouter
             return;
         }
 
-        var now = global::Godot.Time.GetTicksMsec();
+        var now = Time.GetTicksMsec();
         if (now - _lastHeartbeatMs < MoveHeartbeatMs) return;
         _lastHeartbeatMs = now;
 
@@ -223,7 +223,8 @@ public sealed partial class InputRouter
                  "spec: Docs/RE/specs/camera_movement.md §B.1.2.");
     }
 
-    private bool TryGroundPlanePick(int screenX, int screenY, out float legacyX, out float legacyZ, out Vector3 godotHit)
+    private bool TryGroundPlanePick(int screenX, int screenY, out float legacyX, out float legacyZ,
+        out Vector3 godotHit)
     {
         legacyX = 0f;
         legacyZ = 0f;

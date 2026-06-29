@@ -11,7 +11,7 @@ public readonly struct ItemSlotRecord
 
     public const byte EmptyMarker = 0xFF;
 
-    public static readonly ItemSlotRecord Empty = default;
+    public static readonly ItemSlotRecord Empty;
 
     public readonly byte FlagsA;
 
