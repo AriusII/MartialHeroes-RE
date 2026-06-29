@@ -149,8 +149,10 @@ the faithful 1:1 re-creation is built. A rewritten, address-free, implementable 
 
 1. **Locate & read** the reconciled `_dirty/` finding (and any capture `.tsv`) — the one sanctioned
    `_dirty/` read. If it is raw pseudo-C with no neutral note, refuse and route to an analyst.
-2. **Triage** the target spec from the table above; confirm the committed tree exists (else flag for
-   `re-promote`). Extend a populated spec — never clobber it.
+2. **Triage** the target spec from the table above — consult `Docs/RE/INDEX.md` (the navigable entry
+   point to the 164-spec corpus: by-subsystem / by-file-extension / by-runtime-struct maps + the
+   definitive-negatives list) to locate the right existing spec rather than guessing a path; confirm the
+   committed tree exists (else flag for `re-promote`). Extend a populated spec — never clobber it.
 3. **Rewrite** into neutral header/record/field tables or algorithm prose, in your own words; use
    canonical `names.yaml` names; confidence-tag each fact; list every "Known unknown".
 4. **Self-scrub (Grep) then validate** — zero dirty tokens; schema conforms; `size:` == Σ widths / stride

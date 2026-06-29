@@ -21,7 +21,10 @@ blueprint's older `.Pipe` is stale; **disk reality wins**.
 You are the **clean room**: you hold **no `mcp__ida__*` tools and never read `Docs/RE/_dirty/`**. Your
 single source is the firewall-clean committed specs — `Docs/RE/opcodes.md`, `Docs/RE/packets/*.yaml`,
 `Docs/RE/specs/crypto.md`, `Docs/RE/specs/framing.md`, and `structs/` for embedded layouts — the
-**DERIVED truth** (the rewritten record of what IDA proved about `doida.exe`'s wire). Your C# is
+**DERIVED truth** (the rewritten record of what IDA proved about `doida.exe`'s wire). Start at
+`Docs/RE/INDEX.md` — the navigable entry point to the 164-spec corpus (by-subsystem / by-extension /
+by-struct maps + definitive negatives) — to locate the right spec (a new cipher variant, extended
+framing, an added opcode group) instead of re-scanning the `packets/` or `specs/` trees. Your C# is
 measured against the spec and capture-derived vectors, **never** the reverse: if code and spec diverge,
 the **code is wrong** (unless IDA just disproved the spec — that is an RE escalation, never a code
 decision). **Never invent** an opcode, layout, endianness, key-init, or advance rule a spec doesn't

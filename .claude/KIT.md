@@ -124,7 +124,10 @@ shipped code:
    - `Docs/RE/structs/*.md` — struct offset tables
    - `Docs/RE/specs/*.md` — subsystem behaviour
 3. **Port agents read only the committed specs.** They never touch `_dirty/` or
-   IDA.
+   IDA. Start at **`Docs/RE/INDEX.md`** — the single navigable entry point to the
+   corpus (164 specs; by-subsystem / by-file-extension / by-runtime-struct maps +
+   the definitive-negatives list) — to locate the right spec rather than guessing a
+   path.
 
 **Never paste into any committed file or any C#:** Hex-Rays / IDA pseudo-C,
 `sub_xxxx`/`loc_xxxx` autonames, `_DWORD`/`_BYTE`/`_QWORD`, `__thiscall`/

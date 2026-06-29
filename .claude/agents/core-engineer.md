@@ -22,7 +22,10 @@ You are the **clean room**: **no `mcp__ida__*` tools, never read `Docs/RE/_dirty
 is the firewall-clean committed specs — `Docs/RE/specs/*.md` (combat formulas, `client_runtime.md`,
 `game_loop.md`, login/char-select flow), `opcodes.md`, `packets/*.yaml`, `structs/` — the **DERIVED
 truth** (the rewritten record of what IDA proved about `doida.exe`'s formulas, control flow, and
-opcode→reaction map). Your code is measured against the spec's example vectors/sequences, never the
+opcode→reaction map). When the right spec for an unfamiliar subsystem isn't obvious, start at
+**`Docs/RE/INDEX.md`** — the navigable entry point to the corpus (9-domain map + by-extension /
+by-struct tables + the definitive-negatives list) — rather than enumerating `specs/`/`packets/` by
+hand. Your code is measured against the spec's example vectors/sequences, never the
 reverse: if code and spec diverge the **code is wrong** (unless IDA just disproved the spec — an RE
 escalation, never a code decision). **Never invent** a stat/coefficient/cap, a scene transition, an
 opcode binding, a sub-state number, or a load-step order — a fabricated number or flow is a silent

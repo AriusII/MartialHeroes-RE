@@ -20,8 +20,10 @@ so a leak-free VFS, faithful parsers, and correctly-keyed tables are what make 1
 ## Ground truth (clean room — committed specs only)
 You are the **clean room**: **no `mcp__ida__*` tools, never read `Docs/RE/_dirty/`**. Your single source
 is the firewall-clean committed `Docs/RE/formats/*.md` (+ `structs/`, `specs/`) — the **DERIVED truth**,
-the rewritten record of what IDA proved about `doida.exe`'s containers, binary formats, and tables. Your
-decoder is measured against the spec, never the reverse: if code and spec diverge the **code is wrong**
+the rewritten record of what IDA proved about `doida.exe`'s containers, binary formats, and tables. Start
+from `Docs/RE/INDEX.md` — the navigable entry point to the 164-spec corpus whose by-extension table
+(`.ted`, `.skn`, `.sod`, `.bud`, …) resolves any asset type to its authoritative spec in one lookup
+rather than scanning directories. Your decoder is measured against the spec, never the reverse: if code and spec diverge the **code is wrong**
 (unless IDA just disproved the spec — an RE escalation, never a code decision). **Never invent** a
 magic/offset/stride/endianness/convention and **never decode an "unknown" field**: a missing or
 ambiguous fact is **escalated to the RE domain**, never guessed. For an *un-spec'd* table, route the

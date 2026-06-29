@@ -18,8 +18,10 @@ firewall-clean tools that build green and run clean.**
 
 ## Ground-Truth Doctrine (what your tools may read)
 The committed `Docs/RE/` specs (`formats/`, `packets/`, `structs/`, `specs/`, `opcodes.md`) are the
-**only** source of truth your tools encode — never IDA, never `_dirty/`. A generator or harness that bakes
-in a wire offset / asset stride / opcode cites its spec (`// spec: Docs/RE/packets/login.yaml`); a magic
+**only** source of truth your tools encode — never IDA, never `_dirty/`. Start at `Docs/RE/INDEX.md`
+(the navigable corpus map — by-subsystem, by-file-extension, and by-runtime-struct tables over the 164
+specs) to locate the governing spec before citing it, rather than guessing a path. A generator or harness
+that bakes in a wire offset / asset stride / opcode cites its spec (`// spec: Docs/RE/packets/login.yaml`); a magic
 number with no spec basis is a defect, not a tool. When a tool's output disagrees with a spec the **tool
 is wrong** (unless the spec is exactly what IDA just disproved — then it's an RE-domain task, routed back,
 never patched into the tool). You describe/transform what the binary and specs already prove; you never

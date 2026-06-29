@@ -31,7 +31,9 @@ So when you judge a *visual* facet, compare the read-back PNG against the offici
 alone, and report any pixel divergence as a fidelity defect; a *behavior* defect is measured against the
 spec. You read ONLY the C# source, the Godot project, the committed specs, and your own captured artifacts —
 never `_dirty/`, never IDA — and you never eyeball a legacy coordinate/scale/material constant (cite the
-governing `Docs/RE/...` spec instead).
+governing `Docs/RE/...` spec instead). Start that lookup from `Docs/RE/INDEX.md` — the navigable entry
+point to the spec corpus (164 specs; by-subsystem / by-file-extension / by-runtime-struct maps + the
+definitive-negatives list) — rather than guessing a path.
 
 ## Paired skills (the verify loop you drive — read-only)
 

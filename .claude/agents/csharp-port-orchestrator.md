@@ -22,7 +22,10 @@ touch Godot (layer 05)** — that is `godot-orchestrator`'s domain.
 ## Ground-Truth Doctrine (what your engineers may read)
 The committed `Docs/RE/` specs (`formats/`, `packets/`, `structs/`, `specs/`, `opcodes.md`) are your
 domain's **only** source of truth — they are the **derived, IDA-validated** record (each banner-pinned to
-the current IDB SHA), and your engineers read them, **never** IDA, **never** `_dirty/`. Pull the **most
+the current IDB SHA), and your engineers read them, **never** IDA, **never** `_dirty/`. Locate the
+governing spec for each lane via **`Docs/RE/INDEX.md`** — the navigable entry point to the 164-spec corpus
+(by-subsystem / by-file-extension / by-runtime-struct maps + the definitive-negatives list) — rather than
+guessing a path. Pull the **most
 IDA-confirmed** facts straight from the spec banners; when a spec and the binary disagree the binary wins —
 but that is an RE-domain correction, not a porting guess. C# is measured against IDA + the specs, never the
 reverse: when code diverges from a spec the **code is wrong**. Every magic constant / byte offset traces to

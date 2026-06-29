@@ -55,8 +55,11 @@ numbered layers") and `PRESERVATION_AND_ARCHITECTURE.md`; consult those when a r
 ## Citations & firewall (the Ground-Truth Doctrine)
 
 - **The committed `Docs/RE/` specs are the DERIVED truth** — the rewritten, firewall-clean record of
-  what IDA proved about `doida.exe` — and the **only** thing this code reads. Every layout, stride,
-  opcode, and magic constant here traces back to a spec, which traces back to the binary.
+  what IDA proved about `doida.exe` — and the **only** thing this code reads. Start at
+  `Docs/RE/INDEX.md` — the navigable entry point to the 164-spec corpus (by-extension / by-struct /
+  by-subsystem maps) — to find the right spec for a format, struct, or opcode rather than guessing a
+  path. Every layout, stride, opcode, and magic constant here traces back to a spec, which traces back
+  to the binary.
 - Every magic constant / byte offset cites its source spec inline: `// spec: Docs/RE/formats/terrain.md`.
   An uncited constant is unverified — find its spec or do not write it.
 - **Never invent a missing fact.** If a value is absent, ambiguous, or contradicted by behavior, the

@@ -40,8 +40,10 @@ intake the mandate
 
 Capture the mandate **verbatim** and the "why now". Read the live state to ground it:
 `Docs/PLAN.md` (charter/method), `Docs/ROADMAP.md` (last cycle, resume anchor), the relevant
-`Docs/RE/specs|formats|structs|packets/` and `Docs/RE/opcodes.md`, and `CLAUDE.md` (layers, current
-state, debts). Identify the subsystem family the mandate touches and what evidence already exists.
+specs — start at `Docs/RE/INDEX.md` (the navigable entry point to the 164-spec corpus: by-subsystem /
+by-file-extension / by-runtime-struct maps + the definitive-negatives list) to locate them rather than
+hunting across `Docs/RE/specs|formats|structs|packets/` and `Docs/RE/opcodes.md`, and `CLAUDE.md`
+(layers, current state, debts). Identify the subsystem family the mandate touches and what evidence already exists.
 
 ### Step 2 — REFORMULATE + confirm with the user (the headline)
 
