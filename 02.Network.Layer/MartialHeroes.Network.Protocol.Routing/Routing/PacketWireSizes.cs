@@ -206,6 +206,26 @@ public static class PacketWireSizes
                 size = CmsgKeepaliveToggle.WireSize;
                 isVariableLength = false;
                 return true;
+            case Opcodes.SmsgBillingBalanceUpdate:
+                size = SmsgBillingBalanceUpdate.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgCubeGambleResult:
+                size = SmsgCubeGambleResult.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgCraftingResult:
+                size = SmsgCraftingResult.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgActorDeathState:
+                size = SmsgActorDeathState.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgPvpDeathFx:
+                size = SmsgPvpDeathFx.WireSize;
+                isVariableLength = false;
+                return true;
 
             default:
                 size = 0;

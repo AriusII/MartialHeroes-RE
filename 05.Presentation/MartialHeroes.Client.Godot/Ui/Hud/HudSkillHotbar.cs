@@ -1,5 +1,7 @@
+using System.Threading.Channels;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Events;
+using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -54,6 +56,8 @@ public sealed partial class HudSkillHotbar : Control
 
     private readonly TextureRect[] _slotIcons = new TextureRect[SlotCount];
     private readonly Label[] _slotKeyLabels = new Label[SlotCount];
+
+    private ChannelReader<SkillHotbarSlotSetEvent>? _skillHotbarSlots;
 
 
     public void Build(HudAtlasLibrary atlas, HudIconLibrary icons)
@@ -202,6 +206,33 @@ public sealed partial class HudSkillHotbar : Control
             "TODO(world-campaign): replace with registry-driven slot positions + per-skill overlay values.");
     }
 
+
+    public void BindHub(IHudEventHub hub)
+    {
+        _skillHotbarSlots = hub.SkillHotbarSlots;
+        GD.Print("[HudSkillHotbar] BindHub: SkillHotbarSlots channel connected — live per-slot skill binds " +
+                 "(2/41 SmsgHotbarSlotSet) now reflected on the bar. spec: Docs/RE/specs/ui_system.md §8.21.");
+    }
+
+    public override void _Process(double delta)
+    {
+        if (_skillHotbarSlots is null) return;
+
+        while (_skillHotbarSlots.TryRead(out var ev))
+            if (ev is not null)
+                ApplySlotSet(ev);
+    }
+
+    private void ApplySlotSet(SkillHotbarSlotSetEvent ev)
+    {
+        var slot = ev.HotbarSlot;
+        if (slot >= SlotCount) return;
+
+        if (_slotKeyLabels[slot] is not null)
+            _slotKeyLabels[slot].Text = ev.Skill.Value != 0 ? $"S{ev.Skill.Value}" : $"{slot + 1}";
+
+        SetSlotOverlay(slot, SlotOverlayState.Ready);
+    }
 
     public void OnHotbarInitialized(HotbarInitializedEvent evt)
     {

@@ -1,8 +1,11 @@
 # Anti-Cheat Subsystem — `doida.exe`
 
+> verification: IDA Pro 9.3  
+> ida_anchor: f61f66a9  
+> confidence: CONSUMER-CONFIRMED (triad structure, slot map, singleton orchestration, page-guard cadence — C15-S18 2026-06-30); static-hypothesis where explicitly marked  
+> date: 2026-06-30  
 > Build: `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963`  
-> Analysis: Static, IDA Pro — CYCLE 15  
-> Consolidated: 2026-06-29 — folded `anticheat_core.md` (vtable/destructor correction) and `xtrap_integration.md` (XTrap DLL load, XProc3, telemetry, PE selfcheck) into this master; all folded facts are **static-hypothesis** (unverified at f61f66a9; source: _dirty/ CYCLE 15/17 precursors).
+> Promoted: C15-S18 (2026-06-30) — singleton wiring, base-class fidelity note, page-guard cadence. Folded: `anticheat_core.md` + `xtrap_integration.md` (CYCLE 15/17 precursors; XTrap loader, XProc3, and telemetry sections remain static-hypothesis).
 
 ---
 
@@ -13,7 +16,7 @@ The client integrates a **three-tier anti-cheat architecture**:
 | Layer | Class | Role |
 |-------|-------|------|
 | 1 | `GGGProtect` | Core protection engine — time gating, stack cookies |
-| 2 | `GProtect` | UI panel base class |
+| 2 | `GProtect` | Orchestration base — six vtable check slots (1–6) are no-op return-1 stubs |
 | 3 | `GXProtect` | XTrap SDK integration + logging bridge |
 
 A background monitor thread (`AntiCheat_MonitorThread`) polls every **3 555 ms** for API hook
@@ -37,6 +40,13 @@ type descriptor.
 | `GProtect__ctor` | Installs the `GProtect` vtable |
 | `GProtect__ctor_1` | Thin variant — vtable-write only |
 | `GXProtect__ctor` | Installs the `GXProtect` vtable; calls `GProtect__ctor_1` |
+
+### GProtect — Base Class Slot Behaviour
+
+The six check slots (slots 1–6) of the `GProtect` vtable are all no-op stubs that return the integer 1
+unconditionally. Slot 0 is the virtual deleting destructor. The base class carries no data members of its
+own — the associated protection state (time-gate fields and IAT snapshots) lives in BSS globals, not in
+the 4-byte object body.
 
 ---
 
@@ -73,6 +83,42 @@ vtable-restore step performed on every derived-class destructor, not a factory c
 The overrides previously labelled as panel factory constructors (`GreetPanel`, `LoginPanel`,
 `ServerSelectionPanel`, `OptionPanel_Character`, etc.) are likewise the scalar deleting destructors of
 those same panel classes, which inherit from `GProtect` or `GXProtect`.
+
+---
+
+## Singleton Wiring and Boot Orchestration
+
+> Consumer-confirmed at f61f66a9 (C15-S18).
+
+### Static-Init Construction
+
+A C-runtime static initializer calls a factory that allocates **4 bytes** — exactly one vtable pointer —
+and constructs the **base `GProtect`** object, storing the result into a global protection-singleton slot.
+The base class carries no data members; its associated protection state lives in BSS globals (time-gate
+fields, IAT snapshots). An atexit-style cleanup path invokes the singleton's virtual deleting destructor
+(slot 0) and zeroes the global slot at process exit.
+
+### WinMain Scene-State Pump
+
+The WinMain scene state machine drives the singleton through a family of thin vtable-forwarder thunks at
+scene-state transition boundaries. Each forwarder loads the singleton pointer, loads its vtable, and
+dispatches to the corresponding slot (slots 1–6 are all exposed this way).
+
+At the window/device-init state, **slot 1 is called as a hard boot gate**: if it returns 0 the state
+machine branches to a failure/quit scene and boot does not proceed. Later states call slots 3 and 5.
+
+### Fidelity Note — Base Class Instantiated, Gates Pass Trivially
+
+**The object resident in the protection singleton is the base `GProtect` class, whose slots 1–6 are all
+no-op return-1 stubs.** Every WinMain pump call — including the slot-1 hard boot gate — therefore returns
+1 and passes without any check being performed. The in-band protection orchestration is present in the
+binary but effectively neutralised in the shipped client as statically observed.
+
+The `GGGProtect` (core-engine) and `GXProtect` (XTrap-bridge) override classes are fully compiled with
+distinct vtables, RTTI descriptors, and real slot bodies (including the XTrap registration token). No
+static construction site was found that instantiates either override into the pumped singleton slot.
+Whether either class is constructed via a runtime code path invisible to static analysis is a live-only
+question — see Debugger-Pending Residuals below.
 
 ---
 
@@ -369,6 +415,60 @@ Secondary blob verification:
 2. Compares the 32-byte digest with the secondary blob at `FileSize - 384`.
 3. Mismatch → selfcheck status **7** (signature chain integrity failure).
 4. Both checks pass → file handles and mapping are released; selfcheck returns success.
+
+---
+
+## Secure Auth Context — Page-Guard Cadence
+
+> Consumer-confirmed at f61f66a9 (C15-S18). This cadence belongs to the **secure auth/crypto
+> subsystem**, not to the GXProtect triad.
+
+### Guarded Region
+
+A single **~11 808-byte (0x2E20)** secure auth/crypto context object is held **PAGE_NOACCESS** at rest,
+making it unreadable and unwritable to passive memory scanners and casual debugger reads without kernel
+privilege. The context holds the session's RSA/credential state: imported public-key material (modulus and
+exponent as FLINT bignums), two server scalars, a millisecond timestamp, and a heap pointer to a staged
+credential buffer. Teardown zeroes the full 0x2E20-byte extent and destroys two embedded mutexes near its
+tail.
+
+### Cadence Pattern
+
+Every secure operation wraps its work in an identical bracket:
+
+```
+unlock to read-write  →  perform crypto/auth work  →  relock to no-access
+```
+
+The relock fires on **every** return path, including each early-error exit. The cadence is
+**event-driven and per-operation**: the guard window spans exactly one auth or key-exchange call. There is
+no fixed time interval.
+
+### Operations Protected by the Bracket
+
+| Operation | Triggered by |
+|-----------|-------------|
+| Parse incoming key-exchange message (server-to-client phase 0) | Network receive of handshake packet |
+| Build outgoing login packet | Login submission |
+| Build secure auth reply (client-to-server phase 1) | Auth continuation |
+| Destroy and zero the context | Session teardown (logout or disconnect) |
+
+A separate, unrelated 4-byte code-guard pair toggles a single 4-byte location between read-write and
+execute-read-write protection — a self-modifying-code or function-pointer hotpatch facility; its call
+sites are not further characterised here.
+
+---
+
+## Debugger-Pending Residuals (R-CAP)
+
+The following facts are runtime-only and cannot be settled by static analysis alone. They are
+non-blocking and scoped to the GXProtect triad subsystem.
+
+| Tag | Question | Breakpoint plan |
+|-----|----------|----------------|
+| R-CAP-AC-1 | Is the `GGGProtect` core-engine class ever constructed at runtime (e.g. swapped into the singleton by XTrap)? | Break on `GGGProtect__ctor`; inspect the global singleton slot at each hit. |
+| R-CAP-AC-2 | Is the `GXProtect` XTrap-bridge class ever constructed at runtime? | Break on `GXProtect__ctor`; inspect the global singleton slot at each hit. |
+| R-CAP-AC-3 | Does the XTrap-init slot (slot 1 of the XTrap-bridge vtable) ever execute? | Break on `GXProtect__XTrapInit` during boot; observe whether it fires before or after `XTrapVa.dll` load. |
 
 ---
 

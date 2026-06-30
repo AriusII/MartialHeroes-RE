@@ -8,6 +8,7 @@ subsystems: [sky_rendering, environment_sky, cloud_dome, star_dome, particle_bil
 conflicts: star_colour_grid_slot_count (RESOLVED wave-11: 48 slots confirmed by interpolator); sun_struct_orientation_params (RESOLVED wave-11: write-once constants confirmed; draw-time axis [debugger-confirm]); skybox_geometry_disk_reader_location (RESOLVED wave-11: confirmed dead code, gate provably always 0)
 deepened: wave-11 closed §11 items 1/3-values/4/6; added StarDome +0x06C4/+0x06C8/+0x06CC colour-grid base and +0x2ACC–+0x2ADC; filled CloudDome +0x71AC–+0x7397; corrected SunBillboard_Struct +0x14/+0x34 and confirmed static-singleton ownership; confirmed cloud+star alt-animator default; confirmed seconds-of-day clock consumer path
 atm_deep_pass: 2026-06-29 — closed §11 item 2 (EnvSky_Manager+0x2B4 CONFIRMED reserved, no traced path in SkySystem_Init or SkySystem_UpdatePerFrame); closed §11 item 8 (g_EnvTimeBlock full layout recovered, clock CONFIRMED local wall-clock, no server writer — see specs/environment.md §2.5)
+render_geom_correction: 2026-06-30 — §6 star dome confirmed a TEXTURED TRIANGLE mesh (72 verts, 6 rings × 12 segments, D3DRS_POINTSPRITEENABLE off; OPAQUE + CW cull; TEXTUREFACTOR brightness with 0.1 cutoff; per-vertex BGR tint on 48 primary verts, 24 derived; draw requests 132 prims / fills 120 real tris), NOT point sprites; §7 cloud each layer a 60-vertex dome (4 rings × 12 + 12-vertex skirt; STANDARD ALPHA + CW cull + colour-key 0xFF000000; draw 108 / fills 96 real tris); §11 item 10 RESOLVED (fill counts pinned)
 related_specs: Docs/RE/formats/sky.md, Docs/RE/formats/environment_bins.md, Docs/RE/specs/environment.md, Docs/RE/structs/environment_light_scene.md
 ---
 
@@ -209,9 +210,11 @@ via the `SkySun_Init` particle-buffer construction call (wave-11). See `Docs/RE/
 ## 6. StarDome_Object — 11,164 bytes (0x2B9C), heap, pointer at EnvSky_Manager+0x20
 
 Built by `Stardome_BuildGeometryAndTexture`; per-throttle interpolation by
-`StarDome_InterpolatePerStar`. The star dome uses 72 vertices / 132 triangles; FVF 0x142
-(`D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1`) → 24 bytes per vertex
+`StarDome_InterpolatePerStar`. The star dome uses 72 vertices; the draw call requests **132
+primitives** but the builder fills only **120 real triangles** (the index buffer is over-allocated —
+see §11 item 10). FVF 0x142 (`D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1`) → 24 bytes per vertex
 (position 12 B + BGRA diffuse 4 B + UV 8 B). Offsets are **relative to the StarDome_Object base**.
+Dome geometry (rings/segments, positions, fisheye UVs, blend/cull) is detailed in §6.1.
 
 | Offset  | Size  | Type     | Role | Confidence |
 |--------:|------:|----------|------|------------|
@@ -235,6 +238,33 @@ Built by `Stardome_BuildGeometryAndTexture`; per-throttle interpolation by
 > "12 keyframes × 192 stars × 4 B" — that wording is refuted by the interpolator. The env-bins spec
 > owner should update that prose; the runtime figure (48 slots) is definitive.
 
+### 6.1 Dome geometry — textured triangle mesh, not point sprites (corrected 2026-06-30)
+
+The star dome is a **textured triangle mesh**, NOT a point-sprite particle system
+(`D3DRS_POINTSPRITEENABLE` is OFF on the draw). It is a **72-vertex dome of 6 elevation rings × 12
+segments**. Vertex positions:
+
+```
+X = 4000 × sin(ring) × cos(seg)
+Y = 3500 × cos(ring)
+Z = 4000 × sin(ring) × sin(seg)
+```
+
+with ring elevation angles 0° / 30° / 60° / 90° / 120° / 150° (the lower rings dip below the
+horizon), horizontal radius 4000 and vertical radius 3500. Fisheye texture coordinates:
+
+```
+u = cos(seg) × (ring / 6) + 8.0
+v = sin(seg) × (ring / 6) + 8.0
+```
+
+tiled under WRAP addressing. The dome is drawn **OPAQUE** (alpha-blend disabled) with **CW** face
+culling; the per-frame global brightness is pushed via `D3DRS_TEXTUREFACTOR` with a **0.1 visibility
+cutoff** (below which the dome is skipped). The per-vertex BGR day tint (from the +0x06CC colour grid)
+is written to the **48 primary vertices**; the remaining **24 vertices are derived copies**. The draw
+call requests **132 primitives** but the builder fills only **120 real triangles**. On-disk colour
+grid: `Docs/RE/formats/environment_bins.md §4`; render-pass blend/cull recap: `Docs/RE/formats/sky.md §E.5`.
+
 ---
 
 ## 7. CloudDome_Object — 29,592 bytes (0x7398), heap, pointer at EnvSky_Manager+0x24
@@ -244,7 +274,14 @@ ping-pong); tinted per-throttle-cycle by the cloud day-tint update function; alt
 `CloudDome_AnimateVertexColors` if the flag at +0x71A8 is non-zero (constructor sets it to 0).
 
 Cloud vertex format: 24 bytes, FVF 0x142 (`D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1`) — position
-(12 B) + BGRA diffuse (4 B) + UV (8 B). Each layer: 60 vertices / 108 triangles.
+(12 B) + BGRA diffuse (4 B) + UV (8 B). Each layer is a **60-vertex dome** — 4 rings × 12 segments
+(ring radius = `ringIndex × 750`, height = `(3 − ringIndex) × 333.3`) plus a 12-vertex skirt at
+height −200; horizontal radius ≈ 2250, height ≈ 1000; fisheye UVs centred at (0.5, 0.25) with only V
+scrolled (layer B at 2× layer A's rate). The draw requests **108 primitives** per layer but the
+builder fills **96 real triangles** (over-allocated IB — see §11 item 10). Sky-pass render state
+(corrected 2026-06-30): **STANDARD ALPHA** blend (`SRCALPHA` / `INVSRCALPHA`), **CW** face cull,
+colour-key **0xFF000000** (black → transparent), no luminance-based opacity term; see
+`Docs/RE/formats/sky.md §E.5`.
 
 Offsets are **relative to the CloudDome_Object base**.
 
@@ -440,8 +477,12 @@ Both writes are gated by a light-scene lock flag. This confirms the committed §
    this pass. The role of this second texture at draw time (sun disc vs. glow/flare) and how it pairs
    with the primary `sun.dds` at +0x14 remain unknown; requires further static tracing or a live read.
 
-10. **IB fill vs. allocation discrepancy** (`[open]`). Star IB allocates 864 bytes (432 u16 indices /
-    144 triangles) and cloud IB 720 bytes (360 u16 indices / 120 triangles); the geometry builders fill
-    132 and 108 triangles respectively. Buffers are over-allocated — not a contradiction — but the
-    exact filled index counts (and the 12×2 derived-vertex copy in the star path) should be confirmed
-    from `Stardome_FillGeometryBuffers` and `CloudDome_BuildDomeMesh`.
+10. **IB fill vs. allocation discrepancy** (`[RESOLVED — corrected 2026-06-30]`). Star IB allocates
+    864 bytes (432 u16 indices / 144 triangles) and cloud IB 720 bytes (360 u16 indices / 120
+    triangles); both index buffers are over-allocated. The geometry builders' **draw requests are 132
+    primitives (star) and 108 primitives per layer (cloud)**, but the builders fill only **120 real
+    triangles (star)** and **96 real triangles (cloud)** — the remaining requested primitives are
+    degenerate/unused. The star path uses 48 primary + 24 derived dome vertices (the 12×2 derived
+    copy); the cloud path 48 dome + 12 skirt vertices per layer. The filled counts are now pinned
+    statically; live index-count confirmation from `Stardome_FillGeometryBuffers` /
+    `CloudDome_BuildDomeMesh` remains a `[debugger-confirm]` nicety only.

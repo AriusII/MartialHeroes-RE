@@ -33,6 +33,9 @@
 >   implementation that relies on a multi-pass blur loop. Remaining `[debugger-confirm]` items
 >   are NON-BLOCKING.
 > - **evidence:** [static-ida]
+> - **corrected 2026-06-30:** the §8 composite c0/c1 live values are c0 = 0.525 (= base 1.05 × 0.5)
+>   and c1 = 0.3 (unscaled) — the `display.lua` loader's real ×0.5 on `DISPLAY_BASE_BRIGHT_MULTI`
+>   cancels the composite shader's ×2; the earlier "c0 ≈ 1.05" live target was wrong. See §8.
 > - **resolves:** `Docs/RE/structs/renderer_device.md §9` — both open questions are now
 >   statically confirmed: Q#1 (per-slot identity of the ten `glow_chain` COM slots) is
 >   resolved by §2 of this spec; Q#2 (per-slot identity of the five `device_com_slot_a..e`
@@ -74,7 +77,7 @@
 | "16-loop / 2×2 box blur" claim in `rendering.md §6.4` | `[open-question]` — see §6.2 |
 | Present-blit blend — ONE/ZERO (opaque copy) | CONFIRMED (static, addendum walk of `Renderer_DrawScene_OffscreenRT_0`) |
 | Offscreen-enable flag == 2 at runtime | `[debugger-confirm]` (carried from `render_pipeline.md §13`) |
-| Composite c0/c1 live values from display config | `[debugger-confirm]` (carried from `rendering.md §6.3`) |
+| Composite c0/c1 live values from display config | live c0 = 0.525 (= base 1.05 × 0.5), c1 = 0.3 (unscaled) — corrected 2026-06-30; runtime read still `[debugger-confirm]` |
 
 ---
 
@@ -364,8 +367,12 @@ confirmed field identities feeding that step:
 | c0 scalar source | +179016 | PS constant register 0 (base-brightness); uploaded via device vtable `+436` |
 | c1 scalar source | +179020 | PS constant register 1 (glow-brightness); uploaded via device vtable `+436` |
 
-Constructor defaults for c0 and c1 are 1.0/1.0; shipped `display.lua` targets c0 ≈ 1.05,
-c1 ≈ 0.3 (`[debugger-confirm]` for live values — see `rendering.md §6.3`).
+Constructor defaults for c0 and c1 are 1.0/1.0 (used only when a config key is absent). **Corrected
+2026-06-30:** the `display.lua` config loader multiplies `DISPLAY_BASE_BRIGHT_MULTI` (the c0 source) by a
+literal 0.5 before storing, while `DISPLAY_GLOW_BRIGHT_MULTI` (the c1 source) is stored unscaled; that ×0.5
+cancels the composite shader's ×2 on the scene term. So the shipped **live** values are c0 = 0.525
+(= 1.05 × 0.5) and c1 = 0.3 — the net composite is `saturate(scene·1.05 + glow·0.3)`, **not** c0 ≈ 1.05
+(`[debugger-confirm]` only for the runtime read — see `rendering.md §6.3` and `formats/shaders.md §C5.6a`).
 
 ### 8.1 Present-Blit Blend — Static Confirmation
 
@@ -396,7 +403,7 @@ step 7; the present pass does not add a second glow layer. The quad uses FVF `0x
 | # | Item | What to confirm |
 |---|---|---|
 | 1 | Offscreen-enable flag == 2 at runtime | Breakpoint `Renderer_DrawScene_Fork`, read scene/post object `+178748`. Carried from `render_pipeline.md §13` item 1 and `shaders.md §C5.6b`. |
-| 2 | Composite c0/c1 live values | Read object `+179016` and `+179020` while the composite pass runs. Carried from `rendering.md §6.3`. |
+| 2 | Composite c0/c1 live values | Read object `+179016` and `+179020` while the composite pass runs (expected c0 = 0.525, c1 = 0.3 — corrected 2026-06-30). Carried from `rendering.md §6.3`. |
 | 3 | TEX2 allocation base with backbuffer > 1024 | Confirm the actual width/height argument fed to the TEX2 `D3DXCreateTexture` call at runtime. See §4.1 open question. |
 | 4 | "16-loop" immediate in post-process constructor | Locate the integer 16 in the post-process constructor to determine whether it is dead or drives a path not covered by the two draw routines. See §6.2. |
 

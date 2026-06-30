@@ -22,6 +22,14 @@
 >   grid). It does not change the max-HP/MP formula above; it documents where the per-level scaling
 >   coefficients come from and confirms that **base HP/MP magnitudes are absent from these tables**
 >   (server-supplied), reinforcing the formula's `level_base`/`server_base` external-input flags.
+> - **CYCLE 15 re-anchor (f61f66a9, 2026-06-30):** actor vitals layout CONSUMER-CONFIRMED across two
+>   independent handlers (5/53 and 5/32): current HP is a single signed i64 at actor +176 (settled by
+>   three independent read/clamp-width checks — the 8-byte span is one field, not two packed i32s);
+>   level is i16 at actor +174; current MP is i32 at actor +184; stamina/third vital is i32 in a
+>   player-global mirror (no inline actor field seen this pass). Full 32B (5/53) and 48B (5/32) payload
+>   tables added as a new section. Rank-progress 5/77 400B blob size confirmed (interior opaque,
+>   consumer-pending R-CAP). Residuals: 5/59 76B handler not located (non-blocking); 5/32 +0x20/+0x28
+>   i64s (likely current/next-level XP) debugger-pending R-CAP. Formula confidence unchanged; resolves R-21.
 
 Neutral, data-only model of how the legacy client derives a character's **maximum HP** and
 **maximum MP** from primary stats, equipment, and active auras. Promoted from a dirty-room note;
@@ -40,9 +48,12 @@ Key facts the domain engineer must carry over from `actor.md`:
 - `max_hp` and `max_mp` are **not** wire fields and are **not** stored on the actor. They are
   computed on demand from base stats + equipment + auras, for the **local player only**. Remote
   actors carry only `current_hp` / `current_mp` as sent by the server (the server enforces the cap).
+  Wire widths confirmed (CYCLE 15, CONSUMER-CONFIRMED): `current_hp` is a single signed 64-bit
+  integer (i64) and `current_mp` is a signed 32-bit integer (i32) — see **Current-vitals actor
+  layout and wire vitals messages** section below for the full layout and payload tables.
 - The formula has **no direct level input**. Level affects the result only through the
   externally-supplied "level base" term (below), which the legacy client updated when a level-up
-  message arrived.
+  message arrived. Level is carried as a signed 16-bit integer (i16) in the 5/32 wire message.
 
 ---
 
@@ -239,6 +250,58 @@ hard-coded here — they come from item definitions.
 
 ---
 
+## Recovered 2026-06-30 — vitals getters re-witnessed; class table indexing; max-stamina base
+
+The two vitals getters (max HP, max MP) were re-read end-to-end on anchor `f61f66a9` this pass. The
+constants previously flagged **static-residual / not re-witnessed** are now **re-witnessed bit-exact**:
+
+- **Max HP** stat weights `STR×2.2, DEX×2.5, AGI×2.4, CON×1.5, INT×1.6` and the `+30.0` constant are
+  present in the getter exactly as tabled. The **per-class HP growth table is the four floats
+  `0.3, 0.2, 0.15, 0.1`** preceded by a `0.0` sentinel at index 0 — confirmed.
+- **Max MP** stat weights `STR×1.4, DEX×1.5, AGI×1.7, CON×1.5, INT×3.5` and `+30.0` are present
+  exactly; the MP multiplier starts at `1.0` with no class table.
+- **HP-aura kind = 1, MP-aura kind = 2**, the two aura slots, and the `/100.0` percentage math are all
+  re-witnessed; each aura reads a kind byte (aura-actor offset `+542`) and a percent value (`+520`).
+- The HP flat-add stat-slot keys are **7 and 2**; the **MP flat-add stat-slot keys are 9 and 3**
+  (newly pinned — the MP keys were not previously listed). Each of these keys is read **twice** (once
+  by the linear-scan slot accessor and once by the direct-index accessor) and both reads are summed,
+  matching the "read this slot" convention.
+
+**Soft-divergence resolved (was the §"Current-vitals" / Section-13.3 open item): the class-HP table is
+indexed by the local-player LEVEL byte on this build, not by class id.** The max-HP getter loads
+`CLASS_HP_TABLE[ (u8) local_player_level ]`. With the four-entry table `{0, 0.3, 0.2, 0.15, 0.1}`, this
+means only levels 1..4 hit the populated slots and levels ≥ 5 read **past the table into adjacent
+zero-initialised stack**, yielding a `0.0` multiplier (and therefore a computed max HP of 0) for the
+common case. This strongly implies the table is **meant** to be keyed by **class id** (values 1..4 =
+the four classes) and that indexing it by level is a **latent bug or a build artifact** — but on this
+binary the index is unambiguously the level byte. **Do not silently "fix" this in the port without a
+capture**; carry the question to a known-class / known-level debugger read as already noted.
+
+### Newly recovered — a third stat-weighted base (max stamina / third vital)
+
+A third stat-weighted getter of the same three-stage shape as HP/MP was recovered (consumed by the
+status panel, the actor-manager per-actor update, and the `5/53` vitals handler — i.e. it produces a
+displayed/derived vital, almost certainly **max stamina**, the third bar):
+
+```
+score_third = STR*0.9 + DEX*1.5 + AGI*1.3 + CON*1.3 + INT*1.7 + 30.0
+max_third   = floor(score_third) + third_equip_set_buff_sum
+```
+
+| Stat   | Weight | Exact 32-bit-literal value |
+|--------|--------|----------------------------|
+| STR    | 0.9    | 0.8999999761581421 |
+| DEX    | 1.5    | 1.5 |
+| AGI    | 1.3    | 1.299999952316284 |
+| CON    | 1.3    | 1.299999952316284 |
+| INT    | 1.7    | 1.700000047683716 |
+| (const)| +30.0  | 30.0 |
+
+It has **no class multiplier table and no percentage-multiplier stage** — it is `floor(score) + a flat
+equipment/set/buff sum` only (the equip sum reuses the same slot-iteration + set-bonus-distributor
+machinery as HP/MP). The exact in-game meaning of this bar (max stamina vs. another secondary vital)
+is **PLAUSIBLE / capture-pending**; the formula itself is bit-exact and implementable now.
+
 ## Implementation guidance for the domain engineer
 
 1. Model the formula as a pure function of: five effective stats, the per-quantity flat bonuses
@@ -275,6 +338,76 @@ global, **not** an Actor field and **not** the char-select stats record. Keep th
   character-info sub-panel; it is **not** the formula's stat-slot table.
 - **Effective primary stats** — the resolved STR/DEX/AGI/INT/CON the formula's Stage 1 consumes,
   assembled from base + equipment + set + buff (see "Inputs").
+
+---
+
+## Current-vitals actor layout and wire vitals messages — CYCLE 15
+
+The fields below record **current** (server-supplied) values of HP, MP, level, and related vitals
+in the actor struct and on the wire. They are distinct from the max-HP/MP formula above, which
+computes the cap from base stats.
+
+### Actor vitals region (CONSUMER-CONFIRMED, CYCLE 15)
+
+Proven by read and store widths in two independent message handlers (5/53 and 5/32); layout is
+consistent across both:
+
+| Actor offset | Size | Type | Field |
+|---|---|---|---|
+| +174 | 2 | i16 | current level |
+| +176 | 8 | i64 | current HP — a single signed 64-bit integer; the 8-byte span is one field, not two packed 32-bit values |
+| +184 | 4 | i32 | current MP |
+| (player-global mirror) | 4 | i32 | stamina / third vital — written to a player-global mirror by 5/53 for the local player only; no inline actor field seen this pass |
+
+Local-player mirrors updated on each 5/53 push: HP (i64 mirror), MP (i32 mirror), stamina (i32 mirror).
+
+### 5/53 — SmsgActorVitalsAndPairState (32-byte body, CONSUMER-CONFIRMED)
+
+Payload offsets within the message body, after the major/minor opcode dispatch:
+
+| Payload offset | Size | Type | Field | Notes |
+|---|---|---|---|---|
+| +0x00 | 1 (in u32) | u8 | actor key type | low byte only; value 8 remapped to 1 before lookup; value 2 selects the pair sub-path; upper 3 bytes unreferenced |
+| +0x04 | 4 | u32 | actor id | composite-key id (paired with type at +0x00) |
+| +0x08 | 2 | — | reserved | not read by the handler |
+| +0x0A | 1 | u8 | pair/relation state A | stored at actor +172; for the local player mirrors a player global; drives pair-formed/broken notice |
+| +0x0B | 1 | u8 | pair/relation state B | stored at actor +173 |
+| +0x0C | 4 | u32 | partner actor id | the paired actor's id; cross-ref actor.md for the actor struct offset |
+| +0x10 | 8 | i64 | current HP | the low 32 bits (+0x10) and high 32 bits (+0x14) together form a single signed i64; written as one unit to actor +176 |
+| +0x18 | 4 | i32 | current MP | stored at actor +184; independently sign-clamped to zero if negative |
+| +0x1C | 4 | i32 | stamina / third vital | local player only; written to player-global stamina mirror; independently sign-clamped to zero if negative |
+
+### 5/32 — SmsgLevelUp (48-byte body, CONSUMER-CONFIRMED)
+
+| Payload offset | Size | Type | Field | Notes |
+|---|---|---|---|---|
+| +0x00 | 4 | u32 | actor key type | composite-key type |
+| +0x04 | 4 | u32 | actor id | composite-key id |
+| +0x08 | 2 | i16 | level | stored at actor +174 (16-bit); local-player level mirror also updated; gates class-evolution UI |
+| +0x0A | 2 | — | reserved | not read |
+| +0x0C | 4 | i32 | unknown A | local-player global only; role unresolved |
+| +0x10 | 4 | i32 | unknown B | local-player global only; role unresolved |
+| +0x14 | 8 | i64 | current HP | single i64; same actor region (+176) as 5/53; written with a 64-bit move |
+| +0x1C | 4 | i32 | current MP | actor +184; written with a 32-bit move |
+| +0x20 | 8 | i64 | XP field A | local-player global only; likely current accumulated XP — **debugger-pending R-CAP** |
+| +0x28 | 8 | i64 | XP field B | local-player global only; likely next-level XP threshold — **debugger-pending R-CAP** |
+
+5/32 does not carry the stamina/third vital; 5/53 carries it. Both messages write HP and MP to the
+same actor offsets (+176 and +184), confirming layout consistency across opcodes.
+
+R-CAP breakpoint plan for +0x20/+0x28: breakpoint the level-up handler after the 48-byte block is
+applied and read the two local-player i64 globals to confirm XP semantics against a live capture.
+
+### Rank-progress blobs (recon hints — 5/59 and 5/77)
+
+- **5/77 — 400-byte blob (CONFIRMED):** the rank-progress handler reads a 400-byte fixed block and,
+  for the local player, passes the entire block unparsed to the rank/honor panel subsystem. Interior
+  field layout is opaque at the handler site — consumer-pending R-CAP (breakpoint the rank/honor
+  panel consumer and observe field reads during a rank-event capture).
+- **5/59 — 76-byte blob (NOT pinned this pass):** no handler reading exactly 76 bytes was located
+  during this pass (the size immediate evades the 4/8-byte scanner). The rank-progress handler family
+  includes multiple distinct fixed-size blobs (12, 20, 32, 236, and 400 bytes observed); a 76-byte
+  variant is consistent with this pattern but its handler and interior remain open. Non-blocking.
 
 ---
 

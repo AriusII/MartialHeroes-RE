@@ -13,15 +13,22 @@ verification: routing/teardown-control-flow [confirmed] (the existence of TWO di
   and the two respawn-response opcodes/sizes are static-confirmed on build 263bd994;
   the concrete meaning of each respawn-choice value (0/1/2/3) and the server-decided respawn location +
   restored HP are RUNTIME-ONLY (server-authoritative / capture-debugger-pending).
+  Death-state / PvP death FX (§7.8–§7.9): SmsgActorDeathState (5/79) mode bytes and effect-id
+  constants (base 350000038 + variant), and SmsgPvpDeathFx (5/80) PvP engage/disengage effect
+  constants (371003701 / 371003702), are CONSUMER-CONFIRMED on build f61f66a9 (CYCLE 15, 2026-06-30);
+  body sizes (20 / 16 bytes) and mode-byte body-offsets are capture-UNVERIFIED R-CAP (non-blocking).
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
-ida_reverified: 2026-06-27  # CYCLE 14 re-anchor: confirmatory — 1 re-confirmed SAME; prior: 2026-06-24
-evidence: [static-ida]
+ida_reverified: 2026-06-30  # CYCLE 15 P-worldexit: added §7.8–§7.10 (5/79 SmsgActorDeathState, 5/80 SmsgPvpDeathFx); prior: 2026-06-27
+evidence: [static-ida, consumer-confirmed]
 sample_verified: false
 note: |
   IDB SHA 263bd994, CYCLE 7 (2026-06-20) — appended §7 "Local death & respawn" (death notification
   5/10, respawn request 2/3, respawn responses 4/28 + 5/28, the level>=36 respawn-modal split, and the
   timed-event 10003 death countdown). Death is NOT a world exit — the actor stays in the world session;
   the section is recorded here because world_exit.md owns the death-and-respawn behavioural spec.
+  IDB SHA f61f66a9, CYCLE 15 (2026-06-30) — appended §7.8–§7.10: SmsgActorDeathState (5/79) and
+  SmsgPvpDeathFx (5/80) death-state push and PvP death FX opcodes; body sizes and mode-byte offsets
+  remain R-CAP pending pcap cross-check.
 -->
 
 # World Exit — Logout & Leave-World Teardown — Clean-Room Specification
@@ -246,6 +253,99 @@ the ordinary actor-vitals push, not from a client-side respawn formula).
 
 ---
 
+### 7.8 `SmsgActorDeathState` — inbound `5/79`
+
+The server pushes actor death-state changes and death effects with **S2C `5/79`
+`SmsgActorDeathState`**, a body of **20 bytes** [R-CAP: body size capture-pending]. The handler
+resolves the target actor by key, skips if not found or if it is the local player, then dispatches
+on a **DeathOp / mode** byte.
+
+> **R-CAP — capture-pending (non-blocking):** the 20-byte body size and the body-offset of the
+> DeathOp byte (0x08) are CONSUMER-CONFIRMED from the handler read sequence but have not been
+> cross-checked against a live pcap. Confirm both before relying on them for a wire implementation.
+
+#### Field table — 20-byte body (CONSUMER-CONFIRMED read sequence)
+
+| Body offset | Width | Field | Notes |
+|---|---|---|---|
+| 0x00 | 4 | leading dword (not consumed) | ignored by this handler; likely a cross-handler serial or zone discriminator — see §7.10 |
+| 0x04 | 4 | dying-actor key | actor lookup (kind = 1); also the effect anchor in mode 1 |
+| 0x08 | 1 | **DeathOp / mode selector** (values 0 / 1 / 2 / 3) | dispatch byte [R-CAP: body-offset capture-pending] |
+| 0x09–0x0B | 3 | alignment padding (not read) | |
+| 0x0C | 4 | mode sub-selector | meaning is mode-dependent (see mode table below) |
+| 0x10 | 4 | source / killer-actor key | kind = 3 lookup; consumed only in mode 0 |
+
+#### DeathOp / mode table (CONSUMER-CONFIRMED)
+
+| Mode | Behaviour | Sub-selector @0x0C | Killer key @0x10 |
+|---|---|---|---|
+| **0** | Killed-by visual setup: records the killer and puts the dying actor into its killed-by visual state. | yes — passed as killer-id argument | yes — kind = 3 actor lookup |
+| **1** | Spawn a **death effect** anchored on the dying actor. Effect id selected by sub-selector — see §7.8.1. | yes — variant 1..7 | no |
+| **2** | Set dying actor death sub-state: **6** if sub-selector == 1, else **7**. | yes — 1-vs-not test | no |
+| **3** | Clear / revive: resets actor to alive/idle (action-state = 1, death sub-state = 0, releases and re-attaches effect / weapon nodes, snaps idle motion). | no | no |
+
+#### §7.8.1 Mode-1 effect-id selector (CONSUMER-CONFIRMED)
+
+Sub-selector (body offset 0x0C) in range 1..7 selects a death-effect catalogue id by:
+
+**effect id = 350000038 + sub-selector** (sub-selector ∈ {1, 2, 3, 4, 5, 6, 7})
+
+| Sub-selector | Effect id |
+|---|---|
+| 1 | 350000039 |
+| 2 | 350000040 |
+| 3 | 350000041 |
+| 4 | 350000042 |
+| 5 | 350000043 |
+| 6 | 350000044 |
+| 7 | 350000045 |
+
+Sub-selector 0 or out of range leaves the effect id at 0 (the variant default).
+
+---
+
+### 7.9 `SmsgPvpDeathFx` — inbound `5/80`
+
+The server pushes PvP duel death FX (persistent aura engage / disengage burst) with **S2C `5/80`
+`SmsgPvpDeathFx`**, a body of **16 bytes** [R-CAP: body size capture-pending]. The handler resolves
+a primary actor by key, skips if not found or local player, then dispatches on a **DeathOp / mode**
+byte.
+
+> **R-CAP — capture-pending (non-blocking):** the 16-byte body size and the body-offset of the
+> DeathOp byte (0x0A) are CONSUMER-CONFIRMED from the handler read sequence but have not been
+> cross-checked against a live pcap. Confirm both before relying on them for a wire implementation.
+
+#### Field table — 16-byte body (CONSUMER-CONFIRMED read sequence)
+
+| Body offset | Width | Field | Notes |
+|---|---|---|---|
+| 0x00 | 4 | leading dword (not consumed) | ignored by this handler; same pattern as 5/79 — see §7.10 |
+| 0x04 | 4 | primary-actor key | kind = 1 lookup (the PvP subject) |
+| 0x08 | 1 | **gate flag** | must equal 1 for the effect-spawn step; both modes check this |
+| 0x09 | 1 | padding (not read) | |
+| 0x0A | 1 | **DeathOp / mode selector** (values 1 or 6) | dispatch byte [R-CAP: body-offset capture-pending] |
+| 0x0B | 1 | padding (not read) | |
+| 0x0C | 4 | opponent / source-actor key | kind = 3 lookup; also used as the effect anchor |
+
+#### DeathOp / mode table (CONSUMER-CONFIRMED)
+
+| Mode | Behaviour | Gate @0x08 | Effect id(s) |
+|---|---|---|---|
+| **1** | PvP **engage**: orientates both actors toward each other, puts both into a motion-fx state, then — if gate == 1 — spawns a **persistent anchored aura** on the opponent actor key. | must be 1 to spawn the aura; no-op after state changes otherwise | **371003701** (engage aura) |
+| **6** | PvP **disengage/end**: clears both actors' motion-fx state (motion = 0), **deactivates** any active 371003701 on the opponent, then — if gate == 1 — spawns a disengage burst on the opponent. | controls the burst spawn only | deactivate **371003701**, then spawn **371003702** |
+| (other) | no-op | — | — |
+
+The persistent aura spawned by mode 1 (`371003701`) is the same effect id explicitly deactivated by mode 6; `371003702` is the mode-6 closing burst.
+
+---
+
+### 7.10 Open items — death-family opcodes 5/79 and 5/80
+
+- **Leading dword at body offset 0x00 (both 5/79 and 5/80):** both handlers leave this field unread. It likely acts as a cross-handler serial, echo, or zone discriminator shared across the Push-major-5 family. RUNTIME-ONLY — not determinable from the two consumers alone; not a blocker for the DeathOp / effect facts.
+- **R-CAP — body sizes and mode-byte body-offsets:** the 20-byte / 16-byte body sizes and the DeathOp body-offsets (0x08 for 5/79, 0x0A for 5/80) are CONSUMER-CONFIRMED from the handler read sequence but remain **capture-pending** for wire-level cross-check (tagged R-CAP, non-blocking).
+
+---
+
 ## 6. Cross-reference map
 
 | This spec covers | Owned elsewhere — cite, don't duplicate |
@@ -256,3 +356,4 @@ the ordinary actor-vitals push, not from a client-side respawn formula).
 | The return scene state 6 / sub-state 8 (§2) | `scenes/scene_state_machine.md` |
 | Death/respawn opcodes `5/10`, `2/3`, `4/28`, `5/28` (§7) | `opcodes.md` (catalogue of record), `packets/` (field specs) |
 | Death-state actor fields, respawn modal, the `10003` countdown engine (§7.1–§7.4) | `specs/combat.md` (death-state convention), `specs/world_systems.md` (death/respawn timer + modal) |
+| Death-state push `5/79` (`SmsgActorDeathState`) and PvP death FX `5/80` (`SmsgPvpDeathFx`) (§7.8–§7.9) | `opcodes.md` (catalogue), `packets/` (field specs) |

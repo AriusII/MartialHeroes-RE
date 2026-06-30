@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -25,9 +26,12 @@ public sealed partial class HudProductWindow : Control
     private bool _open;
     private int _selectedRecipe = -1;
 
+    private ClientContext? _ctx;
+
 
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
+        _ctx = ClientContext.Instance;
         Name = "HudProductWindow";
 
         AnchorLeft = 0.5f;
@@ -171,8 +175,12 @@ public sealed partial class HudProductWindow : Control
 
         GD.Print("[HudProductWindow] Built — ProductPanel slot 230 (4×2 recipe grid, qty textbox, " +
                  "3D preview placeholder, action 36/90/0..15). " +
-                 "Outbound C2S 2/151 = TODO(world-campaign). Recipe list = TODO(capture: 3/8). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.18 CODE-CONFIRMED.");
+                 "Outbound WIRED: Make/Confirm → UseCases.ConfirmProductPurchaseAsync (C2S 2/153 production commit, " +
+                 "4-byte slot tuple from the selected list slot, npc_index 0xFF=none) via ClientContext.Instance. " +
+                 "Inbound recipe rows + 4/79 SmsgCraftingResult BLOCKED: no IHudEventHub crafting channel and " +
+                 "CraftingResultEvent rides the single-consumer IClientEventBus drained only by GameLoop — rows stay " +
+                 "empty (no mock data); recipe-list feed is runtime-capture-pending (crafting.md §6). " +
+                 "spec: Docs/RE/specs/crafting.md §3.2/§4/§6 + cash_shop_browser.md §5.3 + ui_system.md §8.18 CODE-CONFIRMED.");
     }
 
 
@@ -185,15 +193,51 @@ public sealed partial class HudProductWindow : Control
 
     private void OnMakeAction(int actionId)
     {
-        GD.Print($"[HudProductWindow] Make action {actionId}. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.18.3 — actions 8..15.");
+        var cell = actionId - RecipeCellCount;
+        if (cell < 0 || cell >= RecipeCellCount)
+        {
+            GD.PrintErr($"[HudProductWindow] Make action {actionId} out of recipe range. " +
+                        "spec: Docs/RE/specs/ui_system.md §8.18.3 — actions 8..15.");
+            return;
+        }
+
+        _selectedRecipe = cell;
+        CommitProduction($"make-cell-{cell}");
     }
 
     private void OnConfirmOrder()
     {
-        GD.Print("[HudProductWindow] Confirm order (action 36/90). " +
-                 "TODO(world-campaign): IApplicationUseCases.ProductBuyAsync(selector=200). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.18.5 CODE-CONFIRMED.");
+        CommitProduction("confirm-order");
+    }
+
+    private void CommitProduction(string origin)
+    {
+        if (_selectedRecipe < 0 || _selectedRecipe >= RecipeCellCount)
+        {
+            GD.Print($"[HudProductWindow] CommitProduction({origin}) ignored — no recipe selected. " +
+                     "spec: Docs/RE/specs/crafting.md §6 step 4.");
+            return;
+        }
+
+        var ctx = _ctx ?? ClientContext.Instance;
+        if (ctx?.UseCases is null)
+        {
+            GD.PrintErr($"[HudProductWindow] CommitProduction({origin}) blocked — ClientContext.UseCases unavailable.");
+            return;
+        }
+
+        var confirmCode = ProductionConfirmCode(_selectedRecipe);
+        _ = ctx.UseCases.ConfirmProductPurchaseAsync(confirmCode);
+        GD.Print($"[HudProductWindow] CommitProduction({origin}) → ConfirmProductPurchaseAsync(0x{confirmCode:X8}) " +
+                 $"= C2S 2/153 production commit (list_slot={_selectedRecipe}, production_npc_index=0xFF none; " +
+                 "server arms the 60s timeout and replies 4/79). " +
+                 "spec: Docs/RE/specs/crafting.md §3.2/§6 + cash_shop_browser.md §5.3 CODE-CONFIRMED.");
+    }
+
+    private static uint ProductionConfirmCode(int listSlot)
+    {
+        const uint noProductionNpc = 0xFFu;
+        return (noProductionNpc << 24) | ((uint)(listSlot & 0xFF) << 16);
     }
 
 
@@ -204,8 +248,10 @@ public sealed partial class HudProductWindow : Control
         Visible = _open;
 
         if (_open && !wasOpen)
-            GD.Print("[HudProductWindow] Opened → TODO(world-campaign): emit C2S 2/151 selector=0. " +
-                     "spec: Docs/RE/specs/ui_system.md §8.18.5 CODE-CONFIRMED.");
+            GD.Print("[HudProductWindow] Opened — production commit (2/153) routes on Make/Confirm user intent; " +
+                     "no auto-emit on open. Recipe rows await an inbound feed that is BLOCKED (no IHudEventHub " +
+                     "crafting channel; 4/79 rides the GameLoop-drained IClientEventBus) — grid stays empty, no mock data. " +
+                     "spec: Docs/RE/specs/crafting.md §6 + ui_system.md §8.18.5 CODE-CONFIRMED.");
     }
 
     public override void _Input(InputEvent @event)

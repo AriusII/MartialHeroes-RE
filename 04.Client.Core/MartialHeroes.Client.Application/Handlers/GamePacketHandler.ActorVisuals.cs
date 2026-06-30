@@ -22,21 +22,6 @@ public sealed partial class GamePacketHandler
             key, packet.SlotIndex, 0u, 0u, true));
     }
 
-    public void Handle(in SmsgActorVisualFlagsSet packet)
-    {
-        var key = new ActorKey(packet.ActorId, ToEntitySort(unchecked((byte)packet.ActorSort)));
-
-        _eventBus.Publish(new ActorVisualFlagsChangedEvent(key, packet.VisualFlags));
-    }
-
-    public void Handle(in SmsgActorStateEvent packet)
-    {
-        var key = new ActorKey(packet.TargetId, ToEntitySort(unchecked((byte)packet.TargetSort)));
-
-        _eventBus.Publish(new ActorStateChangedEvent(
-            key, ActorStateKind.Generic, 0u, 0u, packet.ActorId));
-    }
-
     public void Handle(in SmsgActorTimedStateUpdate packet)
     {
         var key = new ActorKey(packet.ActorId, ToEntitySort(unchecked((byte)packet.Sort)));

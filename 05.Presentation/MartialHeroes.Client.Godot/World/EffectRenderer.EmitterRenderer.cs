@@ -238,6 +238,8 @@ public sealed partial class EffectRenderer
         return new StandardMaterial3D
         {
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            DisableFog = true,
             AlbedoTexture = texture,
             AlbedoColor = tint,
             Transparency = transparency,

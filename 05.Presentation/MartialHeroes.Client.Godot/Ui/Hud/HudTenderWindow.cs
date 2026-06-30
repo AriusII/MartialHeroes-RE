@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -14,12 +15,13 @@ public sealed partial class HudTenderWindow : Control
     private const int MsgDetailOverCap = 66007;
     private int _detailRequestCount;
 
-
+    private ClientContext? _ctx;
     private bool _open;
 
 
-    public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
+    public void Build(HudAtlasLibrary atlas, HudTextLibrary text, ClientContext ctx)
     {
+        _ctx = ctx;
         Name = "HudTenderWindow";
 
         AnchorLeft = 0.5f;
@@ -123,16 +125,33 @@ public sealed partial class HudTenderWindow : Control
         AddChild(closeBtn);
 
         GD.Print("[HudTenderWindow] Built — TenderInfoPanel slot 118 (512×595, screen-centred). " +
-                 "Action 0=confirm→C2S 2/118 TODO(world-campaign). Detail cap=30 (msg 66007). " +
-                 "Tender listing = TODO(capture). spec: Docs/RE/specs/ui_system.md §8.21.1 CODE-CONFIRMED.");
+                 "Outbound WIRED: ConfirmBtn (action 0) -> ClientContext.UseCases.ConfirmTenderAsync = C2S 2/118 " +
+                 "(empty payload; server resolves the active tender session). " +
+                 "Inbound BLOCKED (left + flagged, no invention): the tender listing rows (TenderListStub), the 3D " +
+                 "item preview (ItemPreview3D_TODO) and the item-stat panel (ItemStatStub) need a per-listing feed, " +
+                 "but no S2C tender handler publishes an event and IHudEventHub exposes NO tender ChannelReader, so " +
+                 "list/preview/stat stay empty (no mock data). " +
+                 $"Detail request is a LOCAL InfoPanel category build (cap {DetailRequestCap}, msg {MsgDetailOverCap}) " +
+                 "with no use-case and no listing record to expand. " +
+                 $"Insufficient-gold (msg {MsgNotEnoughGold}) stays a server/domain verdict (GAME-RULE GUARD) — no " +
+                 "client currency channel and no 4/118 result channel to drive it. " +
+                 "spec: Docs/RE/specs/inventory_trade.md (tender) + ui_system.md §8.21.1 CODE-CONFIRMED.");
     }
 
 
     private void OnConfirm()
     {
-        GD.Print("[HudTenderWindow] Confirm purchase → TODO(world-campaign): C2S 2/118 CmsgTenderConfirm. " +
-                 $"Not-enough-gold path: msg.xdb {MsgNotEnoughGold}. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.21.1 CODE-CONFIRMED.");
+        if (_ctx is null)
+        {
+            GD.PrintErr("[HudTenderWindow] Confirm blocked — ClientContext unavailable.");
+            return;
+        }
+
+        _ = _ctx.UseCases.ConfirmTenderAsync();
+        GD.Print($"[HudTenderWindow] Confirm (action 0) -> UseCases.ConfirmTenderAsync = C2S 2/118 (empty payload; " +
+                 "server resolves the active tender session and replies). Insufficient-gold " +
+                 $"(msg {MsgNotEnoughGold}) stays a server/domain verdict (GAME-RULE GUARD) — node has no currency " +
+                 "channel to pre-gate. spec: Docs/RE/specs/inventory_trade.md (tender) + ui_system.md §8.21.1.");
     }
 
     private void OnRequestDetail()
@@ -145,8 +164,10 @@ public sealed partial class HudTenderWindow : Control
         }
 
         _detailRequestCount++;
-        GD.Print($"[HudTenderWindow] Detail requested ({_detailRequestCount}/{DetailRequestCap}). " +
-                 "TODO(world-campaign): detail via InfoPanel category builder. spec: §8.21.1.");
+        GD.Print($"[HudTenderWindow] Detail requested ({_detailRequestCount}/{DetailRequestCap}) — LOCAL InfoPanel " +
+                 "category build per §8.21.1; no C2S intent (no detail use-case) and the listing feed is BLOCKED " +
+                 "(no IHudEventHub tender channel / no S2C tender event), so there is no per-listing record to " +
+                 "expand — no mock data. spec: Docs/RE/specs/inventory_trade.md (tender) + ui_system.md §8.21.1.");
     }
 
 

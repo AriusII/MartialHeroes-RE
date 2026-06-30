@@ -5,11 +5,14 @@ verification: routing/sizes [confirmed] (opcode->handler ROUTING, the C2S send s
   handler read sizes/offsets, and the install-table slot occupancy are all control-flow-confirmed);
   pairing [confirmed] where a request maps to a named/installed reply slot, otherwise
   static-hypothesis (a best-consumer / in-flight-latch inference, not a captured round-trip);
-  value-semantics [capture/debugger-pending] (every wire VALUE semantic — what a reply byte MEANS,
-  which result code is success vs fail — has no live capture this campaign).
+  value-semantics [PARTIALLY-CONFIRMED C15: 3/6 error-code→string-id map CONSUMER-CONFIRMED; 4/81
+  full error-code→string-id map CONSUMER-CONFIRMED; 3/7 Result/Subtype polarity CONSUMER-CONFIRMED;
+  3/100 per-code message-ids CONSUMER-CONFIRMED] (remaining VALUE semantics capture/debugger-pending
+  — see Appendix C).
 ida_reverified: 2026-06-22 (re-verified against doida.exe IDB SHA 263bd994, CYCLE 12 Phase 0; prior CYCLE 8 2026-06-21). CYCLE 12 Phase 0: §A.4 3/100 SmsgCharActionResult code set reconciled -> canonical set {0,1-5,7,10,11,16,22,23,200-211,220-227,202/203/232} (no case 9, no case 32); select-mode codes 22/23 RECOVERABLE (state 7/sub 5), not fatal; cross-ref handlers.md §23.1 as canonical 3/100 table. CYCLE 8 re-confirmed: NO 12-byte create-result opcode exists (1/6 create acked by 3/7 + 3/1 + 3/4, 3/23 = 28B status-bytes-by-name) — the C# port must retire any SmsgCharCreateResult; and the lobby/server-list connect (port 10000) uses inet_addr on a dotted-quad while the game socket uses gethostbyname (DNS).
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory - subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected
+ida_reverified: 2026-06-30   # CYCLE 15 (f61f66a9): 3/6 body+error-map CONSUMER-CONFIRMED; 4/81 full error-code map CONSUMER-CONFIRMED; 3/7 Result/Subtype polarity CONSUMER-CONFIRMED; 3/100 per-code message-ids CONSUMER-CONFIRMED. §A.3 upgraded; §A.5 added; Appendix C R-04/R-07 resolved inline; R-02/R-03 resolved (handlers.md); R-08/R-09/R-10-structure/R-22 resolved (inventory_trade.md); R-11/R-17-cube resolved (cube_gamble.md); R-12 resolved (world_exit.md); R-13/R-16/R-18 resolved (actor.md); R-19 resolved (social.md); R-21 resolved (stats.md); R-29 resolved (cash_shop_browser.md); R-38 resolved (crafting.md); R-20-layout/R-44-layout resolved (skills.md); R-06/R-10-op/R-20-scale/R-43/R-44-actor-id/R-45 → R-CAP; §C.7 cross-domain items added.
 evidence: [static-ida]
 capture_verified: false
 cycle7: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20). Gameplay/dark-subsystem
@@ -264,8 +267,11 @@ The major-3 reply minors use the campaign-10 de-swapped labels: **3/4 = SmsgScen
 
 *Notes.* Server-pushed account notifications (`1/16` billing-off, `1/17` billing-on, `1/19` expiry,
 `1/20` letter) are S2C-only major-1 pushes with no matching request — see §2.13 / §3. The 3/6 + 3/13
-result handlers share the char-mgmt fail-code class (§Appendix A, family 3). *spec:* `handlers.md §2/§7`,
-`opcodes.md`.
+result handlers share the char-mgmt fail-code class (§A.3). 3/6 body layout and error-code map:
+§A.3 (CONSUMER-CONFIRMED C15). **3/6 CREATE-like anomaly (flag):** on the success (status==1) path
+the 3/6 handler increments the account character count and writes a new slot record — create-like
+behavior under the rename label; carried for spec-author review (not a routing/DTO gap). *spec:*
+`handlers.md §2/§7`, `opcodes.md`, §A.3 here.
 
 ### 2.3 Movement / Combat
 
@@ -377,7 +383,7 @@ broadcast roster change for all three.
 | Request (C2S) | size | Response(s) (S2C) | size | Evidence / confidence | packets/ |
 |---|---|---|---|---|---|
 | **2/30** CmsgGuildOp | 8 | **5/55** GuildNameDisplayUpdate / **5/65** GuildMemberRosterUpdate / **4/103** GuildPanelTextUpdate *(selector-dependent)* — **NO 4/30 ack** | var | pending — **REFUTED naive mirror:** 4/30 is installed but is `SmsgSocialPanelTarget`, not a guild-op ack. The guild updates ride 5/55/5/65/4/103 (all installed); which answers a given op is selector-dependent. | *(opcodes.md 0x2001e)* |
-| **2/81** Cmsg_GuildDiplomacyDeclare *(state 0/1)* | 18 | **4/61** SmsgGuildStateChangeResult *(the diplomacy verdict)* | 52 | confirmed/high — **CORRECTED (binary wins, resolves the old §2.9 Open-Q):** the guild-diplomacy verdict lands on the major-4 guild state-change result at **response slot 61 (52-byte body: gate@+8, result@+9 ∈ 1..7, action@+10 ∈ 1..5, CP949 guild name @+11..+27, NUL@+28; action==5/result==2 → cooldown-in-DAYS = server-minutes/1440)**. The stale `4/81 = SmsgGuildDiplomacyResult` pairing is **DROPPED** — 4/81 is the generic `SmsgActionErrorResult` (status@+8, error@+9; 0xFF generic; 0x15 reads seconds@+10 mm:ss; 0x17 server-config percent), not a diplomacy reply. The `submitDiplomacy STATE[%d] target_guild_name_[%s]` string is **SEND-side only** — it stamps the 2/81 builder; it is NOT a receive handler. | `2-81_guild_diplomacy_declare.yaml`, `4-61_guild_state_change_result.yaml` |
+| **2/81** Cmsg_GuildDiplomacyDeclare *(state 0/1)* | 18 | **4/61** SmsgGuildStateChangeResult *(the diplomacy verdict)* | 52 | confirmed/high — **CORRECTED (binary wins, resolves the old §2.9 Open-Q):** the guild-diplomacy verdict lands on the major-4 guild state-change result at **response slot 61 (52-byte body: gate@+8, result@+9 ∈ 1..7, action@+10 ∈ 1..5, CP949 guild name @+11..+27, NUL@+28; action==5/result==2 → cooldown-in-DAYS = server-minutes/1440)**. The stale `4/81 = SmsgGuildDiplomacyResult` pairing is **DROPPED** — 4/81 is the generic `SmsgActionErrorResult` (status@+8, error@+9; 0xFF generic; 0x15 reads seconds@+10 mm:ss; 0x17 reads a **client config-table percent, NOT a wire byte** — see §A.5), not a diplomacy reply. Full error-code→string-id map: §A.5 (R-07 RESOLVED C15). The `submitDiplomacy STATE[%d] target_guild_name_[%s]` string is **SEND-side only** — it stamps the 2/81 builder; it is NOT a receive handler. | `2-81_guild_diplomacy_declare.yaml`, `4-61_guild_state_change_result.yaml` |
 
 ### 2.10 Social / Friend / Relations / Faction
 
@@ -552,19 +558,43 @@ branch. This is **4/1-local**, not a cross-handler family.
 The select-screen messages are driven by message-DB string-id GLOBALS (shown for 5000 ms), not by a
 5000-based string-id family.
 
-### A.3 Family — the major-3 char-mgmt result fail-code class
+### A.3 Family — the major-3 char-mgmt result fail-code class (CONSUMER-CONFIRMED C15)
 
-The `3/6` rename-result and `3/13` status-update handlers share one error-code→message switch (the
-sub-code byte selects one of four message-DB string globals, shown on the select-screen status line
-for 5000 ms):
+The `3/6` SmsgRenameCharResult and `3/13` SmsgCharStatusUpdate handlers share one
+error-code→message switch (the sub-code byte selects one of four message-DB string globals, shown on
+the select-screen status line for 5000 ms). `3/14` SmsgCharSpawnResponse and `3/100`
+SmsgCharActionResult both read from the same shared globals, making these **one shared char-mgmt
+error-string pool** across major-3 result handlers. *source: C15 on anchor f61f66a9,
+CONSUMER-CONFIRMED.*
 
-| code(s) | structural role |
-|---|---|
-| 200, 201 | fail → shared message slot A. |
-| 206 | fail → its OWN distinct slot. |
-| 204, 205, 207, 208, 209, 210 | fail → ONE shared "generic char-mgmt rejection" slot (the contiguous block all collapse here). |
-| 212 | fail → its OWN distinct slot. |
-| (subtype) 1 | success — applies the new name/status (no error message). |
+**3/6 SmsgRenameCharResult body layout (12 bytes):**
+
+| body offset | size | field | role |
+|---|---|---|---|
+| +0 | u8 | status | 1 = success/apply; 0 = error path; other value = no-op (handler returns). |
+| +1 | u8 | errorCode | switch selector; consumed only when status == 0. |
+| +2 | u8[2] | (unread) | not consumed by this handler. |
+| +4 | u32 | slotFieldA | written to select-window slot record on success (status == 1). |
+| +8 | u32 | slotFieldB | written to select-window slot record on success (status == 1). |
+
+The new name text is NOT carried in the reply body (it was sent client-side in 1/13). The
+(slotFieldA, slotFieldB) value-identity (slot index / char id / name handle) is a secondary open
+item, not a routing gap.
+
+**Error-code → message-DB string-id bucket map (R-04 RESOLVED C15):**
+
+| code(s) | string-id | class |
+|---|---|---|
+| 200, 201 | **1106** | shared error class A |
+| 206 | **1105** | own slot |
+| 204, 205, 207, 208, 209, 210 | **1107** | generic char-mgmt rejection |
+| 212 | **1113** | own slot |
+| other | — | switch default → no message shown |
+
+3/13 uses the identical switch and all four globals. 3/14 reads the globals for string-ids 1106 and
+1107. 3/100 (select-screen generic notice) reads the global for string-id 1107. Literal CP949 text
+behind 1105/1106/1107/1113 is loaded from the message-DB asset (not embedded in the binary). For the
+3/100 in-world per-code message-ids (1201–1208, 1604) see §A.4.
 
 ### A.4 Family — the 3/100 SmsgCharActionResult code set
 
@@ -589,6 +619,99 @@ structural roles:
 *Cross-link:* the same numbers 201/202/203/232 also appear as conn-state-machine state codes — they
 **share the numbers, not the code path**. 3/100 PRIMES/publishes; the conn-state machine RESOLVES. The
 runtime "which code = connect / ok / lost / error" mapping is `[capture-pending]` in both.
+
+**In-world mode message-ids (R-02 RESOLVED C15, CONSUMER-CONFIRMED):** When local player is present,
+codes 1–7 and 22 show dedicated tooltip strings; all other codes show no in-world tooltip.
+
+| code | message-id (in-world) |
+|---|---|
+| 1 | 1201 |
+| 2 | 1202 |
+| 3 | 1203 |
+| 4 | 1204 |
+| 5 | 1205 |
+| 6 | 1206 |
+| 7 | 1207 |
+| 22 | 1208 |
+| 0 / other non-zero | — (no in-world tooltip; state-machine path only) |
+
+**Select-screen mode message-ids (CONSUMER-CONFIRMED C15):**
+
+| code | message-id (select-screen) |
+|---|---|
+| 23 | **1604** |
+| any non-zero not in publish-only cluster | **1107** (generic char-mgmt rejection, shared pool from §A.3) |
+
+All ids are statically initialized constants read from the runtime `.data` table. Literal CP949 text
+is loaded from the message-DB asset. *source: C15 on anchor f61f66a9, CONSUMER-CONFIRMED.*
+
+---
+
+### A.5 Family — 4/81 SmsgActionErrorResult full error-code map (CONSUMER-CONFIRMED C15)
+
+`4/81 SmsgActionErrorResult` is the generic action-error channel (used by diplomacy, stall, and other
+action/guild paths without a dedicated reply opcode). All messages are broadcast via the
+chat-log/system notice channel. *source: C15 on anchor f61f66a9, CONSUMER-CONFIRMED.*
+
+**Body layout (minimum 11 bytes read):**
+
+| body offset | size | field | role |
+|---|---|---|---|
+| +0 | u8[8] | actionContext | 8-byte action/actor-visual descriptor; consumed only on the status == 1 path. |
+| +8 | u8 | status | 1 = apply/visual path; other value = error/notice path. |
+| +9 | u8 | errorCode | switch selector (error/notice path) and outcome selector (status == 1: value 100 → string-id 51026). |
+| +10 | u8 | seconds | cooldown remaining (0–255 = 0:00–4:15); consumed only when errorCode == 0x15. |
+
+**status == 1 (apply path):** Consumes the actionContext block (+0). Then errorCode(+9) doubles as an
+outcome selector: value 100 → shows message-DB string-id **51026**; any other value → no message.
+
+**status != 1 (error/notice path) — full errorCode → string-id map (R-07 RESOLVED C15):**
+
+| errorCode | string-id | notes |
+|---|---|---|
+| 0xFF (255) | **21078** | generic error/notice; checked before the main switch |
+| 0x01 | 21074 | |
+| 0x02 | 21075 | |
+| 0x03 | 21076 | |
+| 0x04 | 21077 | |
+| 0x05 | 2163 | |
+| 0x06 | 21097 | |
+| 0x07 | 2164 | |
+| 0x08 | 2165 | |
+| 0x09 | 2166 | |
+| 0x0A (10) | 2167 | |
+| 0x0B (11) | 2168 | |
+| 0x0C (12) | 2169 | also triggers an actor-visual side-effect, then returns |
+| 0x0D (13) | 2170 | |
+| 0x0E (14) | 2171 | |
+| 0x0F (15) | 51016 | |
+| 0x10 (16) | 51017 | |
+| 0x11 (17) | 51018 then 51019 | shows TWO messages: broadcasts 51018 first, then falls through to 0x14 path (51019) |
+| 0x12 (18) | 51020 | |
+| 0x13 (19) | 51023 | |
+| 0x14 (20) | 51019 | |
+| 0x15 (21) | **51024 or 51025** | mm:ss cooldown — see §A.5a |
+| 0x16 (22) | — | NOT a switch case; gap in the 0x01–0x18 range → no message |
+| 0x17 (23) | **51029** | percent — see §A.5b |
+| 0x18 (24) | 51033 | |
+| other (incl. > 0x18) | — | switch default → no message |
+
+All string-ids are statically initialized integer literals. Literal CP949 text is loaded from the
+message-DB asset (not embedded in the binary).
+
+#### §A.5a — errorCode 0x15 (21): mm:ss cooldown
+
+Reads the seconds field (body+10), range 0–255 (= 0:00 to 4:15). Computes minutes = seconds / 60 and
+remaining seconds. If minutes > 0 → formats with string-id **51024** as a two-argument
+(minutes, seconds) form. If minutes == 0 → formats with string-id **51025** as a one-argument
+(seconds) form. The seconds value is a wire byte at body+10.
+
+#### §A.5b — errorCode 0x17 (23): percent (client config-table, NOT a wire byte)
+
+The percentage shown with format string **51029** is NOT read from the 4/81 wire body. It is sourced
+from a **client-side config/data-table**: the handler reads record id 100 from the local config table
+and extracts its float field, casting to integer. No 4/81 body byte carries the percent value.
+Implementers must supply the percentage from the local client config independently of the wire frame.
 
 ---
 
@@ -668,55 +791,55 @@ structural items still worth flagging here:
 
 ### C.1 Enumerations / code-meanings (which numeric value means what)
 
-| R | Opcode(s) | Pending VALUE |
+| R | Opcode(s) | Status / Pending VALUE |
 |---|---|---|
-| R-01 | 0/0 | meaning of the two trailing u32 server scalars A/B (handshake) |
-| R-02 | 3/100 | full action-result-code → user-meaning map (`{0,1-5,7,10,11,16,22,23,200-211,220-227,202/203/232}`; structural roles confirmed in handlers.md §23.1 — only the human VALUE meaning of each code is pending) |
-| R-03 | 3/7 | Result(0/1) and Subtype(0=refresh/1=rename-applied/2=delete) polarity confirmation |
-| R-04 | 3/6 | ErrorCode bucket strings (`{0xC8/0xC9}/{0xCC..0xD2}/{0xCE}/{0xD4}`) |
-| R-05 | 3/5 | BillingFlag enum @+0x1C |
-| R-06 | 4/61 | guild action(1..5)×result(1..7) 2-D verdict map; cooldown-days arm |
-| R-07 | 4/81 | error-code byte map (`0xFF`/`1..0x18`/`0x15` mm:ss/`0x17` percent) |
-| R-08 | 4/15 | outcome selector `{100=shared,101=plain,else}` and failure 1..5→ids |
-| R-09 | 4/82 vs 4/108 | confirm billing-points vs gold field identity at runtime |
-| R-10 | 2/142 | Op enum (deposit/withdraw/move) = widget-action-id − 7 |
-| R-11 | 4/99 / 4/100 | **Cube-Gamble result panel** (NOT combat) — reel phase(3/5)/sub-kind(`0xFF` reset)/wager-value byte meanings |
-| R-12 | 5/79, 5/80 | DeathOp/mode byte sets; effect-id selectors |
-| R-13 | 5/5 | actor-record visual-state codes (1001/1011/1020/1021/1023/1041) — server-driven vs purely local |
-| R-43 | 4/12, 4/16, 4/22 | the leading result-byte values **beyond {0,1}** in the equip/item-slot responses (which code is success vs each failure) — **live-pending (6-D)** |
+| R-01 | 0/0 | meaning of the two trailing u32 server scalars A/B (handshake) — pending |
+| R-02 | 3/100 | **RESOLVED C15 — handlers.md §23.1** (per-code message-ids CONSUMER-CONFIRMED; in-world 1→1201…22→1208; select-screen 23→1604, generic→1107; see §A.4 here) |
+| R-03 | 3/7 | **RESOLVED C15 — handlers.md §23.2** (Result polarity: 1=success/0=fail; Subtype: 0=back-pose/1=front-pose/2=delete; ReadyTime consumed on deletion-cooldown failure branch; CONSUMER-CONFIRMED) |
+| R-04 | 3/6 | **RESOLVED C15 — §A.3 here** (error-code→string-id: 200/201→1106, 206→1105, 204-210→1107, 212→1113; CONSUMER-CONFIRMED) |
+| R-05 | 3/5 | BillingFlag enum @+0x1C — pending (prior status) |
+| R-06 | 4/61 | **R-CAP (non-blocking)** — guild action(1..5)×result(1..7) 2-D verdict map; cooldown-days magnitude + label. *Breakpoint plan: intercept 4/61 handler on action==5/result==2 path, compare ReadyTime to current timestamp; step through the action×result dispatch to read the 2-D label table.* |
+| R-07 | 4/81 | **RESOLVED C15 — §A.5 here** (full error-code→string-id map CONSUMER-CONFIRMED; 0x15 mm:ss via seconds@+10; 0x17 = client config record 100, NOT a wire byte) |
+| R-08 | 4/15 | **RESOLVED C15 — inventory_trade.md** (outcome selector `{100=shared,101=plain,else}` and failure 1..5→ids) |
+| R-09 | 4/82 vs 4/108 | **RESOLVED C15 — inventory_trade.md** (billing-points vs gold field identity confirmed) |
+| R-10 | 2/142 | **STRUCTURE RESOLVED C15 — inventory_trade.md** (Op enum formula Op = widget-action-id − 7 confirmed); Op→deposit/withdraw/move value mapping **R-CAP (non-blocking)** — *Breakpoint plan: intercept 2/142 builder at send site, read the widget-action-id field for each UI control that triggers deposit/withdraw/move.* |
+| R-11 | 4/99 / 4/100 | **RESOLVED C15 — cube_gamble.md** (Cube-Gamble result panel reel phase/sub-kind/wager-value byte meanings) |
+| R-12 | 5/79, 5/80 | **RESOLVED C15 — world_exit.md** (DeathOp/mode byte sets; effect-id selectors) |
+| R-13 | 5/5 | **RESOLVED C15 — actor.md** (actor-record visual-state codes 1001/1011/1020/1021/1023/1041 — server-driven vs local) |
+| R-43 | 4/12, 4/16, 4/22 | **R-CAP (non-blocking)** — the leading result-byte values beyond {0,1} in equip/item-slot responses. *Breakpoint plan: intercept 4/12/4/16/4/22 handlers, inspect result-byte under varied equip-error conditions; cross-reference with C2S trigger identification (see R-45).* |
 
 ### C.2 Flag-bit meanings
 
-| R | Opcode(s) | Pending VALUE |
+| R | Opcode(s) | Status / Pending VALUE |
 |---|---|---|
-| R-14 | 2/112 / keepalive-enabled flag | the toggle byte arg cadence / who flips it |
-| R-15 | 1/16/1/17 | (none on wire — local billing latch; confirm the displayed text only) |
-| R-16 | 5/124, 5/1 trailer, 5/53 StateByteA/B | actor visual-flag / title / relation bit meanings |
-| R-17 | 4/12/4/16 slot-type==15 | confirm the title/weapon-drawn bit set beyond 15 |
-| R-18 | 5/127 | StealthFlag bit semantics |
-| R-19 | 2/23/2/35/2/36/2/37 mode bytes | invite/accept/decline/leave/kick mode-value meanings |
+| R-14 | 2/112 / keepalive-enabled flag | the toggle byte arg cadence / who flips it — pending (prior status) |
+| R-15 | 1/16/1/17 | (none on wire — local billing latch; confirm displayed text only) — pending (prior status) |
+| R-16 | 5/124, 5/1 trailer, 5/53 StateByteA/B | **RESOLVED C15 — actor.md** (actor visual-flag / title / relation bit meanings) |
+| R-17 | 4/12/4/16 slot-type==15 | **Cube-gamble sub-aspect RESOLVED C15 — cube_gamble.md**; general slot-type==15 title/weapon-drawn bit set beyond 15 — pending |
+| R-18 | 5/127 | **RESOLVED C15 — actor.md** (StealthFlag bit semantics) |
+| R-19 | 2/23/2/35/2/36/2/37 mode bytes | **RESOLVED C15 — social.md** (invite/accept/decline/leave/kick mode-value meanings) |
 
 ### C.3 Unit / scale of a value
 
-| R | Opcode(s) | Pending VALUE |
+| R | Opcode(s) | Status / Pending VALUE |
 |---|---|---|
-| R-20 | 5/52 rec +0x14/+0x18 | whether the 64-bit accumulator is literal damage vs another signed magnitude |
-| R-44 | 5/13, 5/52, 5/7 | the **actor-id field VALUE semantics** in the in-game broadcasts (which field carries the actor id and how the client keys its local actor table) — **live-pending (6-D)** |
-| R-21 | 5/53, 5/32 | HP i64 vs MP/stamina split unit confirmation (structure agreed i64; semantics pending) |
-| R-22 | 4/108 / 4/115 | gold qword vs the three balance dwords (displayed total vs stored component) |
-| R-23 | 5/9, 5/11 | xp/rank-xp i64 sign + the server-config bonus/penalty split rates |
-| R-24 | 3/7 ReadyTime, 4/61/4/63 cooldowns | epoch vs delta; minutes-vs-days divisor confirmation |
-| R-25 | 5/18 | clock field0/field1 (seconds vs packed date/time) |
+| R-20 | 5/52 rec +0x14/+0x18 | **Layout RESOLVED C15 — skills.md** (field layout at +0x14/+0x18 confirmed); damage-scale VALUE **R-CAP (non-blocking)** — whether 64-bit accumulator is literal damage vs signed magnitude. *Breakpoint plan: intercept 5/52 handler at accumulator read, compare value to observed HP delta on a known hit.* |
+| R-44 | 5/13, 5/52, 5/7 | **Layout RESOLVED C15 — skills.md** (field layout for in-game broadcast bodies confirmed); actor-id field VALUE semantics **R-CAP (non-blocking)** — which field carries the actor id and how it keys the local actor table. *Breakpoint plan: breakpoint 5/13/5/52/5/7 handlers, read the actor-id field against the known actor-table key in a live session.* |
+| R-21 | 5/53, 5/32 | **RESOLVED C15 — stats.md** (HP i64 / MP / stamina split unit confirmed) |
+| R-22 | 4/108 / 4/115 | **RESOLVED C15 — inventory_trade.md** (gold qword vs three balance dwords identity confirmed) |
+| R-23 | 5/9, 5/11 | xp/rank-xp i64 sign + server-config bonus/penalty split rates — pending |
+| R-24 | 3/7 ReadyTime, 4/61/4/63 cooldowns | epoch vs delta; minutes-vs-days divisor confirmation — pending |
+| R-25 | 5/18 | clock field0/field1 (seconds vs packed date/time) — pending (prior status) |
 
 ### C.4 Conditional field presence / which-builder discriminator
 
-| R | Opcode(s) | Pending VALUE |
+| R | Opcode(s) | Status / Pending VALUE |
 |---|---|---|
-| R-26 | 1/4 | PIN field present only when 2nd-password cap configured (confirm live) |
-| R-27 | 2/52 short vs full | whether server keys on count words / struct+4 float / struct+1 to branch |
-| R-28 | 2/7 vs 2/83 vs 3/21 | which UI action drives each chat path + exact channel/target prefix layout |
-| R-29 | 2/151 selector | confirm sel 0 (open→3/8) vs 200 (confirm→4/113-family) at runtime |
-| R-30 | 5/146 / 2/146 field-1 | confirm the echoed field-1 is the local context/state global, not the inbound token |
+| R-26 | 1/4 | PIN field present only when 2nd-password cap configured (confirm live) — pending |
+| R-27 | 2/52 short vs full | whether server keys on count words / struct+4 float / struct+1 to branch — pending |
+| R-28 | 2/7 vs 2/83 vs 3/21 | which UI action drives each chat path + exact channel/target prefix layout — pending |
+| R-29 | 2/151 selector | **RESOLVED C15 — cash_shop_browser.md** (selector 0 → 3/8 open/refresh; selector 200 → 4/113-family confirm; confirmed at runtime) |
+| R-30 | 5/146 / 2/146 field-1 | confirm the echoed field-1 is the local context/state global, not the inbound token — pending |
 
 ### C.5 Opaque-forward interiors (size known; interior field split needs capture/struct)
 
@@ -732,22 +855,42 @@ structural items still worth flagging here:
 
 ### C.6 Pairing not statically pinned (which reply minor answers which request)
 
-| R | Opcode(s) | Pending pairing |
+| R | Opcode(s) | Status / Pending pairing |
 |---|---|---|
-| R-38 | 2/153 CmsgProductConfirm | reply opcode (4/113/4/114/4/115 best hypothesis; the builder stamps none) |
-| R-39 | the ~16 major-2 "Request→pending" submits | exact answering minor per panel/push channel |
-| R-40 | 2/92/2/93 | PvP/revenge reply minors (5/89/5/92/5/94 static-inferred) |
-| R-41 | 1/2 CmsgLobbyPing | the server pong/ack minor (lobby socket — see §Open Conflicts C1) |
-| R-42 | 5/55/5/65/5/123 | confirm the selector-dependent async-answer relationship to 2/30 / gift flow |
-| R-45 | 4/12, 4/16, 4/22 (equip results) | the **exact equip/item C2S send** that elicits each result (an item-panel / quick-equip / item-move send — NOT 2/16 CmsgActorInteract) — **live-pending (6-D)** |
+| R-38 | 2/153 CmsgProductConfirm | **RESOLVED C15 — crafting.md** (crafting commit 2/153→4/79 SmsgCraftingResult confirmed; product-confirm reply opcode on the product path remains best-hypothesis 4/113-family pending capture) |
+| R-39 | the ~16 major-2 "Request→pending" submits | exact answering minor per panel/push channel — pending |
+| R-40 | 2/92/2/93 | PvP/revenge reply minors (5/89/5/92/5/94 static-inferred) — pending |
+| R-41 | 1/2 CmsgLobbyPing | the server pong/ack minor (lobby socket — see §Open Conflicts C1) — pending (prior status) |
+| R-42 | 5/55/5/65/5/123 | confirm the selector-dependent async-answer relationship to 2/30 / gift flow — pending |
+| R-45 | 4/12, 4/16, 4/22 (equip results) | **R-CAP (non-blocking)** — the exact equip/item C2S send that elicits each result. *Breakpoint plan: intercept 4/12/4/16/4/22 handlers, trace back the C2S opcode from the handler-context stack; cross-reference result-byte values (R-43) concurrently.* |
 
-**Register size: 45 distinct capture/debugger-pending VALUE-semantic items** (R-01..R-45), spanning all
-five majors — R-01..R-42 from CYCLE 4, plus three **live-pending (6-D)** additions this pass: R-43
-(equip result-byte values beyond {0,1}), R-44 (the in-game broadcast actor-id field semantics), and R-45
-(the exact equip/item C2S that elicits each 4/x equip result). Every item is a *value* question, not a
-*structure* gap. (Plus the standing **CP949 message-DB string-text** items — message ids such as
-10006/51027/36004-36028/45xxx/54xxx/65xxx/58xxx/74xxx — which are a **string-table/asset task**, not a
-netcode debugger task.) *source:* the CYCLE 4 netcode-deep completeness study (dirty-room).
+### C.7 — CYCLE 15 campaign-plan resolutions (cross-domain, non-register)
+
+Items tracked in the CYCLE 15 campaign plan (§7 series) resolved in their governing specs. Recorded
+here for completeness; see the governing spec for the recovered facts.
+
+| Item | Governing spec | Status |
+|---|---|---|
+| §7-3, §7-4, §7-7 | `crypto.md` | RESOLVED C15 |
+| §7-5 | `anticheat.md` | RESOLVED C15 |
+| §7-6 | `shaders.md` | RESOLVED C15 |
+| §7-17 | `cube_gamble.md` | RESOLVED C15 |
+| §7-18 | `terrain_scene.md` | RESOLVED C15 |
+| §7-19 | `terrain_layers.md` | RESOLVED C15 |
+
+---
+
+**Register size (original): 45 distinct capture/debugger-pending VALUE-semantic items** (R-01..R-45),
+spanning all five majors — R-01..R-42 from CYCLE 4, plus R-43/R-44/R-45 added this campaign.
+**CYCLE 15 resolution summary:** 19 items RESOLVED (R-02, R-03, R-04, R-07, R-08, R-09,
+R-10-structure, R-11, R-12, R-13, R-16, R-17-cube, R-18, R-19, R-21, R-22, R-29, R-38,
+R-20-layout, R-44-layout); 6 items → **R-CAP / debugger-pending non-blocking** (R-06, R-10-op,
+R-20-scale, R-43, R-44-actor-id, R-45); 5 items at prior status (R-05, R-14, R-15, R-25, R-41).
+Plus 7 CYCLE 15 cross-domain items resolved in §C.7. Every item is a *value* question, not a
+*structure* gap. (The standing **CP949 message-DB string-text** items — ids such as
+10006/51027/36004-36028/45xxx/54xxx/65xxx/58xxx/74xxx — remain a **string-table/asset task**, not a
+netcode debugger task.) *source:* the CYCLE 4 netcode-deep completeness study (dirty-room); CYCLE 15
+resolutions per governing specs cited per item.
 
 ---
 

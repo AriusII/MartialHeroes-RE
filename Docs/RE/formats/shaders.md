@@ -18,14 +18,16 @@
 > file may open with CP949 comment lines before the version declaration (confirmed in two cel `.psh`
 > samples).
 > CYCLE 14 re-anchor (f61f66a9): 2 facts re-confirmed SAME (Renderer_InitCelGlowShaders 5-shader assemble order; D3DXAssembleShader caller census), 1 corrected (post-chain enable gate polarity: see §C5.6b — gate condition is option index 12 == 1, not == 0; gate PASSES on f61f66a9; bloom+cel structurally ON; old 263bd994 comparison or debugger confirm required to distinguish spec-misread from build flip).
-> **ida_reverified:** 2026-06-27 (CYCLE 14, f61f66a9); prior: 2026-06-24 (build 263bd994)
+> CYCLE 15 consumer-confirm (f61f66a9, 2026-06-30): `dotoonshading.psh` confirmed NOT an orphan — it is the 2nd of five runtime-assembled cel/post shaders, the normal-state cel pixel shader; loader and name binding consumer-confirmed (assembled at two sites: full-init loader and device-reset hot-reload; handle at renderer `+0x2B894` released and recreated on device reset; bound via SetPixelShader on the non-stealth cel-bind branch). The only assembled-but-discarded output in the cel set is `dotoonshading.vsh` (§C5.6b-ANOMALY, re-confirmed on f61f66a9). Confidence upgraded to CONSUMER-CONFIRMED. Runtime enable-flag reachability is a separate `[R-CAP]` debugger-confirm (non-blocking — does not affect the statically-confirmed loader/binding facts).
+> CYCLE-correction (f61f66a9, 2026-06-30): the cel/composite brightness ×0.5 is REAL, not a decompiler artifact — the `display.lua` loader multiplies `DISPLAY_BASE_BRIGHT_MULTI` and every per-state `DISPLAY_CHAR_BRIGHT_MULTI_*` channel by a literal 0.5 before storing (`ADD` / `ALPHA` / `GLOW_BRIGHT` / `LIGHT_RATIO` unscaled), cancelling the cel/composite shaders' ×2; live composite c0 = 0.525, c1 = 0.3 (net `saturate(scene·1.05 + glow·0.3)`). The per-state PS-constant c0.w is forced to 1.0 and c1.w = the per-state ALPHA. See §C5.5 / §C5.6a / §C5.6b and the Re-authoring Guidance.
+> **ida_reverified:** 2026-06-30 (CYCLE 15, f61f66a9); prior: 2026-06-27 (CYCLE 14, f61f66a9)
 > **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > **evidence:** [static-ida, vfs-sample]
 > **conflicts:** NONE structural for shader-file content. CYCLE 14 correction: §C5.6b post-chain enable-flag gate polarity corrected (see that section). Wave-11 correction: toon ramp renderer offset corrected from +0x2B9BC to +0x2B9DC (static-confirmed). Prior conflicts note: Three refinements vs the earlier text (not reversals): encoding statement loosened (code tokens ASCII, comments may carry CP949); `power2dx8.psh` / `power4dx8.psh` not statically string-referenced; power ladder extended from 1/2/4 to 1/2/4/8/16/32 (three further taps physically verified on disk). The exact `toonramp.bmp` band layout remains the only open content item (see Known Unknowns).
 > **wave-11 deep-dive (f61f66a9, 2026-06-28):** full shader-create API sequence resolved (exact D3DXAssembleShader arguments + PS-create idiom); VS-create ANOMALY discovered — the cel "vertex shader" handle is produced by calling `CreateVertexShader` with a D3DVERTEXELEMENT9 declaration array (not assembled `.vsh` bytecode), and the assembled `dotoonshading.vsh` token stream is released unused; glow/power PS handle (+0x2B6D4) and composite PS handle (+0x2B6D8) added to field map; all three RT texture/surface/RTS triples and glow divisors added; c4 light-direction source field offsets confirmed; composite PS-constant sources (+0x2BB48 / +0x2BB4C) and glow-path slot (+0x2BB54) added; per-pass D3DTSS/D3DSAMP/FVF cascades for bright-copy, glow-blur, composite, and present-blit passes fully decoded (see §C5.6c); §C5.6b gate-polarity open item subsumed by VS-create anomaly (see §C5.6b).
 >
-> **spec_status:** sample_verified (10 shader files cross-confirmed; all five runtime-assembled shaders read)
-> **date:** 2026-06-11 (re-verified 2026-06-21; CYCLE 11 addition 2026-06-23; re-verified 2026-06-24; CYCLE 14 correction 2026-06-27; Deep-3D 2026 fixed-function pipeline addition 2026-06-28; wave-11 deep-dive 2026-06-28)
+> **spec_status:** consumer_confirmed (10 shader files cross-confirmed; all five runtime-assembled shaders read; dotoonshading.psh loader and name binding consumer-confirmed on f61f66a9)
+> **date:** 2026-06-11 (re-verified 2026-06-21; CYCLE 11 addition 2026-06-23; re-verified 2026-06-24; CYCLE 14 correction 2026-06-27; Deep-3D 2026 fixed-function pipeline addition 2026-06-28; wave-11 deep-dive 2026-06-28; CYCLE 15 consumer-confirm 2026-06-30)
 
 ---
 
@@ -178,7 +180,7 @@ and the active tap is selected by the `DISPLAY_POWER` key in `display.lua` (ship
 |----------|-----------|-------------|------|---------------|
 | `dotoonshading.vsh`  | .vsh | vs.1.1 | Cel-shading vertex shader: world-view-projection transform, two-light Lambert diffuse, emits luminance-based UV on output texcoord 1 for toon LUT lookup. **Wave-11 note:** the runtime assembles this file but its bytecode is discarded — `CreateVertexShader` is called with a D3DVERTEXELEMENT9 declaration array instead (see §C5.6b-ANOMALY). Whether this shader ever executes on the live client is `[debugger-confirm]`. | VERIFIED (source content); runtime execution status [debugger-confirm] |
 | `power1dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample pass 1: base texture sample, scale by `c0` | VERIFIED (string-referenced) |
-| `dotoonshading.psh`  | .psh | ps.1.1 | Cel tone pixel shader — **normal** render state: `base × toonRamp`, ×2, brightness-modulated by per-state MULTI (`c0`) and ADD (`c1`); alpha passes through the lit value | VERIFIED (string-referenced) |
+| `dotoonshading.psh`  | .psh | ps.1.1 | Cel tone pixel shader — **normal** render state: `base × toonRamp`, ×2, brightness-modulated by per-state MULTI (`c0`) and ADD (`c1`); alpha passes through the lit value. The 2nd of five runtime-assembled shaders; assembled by both the full-init loader (device creation) and the device-reset cel-PS hot-reload; handle at renderer `+0x2B894` released and recreated on device reset. Bound via SetPixelShader on the non-stealth cel-bind branch. Not an orphan: loader, handle slot, and consumer all consumer-confirmed on f61f66a9. | CONSUMER-CONFIRMED |
 | `dotoonshading2.psh` | .psh | ps.1.1 | Cel tone pixel shader — **stealth / 은신 (invisible)** render state: identical arithmetic to the normal shader except alpha is taken from `c1.w` (the per-state ADD's w drives the stealth fade) | VERIFIED (string-referenced) |
 | `finaldx8.psh`       | .psh | ps.1.1 | Final composite / post: `saturate(scene×2×c0 + glow×c1)`, alpha forced opaque from a literal `(1,1,1,1)` constant | VERIFIED (string-referenced) |
 | `power2dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample (squared sample — one `mul r0,r0,r0` squares the sample) | VERIFIED (present on disk; not string-referenced in build 263bd994) |
@@ -242,7 +244,7 @@ The text source files are the complete, human-readable description of the shader
 - `lit = lit × 2` (a self-paired `add` doubling).
 - `lit = lit × c0` — multiply by the per-state brightness **MULTI** constant.
 - `rgb = lit + c1` — add the per-state brightness **ADD** constant; **alpha passes through the lit value** (a paired `+mov r0.a`).
-- Net: `out.rgb = (base × toonRamp) × 2 × c0 + c1`, `out.a = lit.a`. This confirms §C5.5 — `c0`/`c1` are the per-state brightness MULTI/ADD pair, applied here.
+- Net: `out.rgb = (base × toonRamp) × 2 × c0 + c1`, `out.a = lit.a`. This confirms §C5.5 — `c0`/`c1` are the per-state brightness MULTI/ADD pair, applied here. **Note (2026-06-30):** this net reduces to `base·toonRamp·MULTI + ADD` only because the `display.lua` loader stores each per-state MULTI channel pre-multiplied by a literal **×0.5**, which cancels the shader's `×2` on the base term; the ADD channel and the per-state ALPHA (carried in `c1.w`) are stored unscaled. So the stored/live `c0` (MULTI) is the file value × 0.5, while the net effective per-channel gain equals the file MULTI value. (`c0.w` is forced to a literal 1.0; `c1.w` = the per-state ALPHA, used by the stealth variant below.)
 
 **`dotoonshading2.psh` (cel tone, STEALTH / 은신 render state) — sample-verified arithmetic:**
 - **Identical** to `dotoonshading.psh` except the alpha write: alpha is taken from **`c1.w`** (the per-state ADD's w component) instead of from the lit value. The ADD constant's w therefore drives the stealth/invisible fade.
@@ -251,7 +253,7 @@ The text source files are the complete, human-readable description of the shader
 - Sample the scene/bright render target into `t0` and the bloom/glow render target into `t1`.
 - `scene = t0 × 2 × c0`, `glow = t1 × c1` — both `c0`/`c1` are composite-scale constants set per pass (NOT per-character brightness).
 - `rgb = scene + glow`; alpha forced opaque from a literal `def c2, 1,1,1,1`.
-- Net: `out = saturate(scene×2×c0 + glow×c1)`, `out.a = 1`. This refines the prior "saturate(2·edge·c0 + bloom·c1)" summary: `t0` = bright/scene RT scaled ×2·`c0`, `t1` = bloom/glow RT scaled by `c1`, `c2` = literal opaque-alpha constant.
+- Net: `out = saturate(scene×2×c0 + glow×c1)`, `out.a = 1`. This refines the prior "saturate(2·edge·c0 + bloom·c1)" summary: `t0` = bright/scene RT scaled ×2·`c0`, `t1` = bloom/glow RT scaled by `c1`, `c2` = literal opaque-alpha constant. **Note (2026-06-30):** the net reduces to `saturate(scene·BASE_BRIGHT + glow·GLOW_BRIGHT)` only because the `display.lua` loader stores `c0` (from `DISPLAY_BASE_BRIGHT_MULTI`) pre-multiplied by a literal **×0.5**, cancelling the shader's `×2` on the scene term; `c1` (from `DISPLAY_GLOW_BRIGHT_MULTI`) is stored unscaled. So the **stored/live** `c0` is the file value × 0.5 — for the shipped file (`BASE_BRIGHT = 1.05`) the live `c0 = 0.525`, **not** the file's 1.05 — while `c1 = 0.3`; the net composite is `saturate(scene·1.05 + glow·0.3)`.
 
 **`power*.psh` (glow/bloom passes):**
 - `power1dx8.psh`: `r0 = tex t0; r0 = r0 * c0` — sample base texture, scale by constant.
@@ -322,7 +324,7 @@ pixel shaders without touching the vertex shader or the render targets).
 | Shader file | Role | Bound in | Confidence |
 |-------------|------|----------|------------|
 | `data/shader/dotoonshading.vsh` | Cel vertex shader — world-view-projection transform + two-light Lambert → emits the N·L luminance coordinate on a texcoord | The cel bind site, once per skinned-character draw | HIGH |
-| `data/shader/dotoonshading.psh` | Cel tone pixel shader — **normal** render state | The cel bind site (default branch) | HIGH |
+| `data/shader/dotoonshading.psh` | Cel tone pixel shader — **normal** render state. Assembled at two sites: full-init loader (device creation) and cel-PS hot-reload (device reset); handle at renderer `+0x2B894` released and recreated on reset | The cel bind site (non-stealth branch; SetPixelShader) | CONSUMER-CONFIRMED |
 | `data/shader/dotoonshading2.psh` | Cel tone pixel shader — **stealth / 은신 variant** | The cel bind site (stealth branch, selected by a boolean argument) | HIGH |
 | `data/shader/finaldx8.psh` | Final composite / blur pixel shader for the post chain | The bloom-blur post pass (see `specs/rendering.md` §6) | HIGH |
 | `data/shader/power1dx8.psh` | Glow downsample / blur pixel shader for the post chain | The offscreen/scene glow pass (see `specs/rendering.md` §6) | HIGH |
@@ -416,8 +418,10 @@ about a hidden numeric "edge" parameter.
 
 What the per-skin pixel-shader constants actually are: once per skinned-character draw, two
 pixel-shader constant registers (registers 0 and 1) are uploaded from a **9-entry table** on the
-renderer object — one multiply triple and one add triple — selected by a per-character **state index**
-in the range 0..8. A display-config loader fills that table from an external display configuration
+renderer object — register 0 = the per-state MULTI rgb with its **w forced to a literal 1.0**, and
+register 1 = the per-state ADD rgb with its **w = the per-state ALPHA** — selected by a per-character
+**state index** in the range 0..8. (The normal cel pixel shader writes output alpha from the lit
+value; the stealth variant writes it from `c1.w` = the per-state ALPHA — see the Re-authoring Guidance.) A display-config loader fills that table from an external display configuration
 file under keys of the form `DISPLAY_CHAR_BRIGHT_{MULTI|ADD}_{R|G|B}_{state}` for the nine states:
 
 | State index | State | Meaning |
@@ -475,9 +479,7 @@ duplicate them.
    look is **coupled to the bloom/post feature being enabled**, and even skinned actors fall back to
    fixed-function shading when post is off. When the flag is on, both the per-frame cel VS constant
    upload and the per-draw cel bind (ramp + VS + normal/stealth PS) run.
-6. **Hot reload:** on a device reset, the partial reload re-assembles only the two cel pixel shaders
-   (and clears the stage-1 texture, vertex shader, and pixel shader) without touching the vertex
-   shader or the render targets.
+6. **Hot reload:** on a device reset, the partial reload first clears SetVertexShader(0), SetPixelShader(0), and SetTexture(stage 1, 0), then **releases the existing handles at renderer `+0x2B894` (`dotoonshading.psh`) and `+0x2B898` (`dotoonshading2.psh`)** and re-assembles exactly those two cel pixel shaders. The vertex shader handle, the composite and glow pixel-shader handles, and the three render targets are untouched. The Release-then-recreate of `+0x2B894` on device reset confirms it is a live, owned device object — not an orphaned or dead assembly.
 
 ### C5.6a Shipped display.lua values (CYCLE 11 addition)
 
@@ -507,10 +509,10 @@ duplicate them.
 
 | Key | Value | Role |
 |-----|-------|------|
-| `BASE_BRIGHT` | 1.05 | Global character brightness multiplier (applied before per-state MULTI) |
-| `GLOW_BRIGHT` | 0.3 | Glow/bloom intensity scale fed to the post chain |
+| `BASE_BRIGHT` | 1.05 | Global character/scene base brightness → composite `c0`. **Stored ×0.5 by the loader (live c0 = 0.525); the cel/composite shader's ×2 cancels it (net 1.05) — corrected 2026-06-30, see §C5.5 note.** |
+| `GLOW_BRIGHT` | 0.3 | Glow/bloom intensity scale fed to the post chain → composite `c1`. **Stored unscaled (live c1 = 0.3).** |
 | `GLOW_RANGE` | 1, 1 | Glow range parameters (width, height; both 1 in the shipped file) |
-| `LIGHT_RATIO` | 0.5 | Light-to-ambient blend ratio |
+| `LIGHT_RATIO` | 0.5 | Light-to-ambient blend ratio (stored unscaled; parsed-but-dead per `rendering.md §6.7`) |
 | `DISPLAY_POWER` | 2 | Shipped glow tap selector — value `2` selects `power2dx8.psh` as the active glow pixel shader |
 
 **Glow-tap chain (corrected from §C5.1).** The glow downsample/blur chain is a **1 / 2 / 4 / 8 / 16 / 32**
@@ -549,11 +551,11 @@ The format for all three is the device backbuffer adapter format. Pass order:
 1. Draw cel/toon world → TEX0.
 2. Clear to black; plain fixed-function fullscreen quad TEX0 → TEX1 (**bright-pass is a copy, not a threshold**; no pixel shader on this pass).
 3. Downscaled ortho quad TEX0 → TEX2; bind **the glow pixel shader** (`power1dx8.psh` by default, configurable via `DISPLAY_POWERSHADER` string — see §C5.1 and `specs/rendering.md §6.4`). Exactly **one** downscale tap; no multi-pass power chain in the binary.
-4. TEX1 (stage 0) + TEX2 (stage 1) → TEX0; bind **`finaldx8.psh`**; upload c0 = `BASE_BRIGHT` (≈1.05 from `display.lua`), c1 = `GLOW_BRIGHT` (≈0.3 from `display.lua`). Then run the FX overlay callback into TEX0.
+4. TEX1 (stage 0) + TEX2 (stage 1) → TEX0; bind **`finaldx8.psh`**; upload c0 = the stored base-brightness (= `BASE_BRIGHT` × 0.5 = **0.525** live, from `display.lua`; the shader's ×2 makes the net 1.05), c1 = `GLOW_BRIGHT` (**0.3**, stored unscaled). Then run the FX overlay callback into TEX0.
 5. Present TEX0 → backbuffer; opaque blit (ONE / ZERO blend, not additive).
 6. UI / HUD callback; end scene.
 
-Net composite arithmetic (SAMPLE-VERIFIED from `finaldx8.psh`): `out.rgb = saturate(TEX1 × 2 × c0 + TEX2 × c1)`, `out.a = 1`. See §C5.6 step 4 and the Re-authoring Guidance.
+Net composite arithmetic (SAMPLE-VERIFIED from `finaldx8.psh`): `out.rgb = saturate(TEX1 × 2 × c0 + TEX2 × c1)`, `out.a = 1`. With the shipped live constants (c0 = 0.525, c1 = 0.3) this reduces to `saturate(TEX1 × 1.05 + TEX2 × 0.3)` — the loader's ×0.5 on `BASE_BRIGHT` cancels the `×2` (corrected 2026-06-30). See §C5.6 step 4 and the Re-authoring Guidance.
 
 **Post-chain enable flag — CYCLE 14 + wave-11 analysis:**
 
@@ -576,11 +578,13 @@ Net composite arithmetic (SAMPLE-VERIFIED from `finaldx8.psh`): `out.rgb = satur
 > question (was it always == 1 or did the build flip it?) operationally moot: even if the gate
 > passes, the initialiser's VS-create step fails first.
 >
-> **[debugger-confirm] Tightened:** at the `CreateVertexShader` call inside `Renderer_InitCelGlowShaders`,
+> **[debugger-confirm] [R-CAP] Tightened:** at the `CreateVertexShader` call inside `Renderer_InitCelGlowShaders`,
 > read the return value in EAX (expected < 0). Then read renderer field `+0x2D67C` (expected 0) and
 > `+0x2B890` (cel VS handle, expected null/zero). If EAX ≥ 0 and the enable flag becomes non-zero,
 > the cel/post path is genuinely live and the D3DVERTEXELEMENT9 anomaly (§C5.6b-ANOMALY) must be
 > re-examined. Either way, the live EAX of that `CreateVertexShader` call is the single decisive read.
+> Non-blocking: the static loader and name binding of `dotoonshading.psh` are consumer-confirmed
+> independently of this runtime read (see §C5.6 step 6 and CYCLE 15 banner note).
 
 The per-frame fork that selects the offscreen RT path over the direct path reads an enable flag on
 the scene/post object (constructor default: 0 = off). The flag is stored to 2 at **at least two
@@ -1080,13 +1084,13 @@ field `+0x2D67C` (dword `[44687]`) is **non-zero**; otherwise it tail-calls
 | c4 light dir Z | `+0x2BA0C` | → VS `c4.z` (default 0); `c4.w` is forced 0 at upload |
 | Glow divisor X | `+0x2BA40` | screenW ÷ this = glow RT pixel width |
 | Glow divisor Y | `+0x2BA44` | screenH ÷ this = glow RT pixel height |
-| Composite PS c0 source | `+0x2BB48` | BASE_BRIGHT scalar → finaldx8 PS `c0` broadcast ×4 (≈1.05 from display.lua) |
-| Composite PS c1 source | `+0x2BB4C` | GLOW_BRIGHT scalar → finaldx8 PS `c1` broadcast ×4 (≈0.3 from display.lua) |
+| Composite PS c0 source | `+0x2BB48` | base-brightness scalar → finaldx8 PS `c0` broadcast ×4. **Stored value = BASE_BRIGHT × 0.5 = 0.525 live** (the loader pre-scales by ×0.5; the shader's ×2 nets 1.05) — corrected 2026-06-30 |
+| Composite PS c1 source | `+0x2BB4C` | GLOW_BRIGHT scalar → finaldx8 PS `c1` broadcast ×4 (0.3 from display.lua, stored unscaled) |
 | Glow shader path slot | `+0x2BB54` | Editable filename string; constructor default `power1dx8.psh` |
 | Post / cel enable flag | `+0x2D67C` (dword [44687]) | 0 = FF path; non-zero = cel/post path (§C5.6b) |
-| PS tint mulR [0..8] | dword [44691] | Per-state MULTI R, 9 entries |
-| PS tint mulG [0..8] | dword [44700] | Per-state MULTI G, 9 entries |
-| PS tint mulB [0..8] | dword [44709] | Per-state MULTI B, 9 entries |
+| PS tint mulR [0..8] | dword [44691] | Per-state MULTI R, 9 entries (stored ×0.5-scaled by the loader; cel shader ×2 nets the file MULTI value — corrected 2026-06-30) |
+| PS tint mulG [0..8] | dword [44700] | Per-state MULTI G, 9 entries (stored ×0.5-scaled) |
+| PS tint mulB [0..8] | dword [44709] | Per-state MULTI B, 9 entries (stored ×0.5-scaled) |
 | PS tint addR [0..8] | dword [44718] | Per-state ADD R, 9 entries |
 | PS tint addG [0..8] | dword [44727] | Per-state ADD G, 9 entries |
 | PS tint addB [0..8] | dword [44736] | Per-state ADD B, 9 entries |
@@ -1110,14 +1114,15 @@ field `+0x2D67C` (dword `[44687]`) is **non-zero**; otherwise it tail-calls
 
 ### Open questions (Deep-3D 2026)
 
-1. `[debugger-confirm]` Runtime return of `CreateVertexShader` (device vtable +0x16C) inside
+1. `[debugger-confirm]` `[R-CAP]` Runtime return of `CreateVertexShader` (device vtable +0x16C) inside
    `Renderer_InitCelGlowShaders` and the resulting value of renderer field `+0x2D67C` (post/cel
    enable flag). Wave-11 static analysis predicts the call returns `D3DERR_INVALIDCALL` (< 0)
    because the argument is a D3DVERTEXELEMENT9 declaration array, not a shader token stream —
    causing the initialiser to return 0, the enable flag to stay 0, and the whole world to draw
    fixed-function. Confirm by reading EAX after the call and reading `+0x2D67C` and `+0x2B890`
    (cel VS/decl handle) live. If EAX ≥ 0 and the flag becomes non-zero, the VS anomaly (§C5.6b-ANOMALY)
-   must be re-examined. This is the single decisive read for the cel/post path status.
+   must be re-examined. This is the single decisive read for the cel/post path status. Non-blocking:
+   the `dotoonshading.psh` loader and name binding are consumer-confirmed independently (CYCLE 15).
 2. `[debugger-confirm]` Live value of VS constant `c4` (light direction): source fields `+0x2BA04`/
    `+0x2BA08`/`+0x2BA0C` (x/y/z). Constructor default is (−1, 0, 0, 0); gameplay or config may
    overwrite the three scalar fields. The upload mechanism and source offsets are now static-confirmed;

@@ -29,6 +29,16 @@ public interface IHudEventHub
 
     ChannelReader<QuestCompletedEvent> QuestCompleted { get; }
 
+    ChannelReader<MailLetterArrivedEvent> MailLetters { get; }
+
+    ChannelReader<DeliveryRecordUpdatedEvent> DeliveryRecords { get; }
+
+    ChannelReader<SkillHotbarSlotSetEvent> SkillHotbarSlots { get; }
+
+    ChannelReader<TradeSlotUpdatedEvent> TradeSlots { get; }
+
+    ChannelReader<TradeSessionPhaseEvent> TradeSessions { get; }
+
     bool PublishChatLine(ChatLineEvent line);
 
     bool PublishBuffState(BuffStateEvent buffs);
@@ -50,6 +60,16 @@ public interface IHudEventHub
     bool PublishQuestLog(QuestLogChangedEvent log);
 
     bool PublishQuestCompleted(QuestCompletedEvent completed);
+
+    bool PublishMailLetter(MailLetterArrivedEvent letter);
+
+    bool PublishDeliveryRecord(DeliveryRecordUpdatedEvent record);
+
+    bool PublishSkillHotbarSlot(SkillHotbarSlotSetEvent slot);
+
+    bool PublishTradeSlot(TradeSlotUpdatedEvent slot);
+
+    bool PublishTradeSession(TradeSessionPhaseEvent session);
 
     void Complete();
 }

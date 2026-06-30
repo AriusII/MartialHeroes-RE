@@ -14,13 +14,19 @@ public static class VitalFormula
     private const float MpWeightCon = 1.5f;
     private const float MpWeightInt = 3.5f;
 
+    private const float ThirdWeightStr = 0.8999999761581421f;
+    private const float ThirdWeightDex = 1.5f;
+    private const float ThirdWeightAgi = 1.299999952316284f;
+    private const float ThirdWeightCon = 1.299999952316284f;
+    private const float ThirdWeightInt = 1.700000047683716f;
+
     private const double ScoreConstant = 30.0;
     public const byte HpAuraKind = 1;
     public const byte MpAuraKind = 2;
 
-    public static (long MaxHp, long MaxMp) Compute(in VitalFormulaInputs inputs)
+    public static (long MaxHp, long MaxMp, long MaxThird) Compute(in VitalFormulaInputs inputs)
     {
-        return (ComputeMaxHp(in inputs), ComputeMaxMp(in inputs));
+        return (ComputeMaxHp(in inputs), ComputeMaxMp(in inputs), ComputeMaxThird(in inputs));
     }
 
     public static long ComputeMaxHp(in VitalFormulaInputs inputs)
@@ -71,6 +77,21 @@ public static class VitalFormula
         var pctMult = 1.0 + SumAuraPercent(inputs.Aura0, inputs.Aura1, MpAuraKind);
 
         return (long)Math.Floor(baseMp * pctMult);
+    }
+
+    public static long ComputeMaxThird(in VitalFormulaInputs inputs)
+    {
+        var s = inputs.Stats;
+
+        var score =
+            s.Str * (double)ThirdWeightStr +
+            s.Dex * (double)ThirdWeightDex +
+            s.Agi * (double)ThirdWeightAgi +
+            s.Con * (double)ThirdWeightCon +
+            s.Int * (double)ThirdWeightInt +
+            ScoreConstant;
+
+        return (long)Math.Floor(score) + inputs.ThirdBarFlat;
     }
 
     private static double SumAuraPercent(in AuraTerm a0, in AuraTerm a1, byte kind)

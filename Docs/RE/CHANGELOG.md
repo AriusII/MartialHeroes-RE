@@ -2,6 +2,64 @@
 
 ---
 
+## 2026-06-30 — CYCLE 15: RE-unlock promotion (W→P) + conflict resolution
+
+### Summary
+
+CYCLE 15 statically recovered the load-bearing capture/debugger-pending facts (registry R-02..R-45 and
+the HIGH §7 crypto/asset gaps) from `doida.exe` at IDB anchor **f61f66a9**, then promoted them into the
+committed corpus. 22 facts recovered to dirty-room notes; 18 promoted implementation-ready; 4 remain
+runtime-only (R-CAP, capture-pending, non-blocking). 18 committed files updated (1 new). All
+consumer-confirmed (read from the code that uses each field/code); the firewall held — no decompiler
+identifiers, raw addresses, or cipher key bytes entered any committed file.
+
+### Files updated (18)
+
+`specs/`: handlers, net_contracts, inventory_trade, social, world_exit, crafting, cash_shop_browser,
+crypto, anticheat, skills, **cube_gamble (NEW)** · `structs/`: actor, stats, item · `formats/`:
+terrain_scene, terrain_layers, shaders · `opcodes.md`.
+
+### Tier-1 corrections (the binary disproved the prior spec)
+
+- **crypto.md** — SEED-128 is NON-WIRE (two local on-disk file decoders, not the network gate or RSA
+  chain); RC4 is DEFINITIVELY ABSENT (the candidate cluster is X-Trap/PE-integrity: bundled SSLeay
+  SHA-1 + a pi-constant Blowfish-family block cipher with embedded literal-string keys); the RSA
+  modexp entry corrected to the `mexpkm`/`Bignum_ModExp` wrapper (the prior named entry is unused).
+- **anticheat.md** — the GXProtect override classes are compiled but NOT statically wired; the shipped
+  client runs the base no-op singleton. The page-guard cadence is event-driven (PAGE_NOACCESS bracket
+  per auth op), not timed.
+- **shaders.md** — `dotoonshading.psh` is the normal-state cel pixel shader (2nd of 5), not an orphan;
+  the actual orphan is the unused `.vsh`.
+- **handlers.md** — char rename is opcode 3/6 (not 3/7); 3/7 Subtype 2 = delete.
+- **item.md** — equip acks 4/12 & 4/22 are two-armed (≥2 = no-op); 4/16 applies on any non-zero.
+
+### Conflicts resolved by IDA re-read (2026-06-30)
+
+- **HP width (structs/actor.md vs structs/stats.md).** Two promotion lanes disagreed. Re-reading the
+  5/53 and 5/32 handlers settled it: current HP is a single signed **i64 at Actor +0xB0** (8 bytes);
+  current MP is an **i32 at +0xB8** (the prior +0xB4 reading was the HP high dword); there is no inline
+  stamina slot (player-global mirror only). `actor.md`'s three vitals tables were corrected to match
+  `stats.md`. (Resolves R-21.)
+- **Guild Gate (specs/social.md §5.4).** The 4/65 full-sync Gate byte was inverted in CYCLE 14:
+  `Gate == 1` = full-sync apply (50-member arrays); any other value = leave/no-guild. The leave-pending
+  flag gates only the leave effects. CONSUMER-CONFIRMED; the CYCLE-14 reading is superseded.
+
+### Still runtime-only (R-CAP — capture/debugger-pending, non-blocking)
+
+5/52 literal damage scale + actor-key encoding (R-20, R-44); equip result ≥2 + any C2S-by-result
+(R-43, R-45); guild cooldown magnitude + MessageDB label text (R-06 residual); storage Op →
+deposit/withdraw/move mapping (R-10 residual). Each carries a breakpoint plan for a live session.
+
+### Firewall
+
+Promotion crossed the dirty→spec boundary via a neutral doc-authoring pass (the spec-author role).
+Dirty-room evidence addresses stayed in the gitignored `Docs/RE/_dirty/cycle15/` notes; the committed
+specs carry none. Cipher key bytes and S-box tables are characterized by role/length only, never
+transcribed. Leak scan over all added spec lines: clean. `names.yaml` and per-file IDB annotations are
+deferred to a dedicated ida-toolsmith pass.
+
+---
+
 ## 2026-06-29 — Consolidation wave (183 → 164 files)
 
 ### Summary

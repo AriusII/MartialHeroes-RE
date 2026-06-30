@@ -9,7 +9,13 @@ public sealed class CellCollisionManager
 
     private const float CellSpan = 1024f;
 
+    private const float GroundSentinel = float.MinValue;
+
+    private const float CeilingSentinel = float.MaxValue;
+
     private readonly Dictionary<(int MapX, int MapZ), CellCollision> _cells = new();
+
+    private bool _groundSpecLogged;
 
     public void RegisterCell(
         int mapX, int mapZ, SodBlob? sod,
@@ -108,32 +114,35 @@ public sealed class CellCollisionManager
 
     public bool OverhangTest(Vector3 atGodot, out float floorGodotY, out float ceilingGodotY)
     {
-        floorGodotY = float.NegativeInfinity;
-        ceilingGodotY = float.PositiveInfinity;
+        floorGodotY = GroundSentinel;
+        ceilingGodotY = CeilingSentinel;
 
         var px = atGodot.X;
         var pz = atGodot.Z;
-
-        var foundFloor = false;
-        var foundCeiling = false;
 
         foreach (var cell in _cells.Values)
         {
             foreach (var tri in cell.FloorOverhangs)
                 if (PointInTriangleXz(px, pz, tri.A, tri.B, tri.C))
                     if (tri.PlaneGodotY > floorGodotY)
-                    {
                         floorGodotY = tri.PlaneGodotY;
-                        foundFloor = true;
-                    }
 
             foreach (var tri in cell.CeilingOverhangs)
                 if (PointInTriangleXz(px, pz, tri.A, tri.B, tri.C))
                     if (tri.PlaneGodotY < ceilingGodotY)
-                    {
                         ceilingGodotY = tri.PlaneGodotY;
-                        foundCeiling = true;
-                    }
+        }
+
+        var foundFloor = floorGodotY != GroundSentinel;
+        var foundCeiling = ceilingGodotY != CeilingSentinel;
+
+        if (!_groundSpecLogged)
+        {
+            _groundSpecLogged = true;
+            GD.Print(
+                "[CellCollisionManager] OverhangTest fallback follows entity_placement.md §2.5: " +
+                "-FLT_MAX sentinel, on-edge-inclusive triangle pick, order-independent running max; " +
+                $"valid=(outY!=sentinel) authoritative (floor={foundFloor}, ceiling={foundCeiling}).");
         }
 
         return foundFloor || foundCeiling;

@@ -28,7 +28,7 @@ public readonly struct QuestRecord
 
     public readonly AcceptedFlagsBuffer AcceptedFlags;
 
-    public readonly byte ClassRaceMask;
+    public readonly byte StanceJobGate;
 
     public readonly byte SecondaryStatMin;
 
@@ -49,7 +49,7 @@ public readonly struct QuestRecord
         ushort minLevel,
         ushort maxLevel,
         AcceptedFlagsBuffer acceptedFlags,
-        byte classRaceMask,
+        byte stanceJobGate,
         byte secondaryStatMin,
         byte secondaryStatMax,
         byte tertiaryStatBound)
@@ -66,7 +66,7 @@ public readonly struct QuestRecord
         MinLevel = minLevel;
         MaxLevel = maxLevel;
         AcceptedFlags = acceptedFlags;
-        ClassRaceMask = classRaceMask;
+        StanceJobGate = stanceJobGate;
         SecondaryStatMin = secondaryStatMin;
         SecondaryStatMax = secondaryStatMax;
         TertiaryStatBound = tertiaryStatBound;

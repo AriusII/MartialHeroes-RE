@@ -11,6 +11,7 @@
 |------------------|-------|
 | `verification`   | CYCLE 14 re-anchor (f61f66a9): 5 facts re-confirmed SAME, 0 corrected. Covered facts: (1) `.ted` five-block no-header 46,987-byte layout (§5.3); (2) block-2 normals `/127.0`, block-5 diffuse `×0.5`, steep-flag `>8.0`, spacing `16.0`, cell origin `(map−10000)×1024`, 16×16 patch grid, UV step `0.25` with `s_flip`/`t_flip` (§5.2–§5.8); (3) block-3 texture-index byte stored RAW by the loader, decrement/clamp in downstream finalize only (§5.6); (4) `.map` twelve-section whitespace token parser with keyword→decoder dispatch, geometry directives present on disk but not parser-consumed (§3.1–§3.4); (5) the two `.map` parsers (VFS-path + loose-disk twin) are byte-identical, relocation confirmed at new addresses — behavior unchanged. |
 | `deep-cartography deepening` | 2026-06-29 (static-only, anchor f61f66a9) — `bgtexture.lst` on-disk stride corrected to 48 B (§4.1); sampler flat/steep paths confirmed, block-4 triangulation question resolved UV-only (§5.4a); `.sod` bulk-read file layout re-validated (§11.1); area loader file set/order/sizes re-validated (see `region_grid.md`). Open items D1–D7 tightened with new static bounds. |
+| `ground-draw render-state recipe` | 2026-06-30 (static-only, anchor f61f66a9) — added §5.11: the `.ted` ground draw-time fixed-function render state (FVF 0x252 44-byte vertex with a dead duplicate UV set; stage-0 MODULATE2X texture×diffuse×2 pairing with the §5.8 ×0.5 diffuse halving; sampler MIRROR during the ground draw; cull `D3DCULL_CW`; near-ground stage-1 projected shadow via `TCI_CAMERASPACEPOSITION` + `PROJECTED`+`COUNT4` (260); diffuse byte0→blue/byte1→green/byte2→red BGRA lane mapping confirming the port's R/B swap). Render-domain only — no on-disk format change. |
 | `ida_reverified` | `2026-06-27` |
 | `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
 | `evidence`       | `[static-ida]` — loader read-path re-confirmed at relocated addresses under build f61f66a9; ~96% of functions shifted by a uniform +0x80/+0x7e (behavior unchanged). Prior anchor `263bd994` retired as canonical; f61f66a9 is now the active IDB. |
@@ -804,6 +805,77 @@ marks a workspace copy written by the in-game terrain editor when it saves a pat
   format verdict — the layout is identical regardless.
 - **Editor save protocol** (write-then-rename vs. staging copy) is not recoverable from VFS content
   alone; the "post" = post-edit naming is a reasonable inference, marked UNVERIFIED.
+
+---
+
+### 5.11 Terrain ground draw-time render-state recipe (added 2026-06-30)
+
+This subsection records the Direct3D 9 fixed-function render state the runtime installs when it draws
+the `.ted` ground tiles (the `TerrainGround_DrawAllLayers` ground pass). It is a render-domain
+companion to the on-disk `.ted` blocks above — it does **not** change any on-disk format — and is
+provided so a port reproduces ground shading, the diffuse-channel order, and the near-ground shadow
+projection faithfully.
+
+**Vertex format.** The ground vertex uses **FVF `0x252`** (`D3DFVF_XYZ | D3DFVF_NORMAL |
+D3DFVF_DIFFUSE | D3DFVF_TEX2`) — position (12 B) + normal (12 B) + one packed `D3DCOLOR` diffuse
+(4 B) + **two** 2-D UV sets (2 × 8 B) = **44-byte vertex**. The second UV set (`uv1`) is a **verbatim
+copy of `uv0`** and is functionally **dead** at draw time: the near-ground shadow stage auto-generates
+its own coordinates from camera-space position (see below), so `uv1` is never consumed. A port may
+emit a single UV set.
+
+**Base ground pass (and far ground) stage / sampler / render state:**
+
+| Target | State | Value | D3D9 enum |
+|---|---|---|---|
+| Stage 0 | COLOROP | MODULATE2X | `texture × diffuse × 2` |
+| Stage 0 | COLORARG1 | TEXTURE | |
+| Stage 0 | COLORARG2 | DIFFUSE | |
+| Stage 0 | ALPHAOP | DISABLE | |
+| Stage 1 | (base/far pass) | DISABLED | |
+| Stage 2 | (base/far pass) | DISABLED | |
+| Sampler 0 | MIN / MAG / MIP filter | LINEAR | |
+| Sampler 0 | ADDRESS U/V | **MIRROR** during the ground draw | (restored to WRAP otherwise) |
+| Render | `D3DRS_FOGENABLE` | enabled | |
+| Render | alpha-test | enabled | |
+| Render | alpha-blend | disabled | |
+| Render | `D3DRS_CULLMODE` | **`D3DCULL_CW`** | clockwise backface cull |
+
+The stage-0 `MODULATE2X` (`texture × diffuse × 2`) deliberately pairs with the `.ted` loader's
+**×0.5 diffuse halving** (§5.8): the loader halves each stored diffuse byte on read, and the draw
+multiplies by 2, so an unlit white tile round-trips to full brightness while leaving headroom for
+dynamic lighting.
+
+**Near-ground projected shadow (stage 1 — near ground only; far ground omits it).** For the near
+ground draw the runtime additionally installs a projected shadow on texture stage 1, saving and
+restoring this state around the near-ground draw:
+
+| Target | State | Value | Note |
+|---|---|---|---|
+| Transform | `D3DTS_TEXTURE1` | shadow **perspective** matrix | the shadow projector's perspective transform |
+| Stage 1 | texture | shadow render target | the shadow RT |
+| Stage 1 | TEXCOORDINDEX | `D3DTSS_TCI_CAMERASPACEPOSITION` | auto-generate coords from camera-space position |
+| Stage 1 | TEXTURETRANSFORMFLAGS | `PROJECTED` + `COUNT4` = **260** | projected 4-component texgen |
+| Stage 1 | COLOROP | MODULATE | modulate over stage 0 |
+| Sampler 1 | ADDRESS U/V | CLAMP | |
+
+Because stage 1 auto-generates its coordinates from camera-space position, the duplicated on-disk
+`uv1` set is unused — confirming the "dead second UV set" note above. Far ground draws without this
+stage-1 shadow block.
+
+**Vertex-diffuse byte-to-channel mapping (validates the port's R/B swap).** At draw the per-vertex
+diffuse is a packed `D3DCOLOR`, and the on-disk diffuse bytes map into its lanes as:
+
+| Disk diffuse byte (block 5, §5.8) | Editor label | D3DCOLOR lane at draw | Scale |
+|---|---|---|---|
+| byte 0 | "R" | **blue** lane | ×0.5 |
+| byte 1 | "G" | **green** lane | ×0.5 |
+| byte 2 | "B" | **red** lane | ×0.5 |
+
+So the editor's "RGBA" byte labelling is **reversed into BGRA** at render time (each lane additionally
+halved per the MODULATE2X pairing above). A faithful port must apply the **R/B channel swap** when
+uploading `.ted` block-5 diffuse to a `D3DCOLOR`-style packed vertex colour — this is the binary
+confirmation behind the port's existing red/blue swap. (This is a render-domain note; the on-disk
+block-5 byte positions in §5.8 are unchanged.)
 
 ---
 

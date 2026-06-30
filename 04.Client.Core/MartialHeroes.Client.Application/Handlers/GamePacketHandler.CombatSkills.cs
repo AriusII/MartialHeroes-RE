@@ -5,6 +5,7 @@ using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Domain.Skills.Skills;
+using MartialHeroes.Client.Domain.Stats.Stats;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 using MartialHeroes.Shared.Kernel.Ids;
 
@@ -95,32 +96,28 @@ public sealed partial class GamePacketHandler
         var attackerKey = new ActorKey(header.CasterId, ToEntitySort(header.CasterSort));
         _eventBus.Publish(new ActorSkillActionEvent(attackerKey, skillId, header.ActionCode));
 
-        if (header.CastFlag != 0 && localPlayer is not null && _world.LocalActorKey == attackerKey)
+        var casterIsLocal = localPlayer is not null && _world.LocalActorKey == attackerKey;
+
+        if (header.CastFlag != 0 && casterIsLocal)
             ConfirmLocalCast(new SkillId(skillId), header.TargetCount);
 
         var records = payload[SmsgActorSkillAction.HeaderSize..];
+
+        var accumulator = new SkillDamageAccumulator();
 
         for (var t = 0; t < header.TargetCount; t++)
         {
             var recordStart = t * SmsgActorSkillAction.TargetRecordStride;
             if (recordStart + SmsgActorSkillAction.TargetRecordStride > records.Length) break;
 
-            var record = records.Slice(recordStart, SmsgActorSkillAction.TargetRecordStride);
+            var recordBytes = records.Slice(recordStart, SmsgActorSkillAction.TargetRecordStride);
+            ref readonly var record =
+                ref MemoryMarshal.AsRef<SmsgActorSkillAction.TargetRecord>(recordBytes);
 
-            var targetSubKey = record[SmsgActorSkillAction.TargetSubKeyOffset];
-            var targetKey = BinaryPrimitives.ReadUInt32LittleEndian(
-                record.Slice(SmsgActorSkillAction.TargetKeyOffset, sizeof(uint)));
+            var hit = record.HitMagnitude;
+            accumulator.Add(hit);
 
-            var damageCandidateA =
-                record.Length >= 0x10 + sizeof(long)
-                    ? BinaryPrimitives.ReadInt64LittleEndian(record.Slice(0x10, sizeof(long)))
-                    : 0L;
-            var damageCandidateB =
-                record.Length >= 0x14 + sizeof(long)
-                    ? BinaryPrimitives.ReadInt64LittleEndian(record.Slice(0x14, sizeof(long)))
-                    : 0L;
-
-            var key = new ActorKey(targetKey, ToEntitySort(targetSubKey));
+            var key = new ActorKey(record.TargetKey, ToEntitySort(record.TargetSubKey));
 
             hudEventHub?.PublishCombatText(new CombatTextEvent(
                 key,
@@ -128,9 +125,19 @@ public sealed partial class GamePacketHandler
                 CombatTextEvent.MinKind,
                 false,
                 skillId,
-                damageCandidateA,
-                damageCandidateB));
+                hit,
+                0L));
         }
+
+        if (casterIsLocal && accumulator.HasDisplayDamage)
+            hudEventHub?.PublishCombatText(new CombatTextEvent(
+                attackerKey,
+                accumulator.RecordCount,
+                CombatTextEvent.MinKind,
+                false,
+                skillId,
+                accumulator.DisplayTotal,
+                0L));
 
         return true;
     }

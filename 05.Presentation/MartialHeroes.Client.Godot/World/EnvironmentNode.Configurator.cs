@@ -15,6 +15,9 @@ public sealed partial class EnvironmentNode
     private Dictionary<int, ImageTexture?>? _cloudTexCache;
     private int _dateBlock;
     private LensFlareNode? _lensFlare;
+    private int _optionShadow = 1;
+    private bool _optionShadowRead;
+    private bool _optionShadowLogged;
 
     private void ApplyKeyframe(int kf, float frac)
     {
@@ -40,7 +43,16 @@ public sealed partial class EnvironmentNode
         if (env is null) return;
 
         env.TonemapMode = Environment.ToneMapper.Linear;
-        env.TonemapExposure = 1.0f;
+        env.TonemapExposure = _displayBaseBrightMulti;
+        GD.Print($"[Environment] BASE_BRIGHT={_displayBaseBrightMulti:F3} -> TonemapExposure={_displayBaseBrightMulti:F3} " +
+                 "(Linear tonemap scales the composited scene by BASE_BRIGHT; this is the base/scene brightness, " +
+                 "SEPARATE from the per-character cel MULTI already applied in CelShade — does NOT double-apply). " +
+                 "spec: Docs/RE/specs/rendering.md §6.3 / environment.md §9.");
+        GD.Print("[Environment] double-brighten audit PASS: ambient(AmbientLightEnergy=1.0 + OPTION_BRIGHT floor only), " +
+                 "directional(LightEnergy=1.0), point lights(LightEnergy=PointLightMasterIntensity curve), " +
+                 "background/material/fog colours (ClampColor/BgraToColor raw, no /1.05 pre-divide) — NO scene path bakes a " +
+                 "BASE_BRIGHT factor or sets energy>1 to compensate, so TonemapExposure=BASE_BRIGHT is the SINGLE scene-brightness " +
+                 "application site (matches DX9 scene*1.05, applied exactly once).");
 
         env.SsaoEnabled = false;
         env.SsilEnabled = false;
@@ -131,7 +143,7 @@ public sealed partial class EnvironmentNode
     private void ApplyGlow(Environment env)
     {
         env.GlowEnabled = true;
-        env.GlowHdrThreshold = 0.0f;
+        env.GlowHdrThreshold = 0.8f;
         env.GlowBlendMode = Environment.GlowBlendModeEnum.Additive;
 
         for (var i = 0; i < 7; i++) env.SetGlowLevel(i, 0f);
@@ -143,7 +155,9 @@ public sealed partial class EnvironmentNode
 
         GD.Print(
             $"[Environment] glow ENABLED additive single-level: intensity(c1 DISPLAY_GLOW_BRIGHT_MULTI)={_glowGlowWeight:F3} " +
-            $"displayBaseBrightMulti(c0)={_displayBaseBrightMulti:F3} hdrThreshold=0. " +
+            $"displayBaseBrightMulti(c0)={_displayBaseBrightMulti:F3} hdrThreshold=0.8 " +
+            "(DX9 glow runs scene through power2dx8.psh square falloff -> only bright regions bloom; " +
+            "GlowHdrThreshold=0.8 biases bloom toward bright areas to approximate the power-law). " +
             "spec: Docs/RE/specs/post_processing.md §8 / environment.md §9.2.");
     }
 
@@ -189,7 +203,58 @@ public sealed partial class EnvironmentNode
             _dirLight.LightEnergy = 1.0f;
         }
 
-        _dirLight.ShadowEnabled = true;
+        ReadOptionShadow();
+        var shadowOn = _optionShadow != 3;
+        _dirLight.ShadowEnabled = shadowOn;
+        if (!_optionShadowLogged)
+        {
+            GD.Print($"[Environment] OPTION_SHADOW={_optionShadow} (DoOption.ini [DO_OPTION], clamp[1,3], default 1; " +
+                     $"3=OFF) -> directional ShadowEnabled={shadowOn}. spec: Docs/RE/specs/environment.md.");
+            _optionShadowLogged = true;
+        }
+    }
+
+    private void ReadOptionShadow()
+    {
+        if (_optionShadowRead) return;
+        _optionShadowRead = true;
+        _optionShadow = 1;
+        try
+        {
+            var dir = ClientPathResolver.ResolveClientDir();
+            if (dir is null) return;
+
+            var path = Path.Combine(dir, "DoOption.ini");
+            if (!File.Exists(path)) return;
+
+            var inSection = false;
+            foreach (var rawLine in File.ReadLines(path))
+            {
+                var line = rawLine.Trim();
+                if (line.StartsWith('['))
+                {
+                    inSection = line.Equals("[DO_OPTION]", StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+
+                if (!inSection) continue;
+
+                var eq = line.IndexOf('=');
+                if (eq < 0) continue;
+
+                var k = line[..eq].Trim();
+                if (!k.Equals("OPTION_SHADOW", StringComparison.OrdinalIgnoreCase)) continue;
+
+                if (int.TryParse(line[(eq + 1)..].Trim(), out var v))
+                    _optionShadow = Math.Clamp(v, 1, 3);
+
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[Environment] DoOption.ini OPTION_SHADOW read failed: {ex.Message}");
+        }
     }
 
 
@@ -465,6 +530,7 @@ public sealed partial class EnvironmentNode
         var mat = new StandardMaterial3D
         {
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            DisableFog = true,
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,

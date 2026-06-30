@@ -59,6 +59,7 @@ verification:
     - matrix major-order / up-axis / unit scale
     - whether a player's saved DoOption.ini carries a brightness below 100
   atm_deep_pass: 2026-06-29   # atmosphere deep-cartography deepening pass: g_EnvTimeBlock struct layout added (§2.5, 7 fields confirmed statically); time-scale seed remains [debugger-confirm]
+  render_radius_note: 2026-06-30  # §3.6 terrain sight/stream-radius quality tiers recorded (high/mode-1=1800, mode-2=1000, all other modes=600 world units; per-area SIGHT_FIX overrides the tier as a literal radius; radius clamps to 1000 above 15000; fog fractions blended toward 1.0 only when radius<1000, so 1800 takes the unblended branch). §2.1/§2.2/§2.4/§6.2a cloud-dome (and star-dome) day-tint cadence corrected from 12-frame/7200 ms to 48 slots × 1800 ms, matching environment_bins.md §4/§5.
   ida_reverified: 2026-06-28    # wave-11 atmosphere/fog deep-dive (f61f66a9): §8 item 13 CLOSED — FOGVERTEXMODE(140)/D3DFOG_LINEAR(3)/RANGEFOGENABLE(48)=1 confirmed; FOGTABLEMODE(35) never written; GRSFog node struct + vtable+8 apply branches recovered; Fog_ApplyForViewDistance device fog formula (fog.bin fractions × stream radius) pinned; s×3.0/1/s are EnvironmentLightScene node fog fields only; height fog CLOSED NEGATIVE; EXP/EXP2 unreachable (GRSFog type-4 default, no writer); fog-singleton struct recovered; fog%d.bin layout pinned. Prior pass same date — lighting-apply closeout (f61f66a9): SkySystem_UpdatePerFrame interval gate + env update order confirmed; GLight cull-collect → draw-traverse device push chain recovered; SetLight +204 / LightEnable +212 vtable offsets pinned; Fog_ApplyAfterLoad per-frame FOGCOLOR push + render-view mirror confirmed; GCull_ApplyRenderStateSet 18-slot RS dispatcher identified (narrows §8 item 13); two device-handle paths documented; directional direction globals confirmed write-only. Prior same date: deep-3d pass (f61f66a9): EnvironmentLightScene full struct layout + point-light runtime system + per-pass fog enable map + D3D render-state/vtable tokens recovered; device-ambient byte-add mechanism confirmed; ctor zeroing confirmed. Prior: 2026-06-27 CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected. Prior: 2026-06-24 CYCLE 12 audit (2026-06-24, 263bd994): DisplayConfig_ParseFramerate confirmed as the display.lua loader (§9.1); OPTION_BRIGHT read/write confirmed (§6.2a). Prior CYCLE 12 (2026-06-22, 263bd994): DISPLAY_BASE_BRIGHT_MULTI=pixel-shader c0; GLOW_BRIGHT_MULTI=c1; DISPLAY_LIGHT_RATIO confirmed DEAD on world-geometry path — see §9.2/§9.4. CYCLE 11 World block (263bd994): in-world fog config (range=s×3, near=1/s, LINEAR, enabled s>0) and the closed-form trig sun/moon orbit (seconds-of-day; not a stored track or log curve) folded in. Prior (2026-06-21): ASSET-FIDELITY re-confirmed water RESOLVED-NEGATIVE, ambient floor (OPTION_BRIGHT/100)*255 with K_ambient=0, device-ambient render-state token 139, quality-mode sky LIGHT-RATIO {mode1 0.25 / mode2 0.7 / else 2.0}; CYCLE 7 (2026-06-20) static re-walk of env/lighting constants
   ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
   readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
@@ -184,8 +185,8 @@ returns success. The order (code-confirmed):
 | `SKY_KEYFRAME_COUNT` | 48 | Total keyframes per day |
 | `SKY_KEYFRAME_MS` | 1800 | Milliseconds per keyframe step |
 | `SKY_PERIOD_MS` | 86 400 | Total simulated day length (48 × 1800 ms) |
-| `STARDOME_KF_COUNT` | 12 | Keyframe count for stardome and clouddome |
-| `STARDOME_KF_MS` | 7200 | Milliseconds per stardome/clouddome step (4 × 1800) |
+| `STARDOME_KF_COUNT` | 48 | Slot count for the stardome and clouddome day-tint grids (corrected 2026-06-30 — both domes use the same 48-slot cadence as the main lighting cycle, NOT a coarser 12-keyframe cycle; see `environment_bins.md §4`/§5) |
+| `STARDOME_KF_MS` | 1800 | Milliseconds per stardome/clouddome slot (same 1800 ms as the lighting cycle) |
 
 The 48-slot model is **CONFIRMED from the runtime colour sampler**: it indexes the master
 sky-colour table by time-of-day at 1800 ms (1800 s of simulated day) per slot, bilinearly
@@ -204,10 +205,10 @@ frac           = (t_wrapped mod SKY_KEYFRAME_MS) / SKY_KEYFRAME_MS   // 0.0 .. <
 kf_next        = (kf_index + 1) mod SKY_KEYFRAME_COUNT
 ```
 
-For stardome and clouddome (12-frame cycle):
+For stardome and clouddome (48-slot cycle — corrected 2026-06-30):
 
 ```
-star_kf_index  = t_wrapped / STARDOME_KF_MS       // 0 .. 11
+star_kf_index  = t_wrapped / STARDOME_KF_MS       // 0 .. 47
 star_frac      = (t_wrapped mod STARDOME_KF_MS) / STARDOME_KF_MS
 star_kf_next   = (star_kf_index + 1) mod STARDOME_KF_COUNT
 ```
@@ -243,8 +244,9 @@ mapping is consistent across all sampled areas:
 | 40 | 20:00 (evening) |
 | 47 | 23:30 (late night) |
 
-The stardome/clouddome 12-frame mapping divides the same 86 400 ms window into 12 × 7200 ms
-steps (one step ≈ 2 simulated hours).
+The stardome/clouddome day-tint mapping divides the same 86 400 ms window into **48 × 1800 ms**
+slots — the same cadence as the main lighting cycle (corrected 2026-06-30; the earlier 12 × 7200 ms
+reading mis-grouped the per-layer colour grid, see `environment_bins.md §4`/§5).
 
 ### 2.5 g_EnvTimeBlock — day/night clock runtime object
 
@@ -448,6 +450,8 @@ In every non-disabled branch the mode is committed to **`FOGVERTEXMODE` (140)** 
 
 This is the dominant in-world device fog push, called from `Terrain_SetStreamRadius` and the post-load fog apply path. The argument is the live terrain sight/streaming radius `stream_radius`.
 
+**Terrain sight / stream-radius quality tiers (recorded 2026-06-30).** `stream_radius` is the terrain sight/streaming radius driven by `Terrain_SetStreamRadius`, selected by graphics quality mode: **high / mode-1 = 1800**, **mode-2 = 1000**, and **all other modes = 600** world units. A per-area `SIGHT_FIX` value (`map_option%d.bin` offset 0x04 — see `environment_bins.md §1.1`) **overrides** the tier as a literal radius when non-zero. The radius is **clamped to 1000 when it exceeds 15000**. In the formula below the fog fractions are blended toward 1.0 **only when `stream_radius < 1000`**, so the high-quality **1800** radius takes the **unblended** branch (`fs = start_frac`, `fe = end_frac`). This pins **1800** as the high-quality sight radius (the value the port already uses).
+
 The fog singleton (`Fog_GetSingleton`) holds these fields used by this routine:
 
 | Singleton offset | Type | Field | Init default |
@@ -637,8 +641,9 @@ user-edited on-disk INI value remains as a thin runtime residual (§6.4 / §8).
 
 **Keyframe sampling (CONFIRMED).** Every per-frame environment sampler — fog colour, directional
 light, ambient light, fog scalar — uses the same 48-keyframe / 1800 ms model of §2 with linear
-interpolation `lerp(table[kf], table[kf_next], frac)`. The star/cloud domes use the coarser 12-frame
-(7200 ms) cadence (§2.2). Fog/light samplers run from the per-frame map-time tick.
+interpolation `lerp(table[kf], table[kf_next], frac)`. The star/cloud domes use the **same 48-slot
+(1800 ms) cadence** (§2.2; corrected 2026-06-30 — the earlier "12-frame / 7200 ms" reading is
+refuted by the dome interpolators). Fog/light samplers run from the per-frame map-time tick.
 
 **Fog colour — byte domain, applied directly (CONFIRMED).** The fog-colour push runs in `Fog_ApplyAfterLoad`, which executes on every env-interval tick — **not only at scene-graph draw time** (refines the earlier reading). The sampler reads the byte R/G/B at `fog_colors[kf]` / `fog_colors[kf_next]` (`fog%d.bin`, or the synthesised table when `data_load_flag = 0` — §1.1), lerps each channel **in the byte domain** (result stays 0–255), packs `ARGB = (0xFF << 24) | (R << 16) | (G << 8) | B` (alpha forced opaque), and pushes it to the device via **D3D render-state token 34** (`D3DRS_FOGCOLOR`). No /255 in the original. The packed colour is **also mirrored into the render-view descriptor** immediately after the device push.
 

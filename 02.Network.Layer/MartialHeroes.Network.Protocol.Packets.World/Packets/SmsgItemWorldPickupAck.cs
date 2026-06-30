@@ -18,17 +18,19 @@ public readonly struct SmsgItemWorldPickupAck
 
     public readonly byte Subtype;
 
-    public readonly Pad0Buffer Pad0;
+    private readonly ushort _pad0;
 
-    public readonly int Echo0;
+    public readonly uint WorldKey;
 
-    public readonly Echo1Buffer Echo1;
+    public readonly uint SlotParam;
+
+    private readonly GapBuffer _gap1;
 
     public readonly uint ItemId;
 
-    public readonly int Echo2;
+    public readonly int Count;
 
-    public readonly int Echo3;
+    public readonly int Opaque;
 
     [InlineArray(8)]
     public struct HeaderBuffer
@@ -36,14 +38,8 @@ public readonly struct SmsgItemWorldPickupAck
         private byte _element0;
     }
 
-    [InlineArray(2)]
-    public struct Pad0Buffer
-    {
-        private byte _element0;
-    }
-
-    [InlineArray(8)]
-    public struct Echo1Buffer
+    [InlineArray(4)]
+    public struct GapBuffer
     {
         private byte _element0;
     }

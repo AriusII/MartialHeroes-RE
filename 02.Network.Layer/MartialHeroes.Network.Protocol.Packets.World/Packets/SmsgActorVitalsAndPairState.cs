@@ -14,30 +14,29 @@ public readonly struct SmsgActorVitalsAndPairState
 
     public readonly byte Sort;
 
-    private readonly byte _pad0_0;
+    private readonly byte _pad1;
 
-    private readonly byte _pad0_1;
-    private readonly byte _pad0_2;
+    private readonly byte _pad2;
+
+    private readonly byte _pad3;
 
     public readonly uint ActorId;
 
-    public readonly byte Byte08;
+    private readonly byte _gap8;
 
-    public readonly byte Byte09;
+    private readonly byte _gap9;
 
-    public readonly byte LevelOrState;
+    public readonly byte RelationState;
 
-    public readonly byte StateByte;
+    public readonly byte RelationState2;
 
-    public readonly uint PartnerId;
+    public readonly uint PartnerActorId;
 
-    public readonly uint CurrentHp;
+    public readonly long CurrentHp;
 
-    public readonly uint VitalB;
+    public readonly int CurrentMp;
 
-    public readonly uint Stamina;
-
-    public readonly uint VitalC;
+    public readonly int CurrentStamina;
 
     public ActorSort SortKind => (ActorSort)Sort;
 }

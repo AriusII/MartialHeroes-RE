@@ -1,13 +1,23 @@
 # Social systems: chat, whisper, party, guild, friend/relation (clean-room spec)
 
-> **Verification banner.** verification: confirmed (control-flow-confirmed) for every opcode→routing
-> link, the `(major:minor)` tuples, the total message sizes, the (2:7) 19-byte header, the
-> (2:35/2:36/2:37) party-submit shapes, the (2:30) guild-action size, the per-opcode text-length
-> NUL convention, and the (2:84) header-only-plus-30 s-cooldown shape; capture/debugger-pending for
-> the absolute on-wire byte-order/endianness of each length prefix, the inner field meanings of the
-> larger context/blob headers, and the on-wire VALUE meanings (mode/op/selector enumerations,
-> auto-accept event codes). ida_reverified: 2026-06-20 · ida_reverified: 2026-06-27 · ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963 · evidence: [static-ida].
-> (Re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20).) (CYCLE 14 re-anchor (f61f66a9, 2026-06-27): confirmatory — FATE relation subsystem pinning markers, RelationPanel::setMemberOfRelation, FATE_TYPE_TRAINING strings, and party-vs-FATE boundary cleanly relocated. 1 re-confirmed SAME, 0 corrected.)
+> **Verification banner.** verification: CONSUMER-CONFIRMED for every opcode→routing link, the
+> `(major:minor)` tuples, the total message sizes, the (2:7) 19-byte header, the
+> (2:35/2:36/2:37) party-submit shapes and mode-byte triads (mode 0/1/2, with 3 unzeroed pad bytes
+> between mode and id), the (2:30) guild-action size, the per-opcode text-length NUL convention,
+> the (2:84) header-only-plus-30 s-cooldown shape, and the (4:61) 52-byte layout + +8 gate +
+> action×result matrix + guild cooldown delta/MINUTES/1440=DAYS handler semantics;
+> capture/debugger-pending (R-CAP) for the absolute on-wire byte-order/endianness of each length
+> prefix and `Id` field, MessageDB label text (ids 21147/21148/21020/21021/21092/21093/49014),
+> the UI list-entry handle→panel-tab glossary (E0–E6), the actual cooldown magnitude, and the inner
+> field meanings of the larger context/blob headers.
+> ida_reverified: 2026-06-20 · ida_reverified: 2026-06-27 · ida_reverified: 2026-06-30 ·
+> ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963 · evidence: [static-ida].
+> (Re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20).) (CYCLE 14 re-anchor (f61f66a9,
+> 2026-06-27): confirmatory — FATE relation subsystem pinning markers, RelationPanel::setMemberOfRelation,
+> FATE_TYPE_TRAINING strings, and party-vs-FATE boundary cleanly relocated. 1 re-confirmed SAME, 0
+> corrected.) (CYCLE 15 (2026-06-30): CONSUMER-CONFIRMED additions — 4/61 full layout + action×result
+> matrix + guild cooldown delta semantics; 2:35/2:36/2:37/2:23 mode-byte triads confirmed; 4/65 Gate
+> semantics RESOLVED (CYCLE 15): `Gate == 1` = full-sync, any other value = leave; the prior CYCLE-14 reading was inverted.)
 > conflicts resolved this pass: (a) the (2:7) text-length prefix EXCLUDES the NUL — `(3:21)`/`(2:83)`
 > INCLUDE it (per-opcode, not the prior uniform "verify the off-by-one"); (b) `(2:84)` carries NO
 > text in its builder and is 30-second rate-limited (corrected from the prior "19 + text" catalog
@@ -18,6 +28,9 @@
 > **actor +172 (offset 0xAC) = relation-PAIR-STATE byte** (set by the 5/64 remote-pair handler).
 > The earlier note that +172 was a conflation is itself superseded — both offsets are genuine.
 > CONFIRMED via static IDA, CYCLE 7.
+> (e) **RESOLVED (CYCLE 15, 2026-06-30)**: 4/65 `Gate` byte semantics — the prior CYCLE-14 reading
+> was inverted. Settled by re-reading the handler branch (CONSUMER-CONFIRMED): `Gate == 1` = full-sync
+> apply (50-member arrays); any other value = leave/no-guild — see Section 5.4 notes.
 
 Neutral, data-only model of the legacy *Martial Heroes* client's **social wire protocol** and the
 **membership state** it maintains locally: chat channels, whispers, party/group, guild, and the
@@ -67,6 +80,9 @@ payload @+8). **All field offsets in this document are payload-relative** (relat
 | 2:76 / 2:62 / 2:63 / 2:66 / 5:26 / 5:64 / 4:71 relation network surface sizes | CONFIRMED — literal builder/handler read sizes (Section 7.7) |
 | 4:76 / 5:76 party-pair fields (success @+8, relation-type @+10) | CONFIRMED — branch reads (Section 6.4 / 6.8) |
 | No client auto-accept (party/guild/trade/duel invites always interactive) | CONFIRMED — option table has no auto-accept index (Section 9a) |
+| `SmsgGuildStateChangeResult` (4:61) 52-byte layout; `ApplyGate` at +8 routes to apply vs feedback; action×result feedback matrix (Action 0–5 × Result 1–7); guild arming cooldown delta/MINUTES stored/DAYS displayed via ÷1440 | CONSUMER-CONFIRMED (C15, 2026-06-30) — control-flow-confirmed at handler level; UI-entry panel labels and MessageDB text are RUNTIME-ONLY (Section 5.7) |
+| Party/trade mode-byte triads — 2:35/2:36/2:37/2:23 wire shape `[u8 mode @0][3 pad @1][u32 actor-+92-id @4]`; mode enum per opcode; pad bytes are uninitialized stack (not zeroed by builder) | CONSUMER-CONFIRMED (C15, 2026-06-30) — read from the call sites that produce the mode byte |
+| 4:65 `Gate` byte semantics | CONSUMER-CONFIRMED (C15, 2026-06-30) — `Gate == 1` = full-sync (50-member arrays applied); any other value (incl. 0) = leave/no-guild; the leave-pending flag gates only the leave effects, not the array apply. The prior CYCLE-14 reading (Gate 1 = leave) was inverted and is superseded; see Section 5.4 |
 
 **UNVERIFIED list** is consolidated in Section 9. All Korean text fields referenced here are
 **CP949 / EUC-KR** encoded (no BOM), NUL-padded in fixed buffers; they are never sent as managed
@@ -153,11 +169,16 @@ context-menu actions, not relation/FATE submits (corrected 2026-06-13: a later s
 them to the party-panel action handler and its "party healing actor ok" debug marker; the earlier
 "party or relation" hedge is resolved in favour of party — see Section 6.6 and UNVERIFIED #2).
 
-| Opcode | Proposed name | Dir | Size | Payload shape (inferred) |
-|--------|---------------|-----|------|--------------------------|
-| 2:35 | `CmsgPartyInvite`       | C2S | 8  | `[u8 mode @0][u32 id @4]` (mode 0 = accept/commit, 2 = invite) |
-| 2:36 | `CmsgPartyLeaveOrKick`  | C2S | 8  | `[u8 mode @0][u32 id @4]` (mode 0 = self-leave, 1 = kick) |
-| 2:37 | `CmsgPartyLeaderOp`     | C2S | 8  | `[u8 mode @0][u32 target id @4]` (leader / transfer op) |
+| Opcode | Proposed name | Dir | Size | Payload shape (CONSUMER-CONFIRMED, C15) |
+|--------|---------------|-----|------|----------------------------------------|
+| 2:35 | `CmsgPartyInvite`       | C2S | 8  | `[u8 mode @0][3 pad @1][u32 id @4]` — id = actor +92 composite id; mode 0 = accept (confirm-popup commit), mode 1 = decline, mode 2 = invite (opens 8000 ms confirm popup). |
+| 2:36 | `CmsgPartyLeaveOrKick`  | C2S | 8  | `[u8 mode @0][3 pad @1][u32 id @4]` — id = actor +92 composite id; mode 0 = self-leave (id = local player's own +92), mode 1 = kick (id = selected member's +92). No other mode value emitted. |
+| 2:37 | `CmsgPartyLeaderOp`     | C2S | 8  | `[u8 mode @0][3 pad @1][u32 target id @4]` — id = target member +92; mode 0 = delegate leadership (only mode value the client emits). |
+
+> **Wire-shape note (C15).** Bytes +1..+3 are uninitialized stack bytes — the builder writes only
+> byte[0] and does **not** zero bytes +1..+3. A re-implementation should zero-pad those bytes; the
+> server almost certainly ignores them. The `Id` field in all four social-submit opcodes (including
+> 2:23 — Section 2.9) is the actor **composite id from actor +92** (`ActorCompositeId`, Section 7.5).
 
 ### 2.5 Guild (C2S submits)
 
@@ -179,7 +200,7 @@ them to the party-panel action handler and its "party healing actor ok" debug ma
 |--------|---------------|-----|------|-------|
 | 4:54  | `SmsgGuildRankSlotUpdate`     | S2C | —    | Rank-slot update. |
 | 4:55  | `SmsgGuildInfoUpdateResult`   | S2C | —    | Info-update result. |
-| 4:61  | `SmsgGuildStateChangeResult`  | S2C | —    | State-change result. |
+| 4:61  | `SmsgGuildStateChangeResult`  | S2C | 52   | State-change result; +8 gate → apply vs action×result feedback matrix; full layout in Section 5.7. CONSUMER-CONFIRMED (C15). |
 | 4:62  | `SmsgGuildInviteJoinState`    | S2C | 80   | Invite/join-state block. |
 | 4:63  | `SmsgGuildMemberRemoveResult` | S2C | —    | Member-remove result. |
 | 4:64  | `SmsgGuildPositionChangeResult`| S2C | —   | Position-change result. |
@@ -220,6 +241,16 @@ them to the party-panel action handler and its "party healing actor ok" debug ma
 | 4:71 | `SmsgRelationPartyPanelSnapshot`| S2C | 1092 | Big 8-slot relation / party panel snapshot (Section 7.7). CONFIRMED size. |
 | 5:26 | `SmsgLocalPlayerRelationSlot`  | S2C | 28   | Local-player relation-slot update (Section 7.2). CONFIRMED size. |
 | 5:64 | `SmsgRemoteActorRelationPair`  | S2C | 16   | Remote-actor relation pair; writes actor +172 on both sides (Section 7.8). CONFIRMED. |
+
+### 2.9 Trade submit (C2S — shared confirm-popup family)
+
+The trade request uses the same 8-byte wire shape as the party submits (Section 2.4). Mode bytes
+CONSUMER-CONFIRMED (C15, 2026-06-30). For the full trade-session protocol see
+`Docs/RE/specs/inventory_trade.md`; for the shared confirm-popup context model see Section 6.7.
+
+| Opcode | Proposed name | Dir | Size | Payload shape |
+|--------|---------------|-----|------|---------------|
+| 2:23 | `CmsgTradeRequest` | C2S | 8  | `[u8 mode @0][3 pad @1][u32 id @4]` — id = target actor +92 composite id; mode 0 = accept (confirm-popup commit), mode 1 = decline, mode 2 = request (opens 8000 ms confirm popup stamped with context code 706). |
 
 ---
 
@@ -314,7 +345,7 @@ payload-relative.
 
 | Off  | Size | Type           | Field             | Meaning |
 |------|------|----------------|-------------------|---------|
-| 8    | 1    | u8             | `Gate`            | `1` = "left / no guild" path; any other value = full sync. |
+| 8    | 1    | u8             | `Gate`            | CONSUMER-CONFIRMED (C15) — `1` = full-sync path (the 50-member arrays are applied); any other value (incl. 0) = leave/no-guild path. The guild leave-pending flag gates only the leave *effects* (notice, neutral-state marker, exp-refund), not the array apply. The prior CYCLE-14 reading (`1` = left/no-guild) was inverted and is superseded; settled by re-reading the handler branch. |
 | 10   | 18   | bytes[18]      | `GuildName`       | Guild name, ASCIIZ, CP949. |
 | 28   | 2    | i16            | `GuildId`         | Guild id. |
 | 32   | 4    | i32            | `Gold`            | Guild gold. |
@@ -333,10 +364,17 @@ Notes:
 - Bytes `0..7` and the gap at `9` are header/padding not enumerated above; treat the message as a
   1812-byte block and read the named fields at the listed offsets. The 50-member arrays fully
   account for the bulk of the size; the exact use of the leading 8 bytes is UNVERIFIED.
-- The **leave branch** (`Gate != 1` interpreted as "stay", `Gate == 1` as "leave/no-guild") clears
-  the local player's guild fields and surfaces user-facing notices (string ids `10011` "left guild"
-  and `2183` "exp refund"). These are display ids, not wire fields.
-- A separate guild-info display path walks the 50 member-id slots (offset 60, stride 4) and patches
+- **Gate semantics — RESOLVED (CYCLE 15, CONSUMER-CONFIRMED): the C15 reading below is correct; the prior CYCLE-14 reading was inverted and is superseded.** Prior spec (CYCLE 14): Gate `1`
+  = "left / no-guild" path; any other value = full sync. C15 consumer-confirmed reading: Gate `1` =
+  "full sync, apply the record" path; any other value = leave/no-guild path — **and only when a guild
+  leave-pending flag is set** (the flag is cleared after the leave path fires). On the leave path the
+  handler shows the "left guild" notice (string id `10011`, amber), writes value `2` onto the local
+  player's actor +172 (the neutral/no-guild marker — see Section 7.5), and, if a 64-bit exp-refund
+  quantity embedded in the record is positive, shows the exp-refund notice (string id `2183`) and
+  subtracts it from the player's exp counters. Then it clears the leave-pending flag, the guild id, the
+  guild-name string, and re-applies the player motion. These are local effects triggered by the leave
+  path, not additional wire fields. String ids are display-only.
+- A separate guild-info display path walks the 50 member-id slots (at offset 60, stride 4) and patches
   each resolved actor's guild rank/flags. This is a local mirror, not a separate message.
 
 ### 5.5 Guild member roster patch — 5:65 (S2C, 32 bytes)
@@ -375,6 +413,101 @@ recovered (UNVERIFIED).
 > control-flow-confirmed. The **`Op`/`Id` two-dword split** is a STATIC-HYPOTHESIS: the wire builder
 > copies an 8-byte caller-side struct verbatim, so the split is set by the *caller* and is inferred
 > from the calling convention, not visible in the builder itself.
+
+### 5.7 Guild state-change result — 4:61 (S2C, 52 bytes)
+
+Full guild-state update and action-feedback message. CONSUMER-CONFIRMED (C15, 2026-06-30).
+
+#### 5.7.1 Payload layout
+
+| Off | Size | Type      | Field            | Meaning |
+|-----|------|-----------|------------------|---------|
+| 8   | 1    | u8        | `ApplyGate`      | Non-zero → state-apply branch (Section 5.7.2). Zero → action×result feedback branch (Section 5.7.3). Read in both branches. |
+| 9   | 1    | u8        | `Result`         | Result code (values 1–7); selects the feedback-matrix cell; also read in the apply branch. |
+| 10  | 1    | u8        | `Action`         | Action code (values 0–5); the switch selector in both branches; subject to a pre-dispatch remap (Section 5.7.2). |
+| 11  | 1    | u8        | `Grade`          | Guild grade / rank slot; written in the position-change case. |
+| 12  | 16   | bytes[16] | `GuildName`      | Guild name, CP949, NUL-padded; the handler forces a NUL at +28 (name field occupies +12..+27). |
+| 29  | 1    | u8        | `SortOrSlot`     | Sort/slot index; used to release a tracked entity slot in the position-change case. |
+| 32  | 8    | i64       | `Value64A`       | 64-bit value applied to the character's exp/contribution/fund slot (label UNVERIFIED). |
+| 40  | 2    | u16       | `GuildId`        | Guild id; copied into the guild-state global and the local-player guild-id slot. |
+| 44  | 8    | i64       | `MoneyBalance64` | 64-bit money balance; pushed into the player account balance. |
+
+Bytes 0–7, 30–31, 42–43 are header/padding not enumerated; read named fields at the listed offsets within the 52-byte block.
+
+#### 5.7.2 State-apply branch (`ApplyGate` non-zero)
+
+Routes the 52-byte record to the guild membership/economy apply routine, which switches on `Action`:
+
+| Action | Apply-branch behaviour | Confidence |
+|--------|------------------------|------------|
+| 0 | Leave/dissolve: clears guild id, guild name, sets actor +172 = 2 (neutral/no-guild marker); sends guild-context ack | behavioural inference |
+| 1 | Join/create/granted: applies guild id (+40), name (+12), grade (+11), money balance (+44) to the local player | behavioural inference |
+| 2 | Gold/fund/contribution update: applies `Value64A` and `MoneyBalance64`; no feedback-branch handling | behavioural inference |
+| 4 | Position/grade change: applies grade byte (+11); shows grade-specific notices for grade 3 vs 4 | behavioural inference |
+
+**Action-remap pre-step.** Before dispatching, the handler checks a guild-state global (the
+leave-pending / guild-membership flag): if that flag is **non-zero** (player is already in a guild)
+**and** `Action == 1`, the handler rewrites `Action` to `4` before dispatch. Semantics: a join-result
+arriving while the player is already in a guild is reinterpreted as a position/grade-change result.
+This is a client-side reinterpretation; a server must not rely on it.
+
+#### 5.7.3 Action × Result feedback matrix (`ApplyGate` == 0)
+
+When `ApplyGate` is zero the handler does not mutate guild state; it maps (Action, Result) to a UI
+effect: highlighting a guild-panel list entry (via a click-feedback call) or displaying a notice. All
+other (Action, Result) pairs are silent no-ops.
+
+The seven distinct UI list-entry handles referenced below are labelled **E0–E6** (internal widget
+globals). Their on-screen guild-panel tab/list-entry meaning is not statically resolvable — see
+UNVERIFIED #14.
+
+| Action \\ Result | 1         | 2                                                                          | 3         | 4         | 5         | 6         | 7         |
+|------------------|-----------|----------------------------------------------------------------------------|-----------|-----------|-----------|-----------|-----------|
+| **0**            | —         | Cooldown notice (msg id 21148, amber; days = attribute-slot-93 value ÷ 1440 — Section 5.7.5) | — | — | — | — | — |
+| **1**            | Select E2 | Select E3                                                                  | —         | —         | —         | —         | —         |
+| **2**            | —         | —                                                                          | —         | —         | —         | —         | — (action 2 = no-op in feedback branch) |
+| **3**            | Select E1 | —                                                                          | —         | —         | —         | —         | —         |
+| **4**            | —         | —                                                                          | Select E4 | Select E1 | Select E5 | Select E0 | Select E6 |
+| **5**            | Select E5 | Notice (msg id 21147, yellow)                                              | —         | —         | —         | —         | —         |
+
+Notes:
+- E1 is shared between (3,1) and (4,4) — the same list entry is highlighted for both.
+- E5 is shared between (4,5) and (5,1).
+- Action 2 has no feedback-branch handling regardless of `Result`; it is a silent no-op when `ApplyGate == 0`.
+- Message ids 21147 (yellow notice) and 21148 (amber cooldown line) are runtime MessageDB ids — the
+  literal text is not statically resolvable (RUNTIME-ONLY, R-CAP — see UNVERIFIED #13).
+- Result-code semantic labels (what result 1–7 means to the player) are not statically recoverable
+  from the control-flow alone; treat all result labels as UNVERIFIED.
+
+#### 5.7.4 Action-code summary (cross-branch)
+
+| Action | Inferred meaning | Confidence |
+|--------|-----------------|------------|
+| 0 | Leave / dissolve guild membership | behavioural inference |
+| 1 | Join / create / membership granted (remapped to 4 if already in a guild) | behavioural inference |
+| 2 | Gold / fund / contribution update; feedback branch: no-op | behavioural inference |
+| 3 | Purpose UNVERIFIED (feedback result 1 → select E1) | low |
+| 4 | Position / grade change; also the remap target for action 1 while in-guild | behavioural inference |
+| 5 | Purpose UNVERIFIED (feedback result 1 → select E5; result 2 → notice 21147) | low |
+
+#### 5.7.5 Guild arming cooldown (action 0 / result 2)
+
+The (0, 2) feedback cell computes and displays a cooldown duration:
+
+- **Character-attribute slot 93:** a 32-bit float read from the character stat/parameter store (a
+  generic balanced-tree map keyed by integer attribute ids, shared across stat panels). The handler
+  reads it, casts to integer, and divides by 1440.
+- **Unit stored = MINUTES.** The divisor `1440 = 24 × 60` is the unambiguous minutes-per-day constant.
+- **Unit displayed = DAYS**, via integer (floor/truncating) division. Example: 2880 min → 2 days;
+  4319 min → 2 days; 4320 min → 3 days.
+- **DELTA semantics — NOT an epoch timestamp.** The handler reads the stored value directly and
+  divides; there is no "now minus timestamp" subtraction on this path. The cooldown holds a remaining
+  duration in minutes, not an absolute clock value.
+- Behavioural context: action 0 is the leave/dissolve action, and the leave path (apply branch) also
+  triggers the guild-state flag that remaps a subsequent action-1 result to action-4. This cooldown
+  reads as a guild leave→rejoin penalty (an arming/re-establishment delay). The exact human-readable
+  label is MessageDB id 21148 text (runtime-only).
+- **Actual cooldown magnitude is RUNTIME-ONLY (R-CAP).** See UNVERIFIED #12.
 
 ---
 
@@ -533,12 +666,17 @@ correct sender:
 
 | Context code (hex / dec) | Interaction | Sender it commits to |
 |--------------------------|-------------|----------------------|
-| `0x320` / 800 | party invite      | `2:35` (mode 0 on commit) |
-| `0x2C2` / 706 | trade request     | `2:23` (see `inventory_trade.md`) |
+| `0x320` / 800 | party invite      | `2:35` mode 0 on commit (mode 1 = decline, mode 2 = invite; see Section 2.4) |
+| `0x2C2` / 706 | trade request     | `2:23` mode 0 on commit (mode 1 = decline, mode 2 = request; see Section 2.9) |
 | `0x334` / 820 | relation op       | relation submit (out of this section's lane) |
 
 This is a client-side input-flow detail (a deferred confirm), not a distinct wire message: the popup
 times out after 8000 ms or routes to the listed sender when confirmed. Added 2026-06-13.
+**C15 (2026-06-30): independently CONSUMER-CONFIRMED** — the three context-code globals were read as
+literal initialized values in the popup-commit dispatcher, and the mode-2 (initiate/popup) /
+mode-0 (accept/commit) / mode-1 (decline) triad is consumer-confirmed across 2:35 (party), 2:23
+(trade), and by structural extension the relation path. The 8000 ms countdown was confirmed in every
+initiate branch.
 
 ### 6.8 Party accept result — 4:76 (S2C, 52 bytes)
 
@@ -794,3 +932,25 @@ Caps and gates to model:
 11. **String-table message ids** referenced here (`862010101` reject; `2119`–`2122` party roster;
     `23004`/`23005` party member left/expelled; `10011`/`2183` guild-leave; `67030` relation) are
     **display ids**, not wire fields — listed for context only.
+12. **Guild arming cooldown magnitude (R-CAP, debugger-pending).** Character-attribute slot 93 (a
+    32-bit float, unit = MINUTES remaining) is written by the server's character/guild sync path; its
+    actual value can only be read from a live session. To capture: trigger a guild-leave action on a
+    character subject to the cooldown, then observe the attribute slot 93 value when the 4:61 action-0
+    / result-2 notice fires (Section 5.7.5). Record the pre-division minutes value and the displayed
+    day count to confirm the stored unit is minutes against a real number.
+13. **MessageDB label text for runtime ids (R-CAP, capture-pending).** The following ids are
+    referenced but not statically readable: `21147` (action 5/result 2 notice, yellow), `21148`
+    (arming cooldown line, amber), and the apply-branch ids `21020`, `21021`, `21092`, `21093`,
+    `49014`. Their human-readable text pins the result-code and action-code player-visible labels.
+    Resolve from the runtime string table or by observing on-screen notices during live guild
+    operations.
+14. **UI list-entry handle → guild-panel tab glossary (R-CAP, capture-pending).** The seven handles
+    E0–E6 in the feedback matrix (Section 5.7.3) are internal widget globals whose on-screen
+    guild-panel tab/list-entry meaning is not statically resolvable. To resolve: observe the guild
+    panel while triggering each (Action, Result) pair that selects a given handle, or resolve the
+    widget construction sites in a separate UI-RE pass.
+15. **`Id` field endianness in 2:35 / 2:36 / 2:37 / 2:23 (R-CAP, capture-pending).** The `u32 Id`
+    at payload offset +4 is the actor +92 composite id. Its absolute on-wire byte order is assumed
+    little-endian (standard for this client's other 32-bit fields) but is not capture-confirmed. To
+    verify: trigger a party invite or leave action in a live capture and compare the four bytes at
+    offset +4 against the known actor composite id.

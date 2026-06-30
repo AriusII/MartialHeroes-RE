@@ -10,10 +10,10 @@ public struct CmsgStorageOp
 
     public const int Size = 16;
 
-    public int Target;
+    public uint ContextId;
     public byte Op;
     public Pad0Buffer Pad0;
-    public long Amount;
+    public long Value;
 
     [InlineArray(3)]
     public struct Pad0Buffer

@@ -143,11 +143,11 @@ public sealed partial class HudPetPanel : Control
         infoBtn.Pressed += () => OnAction(7);
         AddChild(infoBtn);
 
-        GD.Print("[HudPetPanel] Built — player-couple/pair-relation window slot 194 (§8.26). " +
-                 "Fixed (80,200) 228×337. Partner name/level, 2 gauges, 4 cmd buttons, info button. " +
-                 "Auto-shown by S2C 5/53 SmsgActorPairRelation (TODO world-campaign). " +
-                 "NOT a hotkey window (§8.26.4). Command sends = TODO(world-campaign). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.26 CODE-CONFIRMED.");
+        GD.Print("[HudPetPanel] Built — couple/partner window slot 194 (ui_system.md §8.26). " +
+                 "Fixed (80,200) 228x337. Partner name/level, 2 HP gauges, 4 mode buttons, info button. " +
+                 "NOT a pet/summon system — couple/partner relation display only (pets.md §0). " +
+                 "Auto-shown by S2C 5/53 SmsgActorVitalsAndPairState (deferred: PairState channel missing from IHudEventHub). " +
+                 "Command sends deferred: CoupleRelationRequestAsync missing from IApplicationUseCases.");
     }
 
 
@@ -193,9 +193,7 @@ public sealed partial class HudPetPanel : Control
         _open = true;
         Visible = true;
 
-        GD.Print($"[HudPetPanel] ShowPartner: name=\"{partnerName}\" lv={partnerLevel} " +
-                 $"g0={gauge0Value} g1={gauge1Value}. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.26.4 CODE-CONFIRMED.");
+        GD.Print($"[HudPetPanel] ShowPartner: name=\"{partnerName}\" lv={partnerLevel} g0={gauge0Value} g1={gauge1Value}.");
     }
 
     public void ClearPartner()
@@ -208,8 +206,7 @@ public sealed partial class HudPetPanel : Control
         _open = false;
         Visible = false;
 
-        GD.Print("[HudPetPanel] ClearPartner — hidden. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.26.4 CODE-CONFIRMED.");
+        GD.Print("[HudPetPanel] ClearPartner — hidden.");
     }
 
 
@@ -218,33 +215,25 @@ public sealed partial class HudPetPanel : Control
         switch (actionId)
         {
             case 0:
-                GD.Print("[HudPetPanel] action 0 — minimize (role MED). " +
-                         "spec: Docs/RE/specs/ui_system.md §8.26.3 CODE-CONFIRMED.");
+                GD.Print("[HudPetPanel] minimize.");
                 break;
             case 2:
-                GD.Print("[HudPetPanel] action 2 — help (msg 16002). " +
-                         "spec: Docs/RE/specs/ui_system.md §8.26.3 CODE-CONFIRMED.");
+                GD.Print("[HudPetPanel] help (msg 16002).");
                 break;
             case 3:
             case 4:
             case 5:
             case 6:
-                GD.Print($"[HudPetPanel] action {actionId} — command button {actionId - 2}. " +
-                         "TODO(world-campaign): generic select/send helper. " +
-                         "spec: Docs/RE/specs/ui_system.md §8.26.3 CODE-CONFIRMED.");
+                GD.Print($"[HudPetPanel] couple-mode button {actionId} — deferred: CoupleRelationRequestAsync(mode, partnerId) missing from IApplicationUseCases (C2S 2/60, specReady=false).");
                 break;
             case 7:
-                GD.Print("[HudPetPanel] action 7 — info/details button. " +
-                         "spec: Docs/RE/specs/ui_system.md §8.26.3 CODE-CONFIRMED.");
+                GD.Print("[HudPetPanel] info button.");
                 break;
             case 8:
                 ClearPartner();
-                GD.Print("[HudPetPanel] action 8 — close. " +
-                         "spec: Docs/RE/specs/ui_system.md §8.26.3 CODE-CONFIRMED.");
                 break;
             default:
-                GD.Print($"[HudPetPanel] action {actionId} — unhandled. " +
-                         "spec: Docs/RE/specs/ui_system.md §8.26.3 CODE-CONFIRMED.");
+                GD.Print($"[HudPetPanel] unhandled action {actionId}.");
                 break;
         }
     }

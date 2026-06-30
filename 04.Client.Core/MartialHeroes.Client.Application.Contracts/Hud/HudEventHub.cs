@@ -23,6 +23,20 @@ public sealed class HudEventHub : IHudEventHub
 
     private readonly Channel<QuestLogChangedEvent> _questLog = CreateBounded<QuestLogChangedEvent>(LatestWinsCapacity);
 
+    private readonly Channel<MailLetterArrivedEvent> _mailLetters = CreateBounded<MailLetterArrivedEvent>(AppendCapacity);
+
+    private readonly Channel<DeliveryRecordUpdatedEvent> _deliveryRecords =
+        CreateBounded<DeliveryRecordUpdatedEvent>(AppendCapacity);
+
+    private readonly Channel<SkillHotbarSlotSetEvent> _skillHotbarSlots =
+        CreateBounded<SkillHotbarSlotSetEvent>(AppendCapacity);
+
+    private readonly Channel<TradeSlotUpdatedEvent> _tradeSlots =
+        CreateBounded<TradeSlotUpdatedEvent>(AppendCapacity);
+
+    private readonly Channel<TradeSessionPhaseEvent> _tradeSessions =
+        CreateBounded<TradeSessionPhaseEvent>(AppendCapacity);
+
     private readonly Channel<StatAllocationView> _statAllocations =
         CreateBounded<StatAllocationView>(LatestWinsCapacity);
 
@@ -95,6 +109,46 @@ public sealed class HudEventHub : IHudEventHub
 
     public ChannelReader<QuestCompletedEvent> QuestCompleted => _questCompleted.Reader;
 
+    public ChannelReader<MailLetterArrivedEvent> MailLetters => _mailLetters.Reader;
+
+    public ChannelReader<DeliveryRecordUpdatedEvent> DeliveryRecords => _deliveryRecords.Reader;
+
+    public ChannelReader<SkillHotbarSlotSetEvent> SkillHotbarSlots => _skillHotbarSlots.Reader;
+
+    public ChannelReader<TradeSlotUpdatedEvent> TradeSlots => _tradeSlots.Reader;
+
+    public ChannelReader<TradeSessionPhaseEvent> TradeSessions => _tradeSessions.Reader;
+
+    public bool PublishTradeSlot(TradeSlotUpdatedEvent slot)
+    {
+        ArgumentNullException.ThrowIfNull(slot);
+        return _tradeSlots.Writer.TryWrite(slot);
+    }
+
+    public bool PublishTradeSession(TradeSessionPhaseEvent session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        return _tradeSessions.Writer.TryWrite(session);
+    }
+
+    public bool PublishMailLetter(MailLetterArrivedEvent letter)
+    {
+        ArgumentNullException.ThrowIfNull(letter);
+        return _mailLetters.Writer.TryWrite(letter);
+    }
+
+    public bool PublishDeliveryRecord(DeliveryRecordUpdatedEvent record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return _deliveryRecords.Writer.TryWrite(record);
+    }
+
+    public bool PublishSkillHotbarSlot(SkillHotbarSlotSetEvent slot)
+    {
+        ArgumentNullException.ThrowIfNull(slot);
+        return _skillHotbarSlots.Writer.TryWrite(slot);
+    }
+
     public bool PublishInventorySlots(InventorySlotsChangedEvent slots)
     {
         ArgumentNullException.ThrowIfNull(slots);
@@ -127,6 +181,11 @@ public sealed class HudEventHub : IHudEventHub
         _inventorySlots.Writer.TryComplete();
         _questLog.Writer.TryComplete();
         _questCompleted.Writer.TryComplete();
+        _mailLetters.Writer.TryComplete();
+        _deliveryRecords.Writer.TryComplete();
+        _skillHotbarSlots.Writer.TryComplete();
+        _tradeSlots.Writer.TryComplete();
+        _tradeSessions.Writer.TryComplete();
     }
 
     public bool PublishTargetChanged(TargetChangedEvent target)

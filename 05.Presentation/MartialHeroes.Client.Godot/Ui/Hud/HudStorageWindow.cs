@@ -190,8 +190,13 @@ public sealed partial class HudStorageWindow : Control
                  "Cell grid: x=45+38·col, y=162+38·row, actions 200..259. " +
                  "Page tabs 261/262; deposit 263; withdraw 264; close 260. " +
                  "Open: ONLY via KeepNpcPanel sel 1 + C2S 2/142. No hotkey. " +
-                 "Item move: TODO(world-campaign): C2S 2/46 (move) + 2/44 (quick-move). " +
-                 "Storage contents: TODO(capture): shared item-panel S2C via unified-slot base +56. " +
+                 "Item move BLOCKED: cells need C2S 2/46 (CmsgItemMove) / 2/44 (CmsgItemQuickMove) but no " +
+                 "IApplicationUseCases send-site emits 2/46 or 2/44 — MoveItemAsync emits 2/16 and needs an " +
+                 "InventoryGrid + held-drag source this panel does not model. " +
+                 "Storage contents BLOCKED: the shared item-panel S2C minor that targets the storage view is " +
+                 "capture-pending (§8.32.7); InventoryTable has only Equip/Bag (no Storage value) and " +
+                 "IHudEventHub.InventorySlots is single-consumer (already drained by HudInventoryPanel) — no " +
+                 "channel to subscribe, so the 60 cells stay empty (no mock data). " +
                  "spec: Docs/RE/specs/ui_system.md §8.32 CODE-CONFIRMED.");
     }
 
@@ -201,7 +206,11 @@ public sealed partial class HudStorageWindow : Control
         _open = true;
         _activePage = 0;
         Visible = true;
-        GD.Print("[HudStorageWindow] Open → TODO(world-campaign): C2S 2/142 (storage open request). " +
+        GD.Print("[HudStorageWindow] Open → local show only. Open-request C2S 2/142 BLOCKED: per §8.32.5 it is " +
+                 "emitted by the KeepNpcPanel sel-1 flow reading the active-target NPC id from the router " +
+                 "(HudKeepNpcDialog emits no packet today), and IApplicationUseCases.StorageOperationAsync(byte op) " +
+                 "writes ONLY op at +4 — it cannot carry context_id (+0, runtime singleton +1576); the open-request " +
+                 "op-byte enum is capture-pending (§8.32.9). " +
                  "spec: Docs/RE/specs/ui_system.md §8.32.5/§8.32.6 CODE-CONFIRMED.");
     }
 
@@ -227,22 +236,29 @@ public sealed partial class HudStorageWindow : Control
         var unifiedSlot = action + SlotPerPage * _activePage + StorageSlotBase;
         GD.Print($"[HudStorageWindow] Cell {cellIndex} clicked (action {action}, " +
                  $"unified slot {unifiedSlot}, page {_activePage}). " +
-                 "TODO(world-campaign): C2S 2/46 (move) or 2/44 (quick-move). " +
+                 "Move BLOCKED: needs C2S 2/46 (CmsgItemMove) / 2/44 (CmsgItemQuickMove) but no " +
+                 "IApplicationUseCases intent emits either opcode (MoveItemAsync emits 2/16). Leaving TODO. " +
                  "spec: Docs/RE/specs/ui_system.md §8.32.4 CODE-CONFIRMED.");
     }
 
     private void OnDeposit()
     {
-        GD.Print("[HudStorageWindow] Deposit money (action 263). " +
-                 $"TODO(world-campaign): gold gate ≥1,000,000; number-entry dialog (msg {MsgDeposit}); " +
-                 "C2S 2/142. spec: Docs/RE/specs/ui_system.md §8.32.4.");
+        GD.Print("[HudStorageWindow] Deposit money (action 263) BLOCKED: IApplicationUseCases.StorageOperationAsync" +
+                 "(byte op) sends 2/142 but cannot carry the i64 amount (+8, the number-entry value, gate value>0) " +
+                 $"nor context_id (+0); the deposit op-byte is capture-pending (§8.32.9 / §11 #23); no number-entry " +
+                 $"dialog (msg {MsgDeposit}) widget and no currency channel on IHudEventHub to source the amount. " +
+                 "Gold gate ≥1,000,000 belongs to the domain (GAME-RULE GUARD), not this node. Leaving TODO. " +
+                 "spec: Docs/RE/specs/ui_system.md §8.32.4.");
     }
 
     private void OnWithdraw()
     {
-        GD.Print("[HudStorageWindow] Withdraw money (action 264). " +
-                 $"TODO(world-campaign): stored>0 gate; number-entry dialog (msg {MsgWithdraw}); " +
-                 "C2S 2/142. spec: Docs/RE/specs/ui_system.md §8.32.4.");
+        GD.Print("[HudStorageWindow] Withdraw money (action 264) BLOCKED: IApplicationUseCases.StorageOperationAsync" +
+                 "(byte op) sends 2/142 but cannot carry the i64 amount (+8, gate value>0) nor context_id (+0); the " +
+                 $"withdraw op-byte is capture-pending (§8.32.9 / §11 #23); no number-entry dialog (msg {MsgWithdraw}) " +
+                 "widget and no stored-money channel on IHudEventHub to source the amount. stored>0 gate belongs to " +
+                 "the domain (GAME-RULE GUARD), not this node. Leaving TODO. " +
+                 "spec: Docs/RE/specs/ui_system.md §8.32.4.");
     }
 
 

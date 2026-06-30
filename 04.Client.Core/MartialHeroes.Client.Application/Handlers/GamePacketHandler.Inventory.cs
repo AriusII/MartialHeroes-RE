@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Collections.Immutable;
 using MartialHeroes.Client.Application.Contracts.Events;
+using MartialHeroes.Client.Domain.Inventory.Inventory;
 using MartialHeroes.Network.Protocol.Core.Packets;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 
@@ -10,23 +11,25 @@ public sealed partial class GamePacketHandler
 {
     public void Handle(in SmsgEquipItemResult packet)
     {
-        const byte ok = 1;
-        const byte titleSlot = 15;
-        var success = packet.Result == ok;
+        var outcome = EquipResultRules.ClassifyExplicit(packet.Result);
+        if (outcome == EquipResultOutcome.NoOp) return;
 
+        var success = outcome == EquipResultOutcome.Apply;
         if (success)
             RecomputeCombatStats();
 
         _eventBus.Publish(new EquipResultEvent(
-            success, packet.FromSlot, packet.ToSlot, packet.ToSlot == titleSlot));
+            success, packet.FromSlot, packet.ToSlot,
+            success && EquipSlots.TriggersVisualRebuild(packet.ToSlot)));
     }
 
 
     public void Handle(in SmsgItemSlotStateAck packet)
     {
-        const byte ok = 1;
-        var success = packet.Result == ok;
+        var outcome = EquipResultRules.ClassifyExplicit(packet.Result);
+        if (outcome == EquipResultOutcome.NoOp) return;
 
+        var success = outcome == EquipResultOutcome.Apply;
         if (success)
             RecomputeCombatStats();
 
@@ -85,7 +88,7 @@ public sealed partial class GamePacketHandler
     private static ImmutableArray<InventorySlotRecord> DecodeItemSlotRun(
         ReadOnlySpan<byte> payload, int recordsOffset, int count)
     {
-        const int stride = ItemSlotRecord.WireSize;
+        const int stride = MartialHeroes.Network.Protocol.Core.Packets.ItemSlotRecord.WireSize;
         var available = payload.Length - recordsOffset;
         var maxRecords = available > 0 ? available / stride : 0;
         if (count > maxRecords) count = maxRecords;

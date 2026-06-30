@@ -10,7 +10,7 @@ public readonly struct SmsgActionErrorResult
 {
     public const uint OpcodeId = Opcodes.SmsgActionErrorResult;
 
-    public const int HeaderSize = 10;
+    public const int WireSize = 10;
 
     public readonly HeadBuffer Head;
 

@@ -32,6 +32,13 @@ conflicts: 5   # (1) FOV stored full-angle/aspect (NO /2); (2) click marker = Us
 >    effect id 380000000)** at the click XZ with Y from the terrain sampler, after clearing the prior
 >    marker. Corrected in §B.2 step 4 and §B.4.
 >
+> **Corrected 2026-06-30 — effective in-world vertical FOV resolved statically.** The previously
+> debugger-pending "perceived vertical FOV = 65° vs 65°/aspect" question is now settled by static
+> derivation: the in-world setter argument is `(π·65/180)/aspect`, and through `top = near·tan(fovy/2)`
+> the **effective perceived vertical FOV is 65/aspect** (≈ 48.75° at 4:3; effective horizontal FOV
+> ≈ 62.2° at 4:3). The faithful Godot reproduction is `keep_aspect = KEEP_HEIGHT` with
+> `Camera3D.Fov = 65/aspect`, **not** a flat 65° vertical. Corrected in §A.7, Part C, and §D.2.
+>
 > **C14 re-confirmation (world-camera follow-up).** The fixed-radius orbit follow math in
 > §A.4 / §A.5 was independently **re-confirmed [confirmed]** by a later gentle re-walk: eye-offset
 > seed **(−750, 0, +500)** (radius ≈ **901.39**), focus-Z **−40** (Third), default pitch **−π/6**
@@ -601,9 +608,16 @@ implement for the gameplay camera. (CODE-CONFIRMED)
 > **Correction (re-verified 2026-06-16, anchor `263bd994`).** A prior revision of this
 > spec described the stored value as the half-angle `π·65/180/2/aspect`. That is
 > inaccurate: the build path stores the **full** vertical FOV (÷ aspect) and the `/2`
-> only appears later inside the `tan(fovY/2)` of the view-volume derivation. This is not
-> load-bearing for a Godot re-implementation — Godot's `Camera3D.Fov` takes a vertical
-> FOV in **degrees (65)** directly — but the internal-storage description is now correct.
+> only appears later inside the `tan(fovY/2)` of the view-volume derivation.
+
+> **Correction (2026-06-30 — debugger-pending residue resolved statically).** Because the stored
+> argument is `(π·65/180)/aspect` and the frustum applies `top = near·tan(fovy/2)`, the **effective
+> perceived vertical FOV is `65/aspect`** (≈ **48.75°** at 4:3) and the effective horizontal FOV is
+> `2·atan(aspect·tan((65/aspect)/2))` (≈ **62.2°** at 4:3). It is therefore **load-bearing** for a
+> faithful Godot re-implementation: do **not** feed `Camera3D.Fov` a flat 65°. The faithful setup is
+> **`keep_aspect = KEEP_HEIGHT`** with `Camera3D.Fov = 65/aspect` (≈ 48.75° at 4:3). The earlier
+> "Godot takes 65° directly" note is superseded. See `Docs/RE/structs/perspective_camera.md`
+> (fovy storage note).
 
 The "60° / 45° / 65° puzzle" is resolved by the `GPerspectiveCamera` constructor
 defaults: **45°** (π/4) is the fovy ctor default at +0xA8, and **60°** (π/3) is the
@@ -614,9 +628,13 @@ to the **shadow projector** (see §A.7.4) — it is not a gameplay camera value.
 these figures competes at runtime with the in-world 65°; **65° is the authoritative
 in-world gameplay FOV.** (CODE-CONFIRMED — DEEP-3D 2026-06-28)
 
-> **Prior open item D.2 in this spec is closed.** Implement the gameplay camera
-> at **65° vertical FOV, near 5, far 15000**. Live-feel still capture-unverified;
-> expose as config but default to 65°.
+> **Prior open item D.2 in this spec is closed.** Implement the gameplay camera at
+> **near 5, far 15000** with the setter argument `(π·65/180)/aspect` — i.e. an effective
+> perceived **vertical FOV of 65/aspect** (≈ 48.75° at 4:3), reproduced in Godot as
+> `keep_aspect = KEEP_HEIGHT` with `Fov = 65/aspect`. Do not default to a flat 65° vertical.
+> Expose as config for live-feel tuning. (Corrected 2026-06-30 — the perceived vertical FOV was
+> previously left as a debugger-pending 65° vs 65°/aspect question; it is now resolved to 65/aspect
+> by static derivation.)
 
 View-volume derivation (centered case): `top = near · tan(fovY/2)`, `bottom = −top`,
 `right = top · aspect`, `left = −right`, then build the 6-plane frustum.
@@ -628,10 +646,11 @@ An off-center mode re-derives field-of-view from explicit L/R/B/T. (CODE-CONFIRM
 > degree values **65.0** (in-world) / **50.0** (char-select) are **inline operands at the
 > scene-construction sites** (`MainHandler_BuildInGameSceneGraph` and
 > `SelectWindow_BuildScene` respectively). The Part D item D.2 "DBG-pending values" flag
-> is downgraded to CONFIRMED — implement at 65°/50°/near 5/far 15000 with confidence; still
-> expose as config for live-feel tuning. One residue remains debugger-pending: confirm the
-> stored fovy value at +0xA8 with a live runtime read to verify the resulting perceived
-> vertical FOV is truly 65° (not 65°/aspect); see D.2.
+> is downgraded to CONFIRMED — implement at near 5/far 15000 with the `(π·deg/180)/aspect` setter
+> argument, with confidence; still expose as config for live-feel tuning. **The former residue is now
+> resolved statically (2026-06-30):** the stored fovy at +0xA8 is `(π·deg/180)/aspect`, so the perceived
+> vertical FOV is **65/aspect** (≈ 48.75° at 4:3), **not** a flat 65°; no live runtime read is needed.
+> See D.2.
 
 ### A.7.1 Projection object (GPerspectiveCamera) — unified corrected layout (DEEP-3D 2026-06-28)
 
@@ -1129,7 +1148,11 @@ These are guidance, not faithful-copy mandates; deviate deliberately and documen
   as a `CameraViewMode` enum + a per-mode rig. Default = Third-person. Bind a "reset
   view" (ESC) → Third. **No combat camera switch.** Gamble = minigame-only; Select =
   char-select scene only; Event = optional cinematic, can be deferred.
-  - Use **65° vertical FOV, near 5, far 15000** (the CODE-CONFIRMED in-world values).
+  - Projection: **near 5, far 15000**; the in-world setter argument is **(π·65/180)/aspect**, so the
+    faithful effective vertical FOV is **65/aspect** (≈ **48.75°** at 4:3), **not** a flat 65°
+    (corrected 2026-06-30 — see §A.7). In Godot this reproduces as **`keep_aspect = KEEP_HEIGHT`** with
+    `Camera3D.Fov = 65/aspect` (≈ 48.75° at 4:3); do **not** set a flat 65° vertical FOV. The effective
+    horizontal FOV is then ≈ 62.2° at 4:3.
   - The world projection is **right-handed (RH)** — view space looks down −Z, matching
     Godot/OpenGL. The existing `WorldCoordinates.ToGodot` Z-negation on world geometry is
     consistent with this. Use `Camera3D` with its default RH projection; no additional
@@ -1171,12 +1194,13 @@ Do **not** hard-code anything in this list without a capture or an analyst cross
 1. **Camera action polarity** — which member of the pitch pair (1002/1003) and zoom
    pair (1000/1001) is up/in vs down/out. Implement as configurable ± axes. (INFERRED/configurable)
 2. ~~**Authoritative runtime FOV — literal values DBG-pending (CYCLE 7)**~~ — **RESOLVED
-   (DEEP-3D 2026-06-28, CODE-CONFIRMED).** The values 65° (in-world), 50° (char-select),
-   near 5.0, and far 15000.0 are confirmed as **inline operands at the scene-construction
-   sites** (`MainHandler_BuildInGameSceneGraph` / `SelectWindow_BuildScene`). Implement at
-   these values; expose as config for live-feel tuning. Residue: the stored fovy at +0xA8
-   is `π·deg/180 ÷ aspect`; confirm via a live debugger read at the real screen aspect that
-   the resulting perceived vertical FOV is truly ~65° (not 65°/aspect). [debugger-confirm]
+   (DEEP-3D 2026-06-28, CODE-CONFIRMED; FOV residue resolved statically 2026-06-30).** The values
+   65° (in-world), 50° (char-select), near 5.0, and far 15000.0 are confirmed as **inline operands at
+   the scene-construction sites** (`MainHandler_BuildInGameSceneGraph` / `SelectWindow_BuildScene`).
+   Implement at near 5 / far 15000; expose as config for live-feel tuning. **The former
+   debugger-pending residue is now resolved by static derivation:** the stored fovy at +0xA8 is
+   `(π·deg/180) ÷ aspect`, so the perceived vertical FOV is **65/aspect** (≈ 48.75° at 4:3), **not** a
+   flat 65°. Reproduce in Godot as `keep_aspect = KEEP_HEIGHT`, `Fov = 65/aspect`. No live read needed.
 3. **`CAMERA_XZ` / `CAMERA_XYZ` semantics** — the exact 2-axis vs 3-axis follow toggle
    the saved option controls.
 4. **Gamble UI driver** — n/a per CYCLE 7: Gamble takes **no user input** (fixed-XZ framing,

@@ -1,4 +1,7 @@
+using System.Threading.Channels;
 using Godot;
+using MartialHeroes.Client.Application.Contracts.Events;
+using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -22,8 +25,24 @@ public sealed partial class HudTradeWindow : Control
 
     private const int MsgAddMoney = 2213;
     private const int MsgSetMoney = 2214;
+    private const byte PhaseCancel = 0;
+    private const byte PhaseReady = 1;
+    private const byte PhaseCommit = 4;
+
     private readonly Panel[] _gridCells = new Panel[GridCellCount];
+    private readonly Label[] _cellLabels = new Label[GridCellCount];
+    private readonly uint[] _myCells = new uint[GridCellCount];
+    private readonly uint[] _theirCells = new uint[GridCellCount];
     private int _activeSide;
+
+    private ChannelReader<TradeSlotUpdatedEvent>? _tradeSlots;
+    private ChannelReader<TradeSessionPhaseEvent>? _tradeSessions;
+    private Label? _moneyLabel;
+    private Label? _lockLabel;
+    private long _myCoin;
+    private long _theirCoin;
+    private byte _myPhase;
+    private byte _theirPhase;
 
 
     private bool _open;
@@ -115,7 +134,7 @@ public sealed partial class HudTradeWindow : Control
         sideB.Pressed += () => SetActiveSide(1);
         AddChild(sideB);
 
-        var moneyLbl = new Label
+        _moneyLabel = new Label
         {
             Name = "MoneyLabel",
             Text = "0",
@@ -123,7 +142,17 @@ public sealed partial class HudTradeWindow : Control
             Size = new Vector2(128f, 15f),
             MouseFilter = MouseFilterEnum.Ignore
         };
-        AddChild(moneyLbl);
+        AddChild(_moneyLabel);
+
+        _lockLabel = new Label
+        {
+            Name = "LockLabel",
+            Text = "",
+            Position = new Vector2(25f, 128f),
+            Size = new Vector2(268f, 15f),
+            MouseFilter = MouseFilterEnum.Ignore
+        };
+        AddChild(_lockLabel);
 
         var addMoneyCaption = text.GetCaption(MsgAddMoney, $"[{MsgAddMoney}]");
         var addMoneyBtn = new Button
@@ -164,7 +193,9 @@ public sealed partial class HudTradeWindow : Control
 
         GD.Print("[HudTradeWindow] Built — 318×732 right-anchored KeepPanel/TradeKeepWindow. " +
                  "ONE 60-cell grid (10×6, 38×38, origin 45,162, actions 200..259), toggled my/their. " +
-                 "Inbound S2C 4/24 + 4/25: TODO(world-campaign). " +
+                 "Inbound S2C 4/24 + 4/25 WIRED via BindHub (TradeSlots/TradeSessions channels): cells fill " +
+                 "by OwnerId side discriminator + SlotIndex + ItemId + Category; money/lock from 4/25 Phase + Coin. " +
+                 "Money-amount column (4/24 Category 0xFF) and 4/25 commit record tail = capture-pending, NOT decoded. " +
                  "Outbound C2S 2/23/24/25: TODO(world-campaign). " +
                  "Open trigger: S2C 4/23 phase=3 (no hotkey). " +
                  "spec: Docs/RE/specs/ui_system.md §8.13 CODE-CONFIRMED.");
@@ -193,6 +224,20 @@ public sealed partial class HudTradeWindow : Control
             cell.AddThemeStyleboxOverride("panel", cs);
             AddChild(cell);
             _gridCells[idx] = cell;
+
+            var cellLabel = new Label
+            {
+                Name = $"TradeCellLabel{CellActionBase + idx}",
+                Text = "",
+                Position = new Vector2(2f, 2f),
+                Size = new Vector2(CellSide - 4f, CellSide - 4f),
+                MouseFilter = MouseFilterEnum.Ignore,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                AutowrapMode = TextServer.AutowrapMode.WordSmart
+            };
+            cell.AddChild(cellLabel);
+            _cellLabels[idx] = cellLabel;
         }
     }
 
@@ -200,9 +245,115 @@ public sealed partial class HudTradeWindow : Control
     private void SetActiveSide(int side)
     {
         _activeSide = side;
-        GD.Print($"[HudTradeWindow] Side toggle → side={side} (0=my-offer, 1=their-offer). " +
-                 "TODO(world-campaign): repopulate cells from trade state. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.13.");
+        RenderActiveSide();
+        RenderMoneyAndLock();
+        GD.Print($"[HudTradeWindow] Side toggle → side={side} (0=my-offer, 1=their-offer) — " +
+                 "repopulated from live trade state. spec: Docs/RE/specs/ui_system.md §8.13.");
+    }
+
+    public void BindHub(IHudEventHub hub)
+    {
+        _tradeSlots = hub.TradeSlots;
+        _tradeSessions = hub.TradeSessions;
+        GD.Print("[HudTradeWindow] BindHub: TradeSlots (S2C 4/24 SmsgUserTradeSlotUpdate) + TradeSessions " +
+                 "(S2C 4/25 SmsgUserTradeFullResponse) channels connected. Cells fill from confirmed fields " +
+                 "(OwnerId side discriminator @0x28, SlotIndex @0x24, ItemId @0xC, Category @0xA); money/lock " +
+                 "from 4/25 Phase @0x08 + Coin @0x0C. Money-amount column on 4/24 (Category 0xFF) and the 4/25 " +
+                 "commit record tail stay capture-pending and are NOT decoded. " +
+                 "spec: Docs/RE/specs/ui_system.md §8.13; packets/4-24_trade_slot_update.yaml; " +
+                 "packets/4-25_trade_full_response.yaml.");
+    }
+
+    public override void _Process(double delta)
+    {
+        if (_tradeSlots is not null)
+            while (_tradeSlots.TryRead(out var slot))
+                if (slot is not null)
+                    ApplyTradeSlot(slot);
+
+        if (_tradeSessions is not null)
+            while (_tradeSessions.TryRead(out var session))
+                if (session is not null)
+                    ApplyTradeSession(session);
+    }
+
+    private void ApplyTradeSlot(TradeSlotUpdatedEvent slot)
+    {
+        if (slot.IsMoneySlot) return;
+        if (slot.SlotIndex >= GridCellCount) return;
+        if (!slot.Apply) return;
+
+        var target = slot.IsLocalSide ? _myCells : _theirCells;
+        target[slot.SlotIndex] = slot.ItemId;
+
+        if ((slot.IsLocalSide ? 0 : 1) == _activeSide)
+            RenderCell(slot.SlotIndex);
+    }
+
+    private void ApplyTradeSession(TradeSessionPhaseEvent session)
+    {
+        switch (session.Phase)
+        {
+            case PhaseCancel:
+                Array.Clear(_myCells, 0, _myCells.Length);
+                Array.Clear(_theirCells, 0, _theirCells.Length);
+                _myCoin = 0;
+                _theirCoin = 0;
+                _myPhase = PhaseCancel;
+                _theirPhase = PhaseCancel;
+                RenderActiveSide();
+                break;
+
+            default:
+                if (session.IsLocalSide)
+                {
+                    _myCoin = session.Coin;
+                    _myPhase = session.Phase;
+                }
+                else
+                {
+                    _theirCoin = session.Coin;
+                    _theirPhase = session.Phase;
+                }
+
+                break;
+        }
+
+        RenderMoneyAndLock();
+    }
+
+    private void RenderActiveSide()
+    {
+        for (var i = 0; i < GridCellCount; i++)
+            RenderCell(i);
+    }
+
+    private void RenderCell(int index)
+    {
+        if (_cellLabels[index] is not { } label) return;
+        var itemId = (_activeSide == 0 ? _myCells : _theirCells)[index];
+        label.Text = itemId == 0u ? "" : itemId.ToString();
+    }
+
+    private void RenderMoneyAndLock()
+    {
+        var coin = _activeSide == 0 ? _myCoin : _theirCoin;
+        if (_moneyLabel is not null) _moneyLabel.Text = coin.ToString();
+
+        if (_lockLabel is null) return;
+        var myState = PhaseText(_myPhase);
+        var theirState = PhaseText(_theirPhase);
+        _lockLabel.Text = $"me: {myState}  /  them: {theirState}";
+    }
+
+    private static string PhaseText(byte phase)
+    {
+        return phase switch
+        {
+            PhaseReady => "ready",
+            PhaseCommit => "commit",
+            _ => "open"
+        };
     }
 
 

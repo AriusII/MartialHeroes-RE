@@ -1,4 +1,8 @@
+using System.Threading.Channels;
 using Godot;
+using MartialHeroes.Client.Application.Contracts.Events;
+using MartialHeroes.Client.Application.Contracts.Hud;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -37,12 +41,20 @@ public sealed partial class HudDeliveryWindow : Control
     private const float PanelH = 550f;
 
 
+    private const int RecordCap = GridCellCount;
+
+    private ClientContext? _ctx;
     private bool _open;
     private int _selectedCell = -1;
 
+    private readonly List<DeliveryRecordUpdatedEvent> _records = new(RecordCap);
+    private ChannelReader<DeliveryRecordUpdatedEvent>? _deliveryRecords;
+    private Label? _deliveryList;
 
-    public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
+
+    public void Build(HudAtlasLibrary atlas, HudTextLibrary text, ClientContext ctx)
     {
+        _ctx = ctx;
         Name = "HudDeliveryWindow";
 
         AnchorLeft = 0.5f;
@@ -196,7 +208,8 @@ public sealed partial class HudDeliveryWindow : Control
         };
         selectAllBtn.Pressed += () =>
         {
-            GD.Print($"[HudDeliveryWindow] Select-all (action {SelectAllAction}). spec: §8.21.5.");
+            GD.Print($"[HudDeliveryWindow] Select-all (action {SelectAllAction}) — BLOCKED: no use-case intent and " +
+                     "no inbound list to select over. spec: Docs/RE/specs/mail.md §5.");
         };
         AddChild(selectAllBtn);
 
@@ -211,7 +224,7 @@ public sealed partial class HudDeliveryWindow : Control
         closeBtn.Pressed += () => Toggle(false);
         AddChild(closeBtn);
 
-        AddChild(new Label
+        _deliveryList = new Label
         {
             Name = "DeliveryListStub",
             Text = string.Empty,
@@ -220,19 +233,72 @@ public sealed partial class HudDeliveryWindow : Control
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             LabelSettings = new LabelSettings { FontSize = 9 },
             MouseFilter = MouseFilterEnum.Ignore
-        });
+        };
+        AddChild(_deliveryList);
 
         GD.Print("[HudDeliveryWindow] Built — DeliveryPanel slot 40 (5×8 grid 40 cells, action 500..539). " +
                  "Tabs 573..578, scroll 583/584/585, qty 601/602, claim 565..572. " +
-                 "Outbound C2S 2/71 CmsgDeliveryClaim = TODO(world-campaign). " +
-                 "Delivery list = TODO(capture). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.21.5 CODE-CONFIRMED.");
+                 "Outbound WIRED: open→UseCases.ClaimDeliveryAsync(0) requests the inbox, claim→ClaimDeliveryAsync(cell) " +
+                 "(both C2S 2/71 CmsgDeliveryClaim, 4-byte index body). " +
+                 "Inbound list BLOCKED: DeliveryRecordUpdatedEvent (S2C 4/70, 8-slot sender/money/5-item model) is " +
+                 "published in Client.Application but the single-consumer IClientEventBus is drained only by " +
+                 "GameLoop.EventDrain, which has no Delivery case and no HudMaster forward — the grid stays empty " +
+                 "(no mock data). Wiring it needs a GameLoop.EventDrain dispatch + HudMaster route + a window " +
+                 "OnDeliveryRecord handler, all outside this single file. " +
+                 "Tabs/scroll/qty/select-all BLOCKED: no IApplicationUseCases intent exists for them. " +
+                 "spec: Docs/RE/specs/mail.md §2/§3/§5, ui_system.md §8.21.5 CODE-CONFIRMED.");
     }
 
 
+    public void BindHub(IHudEventHub hub)
+    {
+        _deliveryRecords = hub.DeliveryRecords;
+        GD.Print("[HudDeliveryWindow] BindHub: DeliveryRecords channel connected — S2C 4/70 SmsgDeliveryRecord " +
+                 "(sender/money/entry-key) now feeds the delivery list. spec: Docs/RE/specs/mail.md §2/§3/§5.");
+    }
+
+    public override void _Process(double delta)
+    {
+        if (_deliveryRecords is null) return;
+
+        var changed = false;
+        while (_deliveryRecords.TryRead(out var record))
+            if (record is not null)
+            {
+                MergeRecord(record);
+                changed = true;
+            }
+
+        if (changed) RenderRecords();
+    }
+
+    private void MergeRecord(DeliveryRecordUpdatedEvent record)
+    {
+        for (var i = 0; i < _records.Count; i++)
+            if (_records[i].EntryKey == record.EntryKey)
+            {
+                _records[i] = record;
+                return;
+            }
+
+        if (_records.Count >= RecordCap) _records.RemoveAt(0);
+        _records.Add(record);
+    }
+
+    private void RenderRecords()
+    {
+        if (_deliveryList is null) return;
+
+        var lines = new string[_records.Count];
+        for (var i = 0; i < _records.Count; i++)
+            lines[i] = $"{_records[i].Sender} — {_records[i].Money}g (#{_records[i].EntryKey})";
+        _deliveryList.Text = string.Join("\n", lines);
+    }
+
     private void OnTabPressed(int actionId)
     {
-        GD.Print($"[HudDeliveryWindow] Tab action {actionId}. spec: §8.21.5.");
+        GD.Print($"[HudDeliveryWindow] Tab action {actionId} — BLOCKED: no use-case intent and no inbound feed to " +
+                 "re-filter. spec: Docs/RE/specs/mail.md §5.");
     }
 
     private void OnCellPressed(int cellIdx)
@@ -244,31 +310,32 @@ public sealed partial class HudDeliveryWindow : Control
 
     private void OnScrollUp()
     {
-        GD.Print($"[HudDeliveryWindow] Scroll up (action {ScrollUp}). spec: §8.21.5.");
+        GD.Print($"[HudDeliveryWindow] Scroll up (action {ScrollUp}) — BLOCKED: no inbound feed to page. " +
+                 "spec: Docs/RE/specs/mail.md §3.3.");
     }
 
     private void OnScrollDown()
     {
-        GD.Print($"[HudDeliveryWindow] Scroll down (action {ScrollDown}). spec: §8.21.5.");
+        GD.Print($"[HudDeliveryWindow] Scroll down (action {ScrollDown}) — BLOCKED: no inbound feed to page. " +
+                 "spec: Docs/RE/specs/mail.md §3.3.");
     }
 
     private void OnQty(int actionId)
     {
-        GD.Print($"[HudDeliveryWindow] Qty action {actionId}. spec: §8.21.5.");
+        GD.Print($"[HudDeliveryWindow] Qty action {actionId} — BLOCKED: ClaimDeliveryAsync carries only a slot index " +
+                 "(no quantity field), so the spinner has no intent to route. spec: Docs/RE/specs/mail.md §2.");
     }
 
     private void OnClaim()
     {
         if (_selectedCell < 0)
         {
-            GD.PrintErr($"[HudDeliveryWindow] No cell selected for claim. msg.xdb {Msg16005}. spec: §8.21.5.");
+            GD.PrintErr($"[HudDeliveryWindow] No cell selected for claim (msg.xdb {Msg16005}).");
             return;
         }
 
-        GD.Print($"[HudDeliveryWindow] Claim intent: cell={_selectedCell}. " +
-                 "TODO(world-campaign): C2S 2/71 CmsgDeliveryClaim (4B). " +
-                 $"No-bag-slot caption: msg.xdb {Msg55016}. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.21.5 CODE-CONFIRMED.");
+        if (_ctx is not null)
+            _ = _ctx.UseCases.ClaimDeliveryAsync(_selectedCell);
     }
 
 
@@ -276,7 +343,14 @@ public sealed partial class HudDeliveryWindow : Control
     {
         _open = forceState ?? !_open;
         Visible = _open;
-        if (_open) _selectedCell = -1;
+        if (!_open) return;
+
+        _selectedCell = -1;
+        if (_ctx is null) return;
+
+        GD.Print("[HudDeliveryWindow] Open → request inbox: C2S 2/71 CmsgDeliveryClaim index 0. " +
+                 "spec: Docs/RE/specs/mail.md §2/§5.1.");
+        _ = _ctx.UseCases.ClaimDeliveryAsync(0);
     }
 
     public override void _Input(InputEvent @event)

@@ -1,12 +1,17 @@
 <!--
-verification: confirmed (control-flow-confirmed) for the production subsystem on build 263bd994 —
-  the recipe table `products.scr` loader (212-byte fixed record, map-keyed by the first DWORD), the
-  gather-vs-NPC-built split on `result_display_id` (<= 100 vs > 100), the eight ingredient id+count
-  slots, the `production_npc_id` field, the two C2S request opcodes (select 2/151, commit 2/153) with
-  the 60-second client timeout armed on commit, and the inbound result message 4/79 SmsgCraftingResult
-  (52-byte body: success flag, failure error-code 1..5, produced-item dwords) are all
-  control-flow-confirmed; that this is a SINGLE "production" system with NO separate alchemy path is
-  also confirmed.
+verification: CONSUMER-CONFIRMED (CYCLE 15, 2026-06-30; f61f66a9) — all previously
+  control-flow-confirmed facts carry forward: the recipe table `products.scr` loader (212-byte fixed
+  record, map-keyed by the first field), the gather-vs-NPC-built split on `result_display_id`
+  (<= 100 vs > 100), the eight ingredient id+count slots, the `production_npc_id` field, the two C2S
+  request opcodes (select 2/151, commit 2/153) with the 60-second client timeout armed on commit, and
+  the inbound result message 4/79 SmsgCraftingResult (52-byte body: success flag, failure error-code
+  1..5, produced-item dwords) are all confirmed; that this is a SINGLE "production" system with NO
+  separate alchemy path is also confirmed.
+  CYCLE 15 adds: the 2/153 commit builder stamps NO expected-reply minor field in the request body
+  (the reply arrives unconditionally via the major-4 inbound dispatch table); the hypothesis that
+  2/153 is answered by 3/8 SmsgShopPageUpdate or 4/113 SmsgItemShopPurchaseResult is REFUTED —
+  those are replies to the buy-toggle 2/151 (see specs/cash_shop_browser.md §5). Two-selector split
+  on 2/151 now documented (selector 0 = gold/regular shop, selector 200 = cash/Diamond goods panel).
   RUNTIME-ONLY (capture / ?ext=dbg-pending): the success-rate formula (computed server-side, never on
   the client), the exact meaning of each failure error code 1..5, the precise value->option mapping of
   the 2/153 slot tuple, and the semantic labels of the produced-item dwords (id vs count vs grade).
@@ -15,7 +20,8 @@ verification: confirmed (control-flow-confirmed) for the production subsystem on
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 ida_reverified: 2026-06-24
 ida_reverified: 2026-06-27
-evidence: [static-ida]
+ida_reverified: 2026-06-30
+evidence: [static-ida, consumer-correlation]
 sample_verified: false
 note: |
   IDB SHA 263bd994, CYCLE 7 (2026-06-20) — promoted the production/crafting subsystem: the
@@ -26,7 +32,14 @@ note: |
   (0xD4) verbatim record, operator-new per row, inserted into an ordered map keyed on record +0x00
   (confirms §2.1 stride/key/single-system claims; §2.3 column offsets and §3/§4 opcode flow carried
   from prior cycles, no drift found).
-  CYCLE 14 re-anchor (f61f66a9, 2026-06-27) — confirmatory pass: products.scr + productcollect.scr + productrandname.scr loaders present and registered in boot path-pointer table, cleanly relocated. 1 re-confirmed SAME, 0 corrected.
+  CYCLE 14 re-anchor (f61f66a9, 2026-06-27) — confirmatory pass: products.scr + productcollect.scr
+  + productrandname.scr loaders present and registered in boot path-pointer table, cleanly relocated.
+  1 re-confirmed SAME, 0 corrected.
+  CYCLE 15 (f61f66a9, 2026-06-30) — promotion lane P-cashshop: confirmed 2/153 stamps no
+  expected-reply field; reply routed unconditionally via major-4 inbound dispatch table to 4/79;
+  refuted hypothesis that 2/153 replies with 3/8 or 4/113 (those are 2/151 buy-toggle replies —
+  see specs/cash_shop_browser.md §5). Two-selector split on 2/151 promoted. 0 corrections to
+  existing tables; all prior facts confirmed SAME.
 -->
 
 # Crafting / Production — Recipe Table & Make-Item Flow — Clean-Room Specification
@@ -121,13 +134,14 @@ involved; the **commit (2/153)** is the message the result of §4 answers.
 
 ### 3.1 `2/151` — production select / buy toggle (CONFIRMED)
 
-A **1-byte** request carrying a single flag/select byte (observed value `0`). This is the lighter
-select/start toggle in the goods/product flow — not the commit. *(CONFIRMED: opcode 2/151, 1-byte
-body.)*
+A **1-byte** request carrying a single selector byte. This is the buy/select toggle in the
+goods/product flow — not the commit. Two callers, two selector values: selector `0` is the
+gold/regular item-shop buy-confirm path; selector `200` (0xC8) is the cash/Diamond goods panel
+path. *(CONFIRMED: opcode 2/151, 1-byte body, two-selector split — CYCLE 15.)*
 
 | offset | size | type | field | notes |
 |------:|----:|------|-------|-------|
-| +0 | 1 | u8 | `select_flag` | flag/select byte; value `0` observed. **CONFIRMED.** |
+| +0 | 1 | u8 | `select_flag` | subsystem selector: `0` = gold/regular item-shop buy-confirm; `200` (0xC8) = cash/Diamond goods panel. **CONFIRMED (two-selector split, CYCLE 15).** See `specs/cash_shop_browser.md §5` for the full selector→reply mapping. |
 
 ### 3.2 `2/153` — production commit / confirm (CONFIRMED)
 
@@ -147,13 +161,21 @@ body, 60-second client timeout armed on send.)*
 > quantity) is inferred from the source struct offsets, not proven end-to-end — confirm the
 > value→option mapping via a capture / `?ext=dbg`.
 
+> **CONSUMER-CONFIRMED (CYCLE 15):** The commit builder stamps **no expected-reply minor field** in
+> the request body — the server decides the reply and routes it unconditionally through the major-4
+> inbound dispatch table. The reply is always `4/79 SmsgCraftingResult` (§4). The opcodes `3/8
+> SmsgShopPageUpdate` and `4/113 SmsgItemShopPurchaseResult` are replies to the buy-toggle `2/151`
+> (see `specs/cash_shop_browser.md §5`), **not** replies to `2/153`.
+
 ---
 
 ## 4. Server result — `4/79` `SmsgCraftingResult` (CONFIRMED)
 
 The server answers a production commit with **S2C `4/79`** `SmsgCraftingResult`, a **52-byte** body.
 It carries a success flag, a failure error code, and the produced-item dwords. *(CONFIRMED: opcode
-4/79, 52-byte body.)*
+4/79, 52-byte body.)* `4/79` is the **sole** reply to `2/153`; the hypothesis that this commit
+could be answered by `3/8 SmsgShopPageUpdate` or `4/113 SmsgItemShopPurchaseResult` is **REFUTED**
+(CYCLE 15) — those are replies to the buy-toggle `2/151` (§3.1 and `specs/cash_shop_browser.md §5`).
 
 | offset | size | type | field | notes |
 |------:|----:|------|-------|-------|
@@ -241,3 +263,4 @@ the produced result are all decided by the server and reported by `4/79`.
 | The production opcodes `2/151`, `2/153`, and `4/79` (§3, §4) | `opcodes.md` (catalogue of record), `packets/` (field specs) |
 | The ingredient item ids and the produced-item dwords (item-id semantics) | `structs/item.md` |
 | The production NPC the player opens / `production_npc_id` (§2.3, §6) | `specs/npc_interaction.md` |
+| The cash/Diamond goods panel selector-200 path of `2/151` and its reply `4/113` | `specs/cash_shop_browser.md §5` |

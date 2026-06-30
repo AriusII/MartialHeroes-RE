@@ -6,12 +6,12 @@ public enum QuestGateResult
     RecordNotFound,
     LevelTooLow,
     LevelTooHigh,
-    NotAcceptedForSlot,
-    WrongClassRace,
+    NotAcceptedForClass,
+    WrongStance,
     SecondaryStatTooLow,
     SecondaryStatTooHigh,
     TertiaryStatFailed,
     SameCategoryActive,
     SameIdActive,
-    PrerequisiteNotMet
+    InChain
 }

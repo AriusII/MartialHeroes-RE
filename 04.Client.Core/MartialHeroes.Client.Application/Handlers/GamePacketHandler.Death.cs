@@ -1,5 +1,6 @@
 using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Domain.Actors.Actors;
+using MartialHeroes.Client.Domain.Simulation.Simulation;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 using MartialHeroes.Shared.Kernel.Numerics;
 
@@ -57,5 +58,28 @@ public sealed partial class GamePacketHandler
 
 
         _eventBus.Publish(new LocalPlayerStateSyncedEvent(key, position, heading, mode));
+    }
+
+    public void Handle(in SmsgActorDeathState packet)
+    {
+        var key = new ActorKey(packet.ActorKey, EntitySort.PlayerCharacter);
+        if (_world.LocalActorKey == key || !_world.TryGet(key, out _)) return;
+
+        var resolution = DeathStateMachine.ResolveActorDeathState(packet.Mode, packet.SubSelector);
+        if (resolution.Op == ActorDeathOp.NoOp) return;
+
+        _eventBus.Publish(new ActorDeathStateEvent(
+            (uint)key.Sort, packet.ActorKey, packet.Mode, packet.SubSelector, packet.KillerKey));
+    }
+
+    public void Handle(in SmsgPvpDeathFx packet)
+    {
+        var key = new ActorKey(packet.ActorKey, EntitySort.PlayerCharacter);
+        if (_world.LocalActorKey == key || !_world.TryGet(key, out _)) return;
+
+        var resolution = DeathStateMachine.ResolvePvpDeathFx(packet.Mode, packet.Gate);
+        if (resolution.Op == PvpDeathFxOp.NoOp) return;
+
+        _eventBus.Publish(new PvpDeathFxEvent((uint)key.Sort, packet.ActorKey));
     }
 }

@@ -182,10 +182,14 @@ public sealed partial class LensFlareNode : CanvasLayer
         }
 
         var anchor = cam.UnprojectPosition(sun);
-        var center = GetViewport().GetVisibleRect().Size * 0.5f;
+        var rectSize = GetViewport().GetVisibleRect().Size;
+        var center = rectSize * 0.5f;
 
-        var dist = anchor.DistanceTo(center);
-        var brightness = _invIntensityBorder > 0f ? 1f - _invIntensityBorder * dist : 1f;
+        var clamped = new Vector2(
+            Math.Clamp(anchor.X, 0f, rectSize.X),
+            Math.Clamp(anchor.Y, 0f, rectSize.Y));
+        var edgeDistance = anchor.DistanceTo(clamped);
+        var brightness = _invIntensityBorder > 0f ? 1f - _invIntensityBorder * edgeDistance : 1f;
         if (brightness <= 0f)
         {
             HideAll();
@@ -193,7 +197,8 @@ public sealed partial class LensFlareNode : CanvasLayer
         }
 
         brightness = Math.Clamp(brightness, 0f, 1f);
-        var dir = center - anchor;
+        var dir = anchor - center;
+        var viewportWidth = center.X * 2f;
 
         for (var i = 0; i < _ghosts.Length; i++)
         {
@@ -205,11 +210,11 @@ public sealed partial class LensFlareNode : CanvasLayer
                 continue;
             }
 
-            g.Position = anchor + dir * spot.Position;
+            g.Position = center + dir * spot.Position;
 
             var texSize = g.Texture.GetSize();
             var maxDim = Math.Max(texSize.X, texSize.Y);
-            var scale = maxDim > 0f ? spot.Radius * 2f / maxDim : 1f;
+            var scale = maxDim > 0f ? spot.Radius * viewportWidth * 2f / maxDim : 1f;
             g.Scale = new Vector2(scale, scale);
             g.Modulate = new Color(spot.Color.R, spot.Color.G, spot.Color.B, spot.Color.A * brightness);
             g.Visible = true;

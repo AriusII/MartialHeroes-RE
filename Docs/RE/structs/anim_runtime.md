@@ -7,6 +7,8 @@ sample_verified: false      # in-memory C++ object layouts, not packed-file form
 subsystems: [animation, render_pipeline, character]
 conflicts: one flagged open (play-time clip-resolve key id_a vs id_b per formats/animation.md — not silently overwritten; see Open Q1)
 deep_cartography_deepening: 2026-06-29 — struct B +0x00 key formula corrected to col1+categoryBase[(u8)(col0+1)]; ActorAnimationCycle pool stride confirmed 44 bytes (added end row); actor+0x510 typed as std::map<unsigned int,CoreAnimation*> keyed by id_a; Q1 static bound sharpened toward id_a (still debugger-pending); no other layout changes.
+corrected_2026_06_30: keyframe sampler — the first index clamps to key_count-1, but the SECOND interpolation index WRAPS to keyframe 0 at the loop seam (it is NOT clamp-to-last); single-keyframe tracks short-circuit and never wrap. The rotation SLERP is raw-dot (no hemisphere flip), only the exact-antipodal dot<=-1 degenerate case special-cased. See the Keyframe sampler section. No layout change.
+mixer_recovered_2026_06_30: per-frame layer math re-read from the binary (action FSM, cycle ramp, sync-phase advance, weighted-sample accumulate, between-pass commit, all shipped start/refresh call sites). Key new facts — action blend-in/out durations are play-call arguments (NOT clip fields/constants) and are 0 at every shipped call site; the commit pass clamps accumulated weight to (1 - committed weight) before folding; the action layer holds output weight 0 and freezes its FSM until the first wrap of its wrap-length window. See the new "Mixer dynamics" section. No layout change.
 ---
 
 # Struct cluster: animation runtime — `CoreAnimation`, `AnimMixer`, `ActorAnimationCycle`, `ActorAnimationAction`, `AnimCatalog` record
@@ -343,9 +345,16 @@ binary addresses are stripped per firewall rules.
 position delta) vs the draw-time render-only variant above.
 
 **Keyframe sampler** (confirms `Docs/RE/formats/animation.md`):
-`idx = floor(t × 10)`, clamp both `idx` and `idx+1` to `key_count − 1`,
+`idx = floor(t × 10)`, **clamp the first index to `key_count − 1`; the second index `idx+1` WRAPS to
+keyframe 0 at the loop seam** (it is NOT clamped to `key_count − 1`; corrected 2026-06-30) — so a track
+with `key_count ≤ frame_count` interpolates `keyframe[last] → keyframe[0]` over its final 0.1 s window
+(raw-seconds alpha in `[0, 0.1)`), while a single-keyframe track short-circuits to that one key and
+never wraps;
 alpha = `t − idx × 0.1` (raw seconds, **not** renormalized to [0, 1]),
-translation via `Vec3_Lerp`, rotation via `Quat_Slerp` (shortest-arc).
+translation via `Vec3_Lerp`, rotation via `Quat_Slerp` (**raw-dot, no hemisphere flip; only the
+exact-antipodal `dot ≤ −1` degenerate case is special-cased** — corrected 2026-06-30; the Godot port
+keeps a shortest-arc SLERP and must NOT be changed toward the binary, see
+`Docs/RE/specs/skinning.md` §6.1).
 
 **Idle-clip selection** (`ActorVisual_ApplyIdleMotionByKind`):
 1. Read `actor.appearanceKey(+0x6C)`.
@@ -355,6 +364,84 @@ translation via `Vec3_Lerp`, rotation via `Quat_Slerp` (shortest-arc).
    tables on the singleton indexed by `actor.direction(+0xA8)`.
 4. `MotClipList_SampleByTime(mixer, motionId, weight=1.0, blendIn=0.0)` — starts or refreshes the
    cycle layer; sets `actor.animState(+0x58C) = 1`; defaults `actor.speed(+0x3FC) = 1.5`.
+
+---
+
+## Mixer dynamics — exact per-frame layer math (recovered 2026-06-30)
+
+A binary re-read of the action-layer advance, the cycle-layer advance, the weighted-sample accumulate,
+the between-pass commit, and every shipped play-action / start-cycle call site sharpened the following.
+Struct-relative offsets only; no behaviour below changes any layout in the tables above.
+
+**Action one-shot FSM (struct E) — what drives the blend-in/out durations.** The blend-in duration
+(layer +0x20) and blend-out duration (layer +0x24) are **not** clip fields and **not** engine
+constants — they are **arguments passed to the play-action routine and stored verbatim on the layer at
+start**. The same start routine sets clip pointer (+0x04), clip id = clip id_a (+0x08), layer-kind tag
+3 (+0x0C), FSM state 3 (+0x10), local time 0 (+0x14), playback speed = requestedSpeedFactor × 1.5
+(+0x18), output weight 0 (+0x1C), wrap length = a caller argument (+0x2C), and wrapped-once flag 0
+(+0x30). **Every shipped call site passes blend-in = 0 and blend-out = 0** — the death/knockdown
+motion, the combat/skill action dispatcher, and the effect-driven motion path were all checked and all
+pass 0 for both durations; only the **wrap length** is ever data-driven (one path reads it from a
+per-actor table at actor +0x4C4 indexed by a motion selector; the others pass 0). The requested speed
+factor observed is 1.0 (death) or 1.5 (combat), giving an effective layer speed of 1.5 or 2.25.
+**Consequence for the port:** with zero blend durations the FSM steps state 3 → 4 on the first advance
+(output weight latches straight to 1.0) and 4 → 5 → expire across the final frame, i.e. shipped
+one-shot actions are a hard 0↔1 switch with **no visible cross-fade**. The ramp machinery is genuine
+but the shipped data never exercises it; the logf-guarded 0.001 denominator floor exists precisely to
+keep the `localTime / duration` division finite when a duration is 0.
+
+**Action FSM per-frame (confirms struct E).** Each advance: local time (+0x14) += speed (+0x18) × dt.
+Before the first wrap (local time < wrap length AND wrapped-once flag clear) the **output weight is
+forced to 0 and the FSM is frozen** for that frame; on the first crossing of the wrap length the
+wrapped-once flag (+0x30) is set and the wrap length is subtracted from local time (clamped ≥ 0).
+State 3 (blend-in): if blend-in duration ≤ local time → state 4 and weight = 1.0; else weight =
+local time / blend-in duration (denominator floored to 0.001 when its logf < 0.001). State 4 → state 5
+when local time ≥ clip duration − blend-out duration. State 5 (blend-out): if clip duration ≤ local
+time → return expired (layer deleted this frame); else weight = (clip duration − local time) /
+blend-out duration (same 0.001 floor). With a zero wrap length the pre-first-wrap gate is a no-op on
+frame 1.
+
+**Cycle looping-layer weight ramp (confirms struct D).** Start/refresh sets target weight (+0x24) and
+blend-in remaining time (+0x20) from the start call's weight and blend-in arguments; a refresh of an
+already-live layer (matched by clip id at +0x08) rewrites **only** those two fields. Each advance, when
+dt < blend-in remaining: weight (+0x1C) = (1 − f)·weight + target·f with f = dt / (blend-in remaining)
+(the remaining time floored to 0.001 when its logf < 0.001), then blend-in remaining −= dt. When
+dt ≥ blend-in remaining: weight latches to the target weight and the remaining time latches to the
+target as well; **if the target weight is 0 the layer expires** (deleted this frame). Free-run timing
+(mode 2): local time (+0x14) += speed (+0x18) × dt, fmod-wrapped at clip duration, wrap flag (+0x28)
+set on wrap. Sync timing (mode 1): the layer carries no own clock; its sample time is computed in the
+evaluator as clip duration × mixer sync phase / mixer sync range.
+
+**Sync-phase advance (confirms struct C).** Each frame, before the layer passes: clear the mixer wrap
+flag (+0x29); then if the sync range (+0x24) is 0 set the sync phase (+0x20) to 0, else phase += dt × 1.5
+and fmod-wrap at the range, setting the mixer wrap flag on a full wrap (which fires the footstep sound
+effect once per wrap for sync-mode cycle layers). After the cycle pass the range is recomputed as
+Σ(weightᵢ × clip durationᵢ) / Σ weightᵢ over **sync-mode cycle layers only**, set to 0 when Σ weight ≤ 0.
+
+**Per-bone weighted-sample accumulate (confirms struct F).** First contributor: assign the sampled
+translation (accumulator +0x38) and quaternion (+0x44) directly and set accumulated weight (+0x18) =
+wNew. Later contributors: f = wNew / (accumulated weight + wNew), denominator floored to 0.001 when
+logf(accumulated weight + wNew) < 0.001; LERP translation by f, SLERP quaternion by f, then accumulated
+weight += wNew.
+
+**Between-pass commit (confirms struct F; cross-note skinning §6.2–6.3).** Run once after the action
+pass and again after the cycle pass, over every pose bone. Per bone: **first clamp the pass's
+accumulated weight (+0x18) to at most (1 − committed weight)** before folding. If accumulated weight > 0:
+when committed weight is 0 (first/only layer) copy the accumulator translation/quaternion straight into
+the committed local-animated slots; when committed weight ≠ 0 (second-or-later layer) blend by
+f = accumulated / (committed + accumulated) (floored to 0.001 under the same logf guard) — and for an
+**interior bone** (one with a parent, a grandparent, and at least one child) the translation is instead
+forced to its bind-local translation (rotate-only), while non-interior bones LERP translation;
+quaternion always SLERP. Finally committed weight += accumulated and the accumulator weight resets to 0.
+
+**Idle ↔ action transition trigger (per-frame).** The action pass deletes any action layer whose
+advance returns expired; the cycle pass deletes any cycle layer whose target weight has reached 0. When
+the action list **becomes empty on a frame on which it was non-empty** (the last action just expired)
+the mixer calls the idle/state tick, which re-applies the looping idle cycle for the actor's current
+motion-kind — this is the action-finished → idle hand-off. Conversely a gameplay event (attack, skill,
+death) calls the play-action routine, pushing a new action layer onto the action list; while any action
+layer is live the action pass commits first and the idle cycle's contribution is blended underneath it
+by the weighted-average commit.
 
 ---
 

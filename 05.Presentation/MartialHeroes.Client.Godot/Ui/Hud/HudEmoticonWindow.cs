@@ -75,6 +75,8 @@ public sealed partial class HudEmoticonWindow : Control
 
     private bool _open;
 
+    private LineEdit? _inputBox;
+
     private Control? _page0Panel;
     private Control? _page1Panel;
 
@@ -173,6 +175,8 @@ public sealed partial class HudEmoticonWindow : Control
             Size = new Vector2(297f, 23f),
             MouseFilter = MouseFilterEnum.Stop
         };
+        inputBox.TextSubmitted += OnInputSubmitted;
+        _inputBox = inputBox;
         AddChild(inputBox);
 
         _page0Panel = BuildMacroPage();
@@ -184,8 +188,14 @@ public sealed partial class HudEmoticonWindow : Control
         SelectPage(0);
 
         GD.Print("[HudEmoticonWindow] Built — right-dock 318×732 EmoticonPanel (+0x370). " +
-                 "Page 0: 9 macro slots (INI SHIFT_1..9 → chat C2S 2/7, rate 5000 ms). " +
-                 "Page 1: graphical emote grid stub (emoticon.do 40-byte records, TODO(format)). " +
+                 "Page 0: 9 macro slots route to chat C2S 2/7 via SendChatAsync (rate 5000 ms); " +
+                 "phrase DATA blocked — no channel/use-case/INI exposes per-class %s_CHATSHORTCUT SHIFT_1..9, " +
+                 "slots stay empty (no mock data). " +
+                 "InputTextbox (202) submit wired → SendChatAsync channel 0 (say). " +
+                 "Page 1: graphical emote grid stub — blocked on emoticon.do parser (§8.19.5 panel data source, " +
+                 "TODO(format); EmoticonCatalogue=emoticon.txt is the char-manifest table, NOT the panel grid) " +
+                 "and page-1 emote is client-local with NO packet (§8.19.6) — no emote use-case and no overhead-balloon " +
+                 "presentation event this window can publish (SpeechBubbleRequested has no subscriber). " +
                  "spec: Docs/RE/specs/ui_system.md §8.19 CODE-CONFIRMED.");
     }
 
@@ -265,7 +275,7 @@ public sealed partial class HudEmoticonWindow : Control
 
     private void OnMacroPressed(int slotIndex)
     {
-        var nowMs = (long)Time.GetTicksMsec();
+        var nowMs = (long)global::Godot.Time.GetTicksMsec();
         if (nowMs - _lastMacroSentMs < MacroRateLimitMs)
         {
             GD.Print($"[HudEmoticonWindow] Macro rate-limited (5000 ms). slot={slotIndex}. " +
@@ -287,6 +297,28 @@ public sealed partial class HudEmoticonWindow : Control
         else
         {
             GD.PrintErr("[HudEmoticonWindow] SendChatAsync: ctx is null (offline). Macro not sent.");
+        }
+    }
+
+
+    private void OnInputSubmitted(string text)
+    {
+        var line = text.Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+        _inputBox?.Clear();
+        if (line.Length == 0) return;
+
+        if (_ctx is not null)
+        {
+            _ = _ctx.UseCases.SendChatAsync(0, line);
+            GD.Print("[HudEmoticonWindow] InputTextbox (action 202) submit → chat C2S 2/7 channel 0 (say) " +
+                     "via UseCases.SendChatAsync. spec: Docs/RE/specs/ui_system.md §8.19.6 " +
+                     "(panel text routed through the normal chat send pipeline) / chat.md §4.1. " +
+                     "Submit-as-trigger inferred from the panel's chat-funnel model (§8.19.3 action 202 = focus; " +
+                     "explicit submit verb capture-pending).");
+        }
+        else
+        {
+            GD.PrintErr("[HudEmoticonWindow] InputTextbox submit: ctx is null (offline). Not sent.");
         }
     }
 

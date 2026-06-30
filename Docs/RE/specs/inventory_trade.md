@@ -1,11 +1,11 @@
 ---
 status: confirmed
 sample_verified: false
-verification: confirmed (client-side routing/sizes/offsets confirmed by control flow; server-authored magnitudes and on-wire VALUE semantics capture/debugger-pending); re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); spec-audit pass (2026-06-24): upgradeitems.scr container corrected (ordered-map/tree keyed on +0x00; +0x04/+0x08 are lookup-time keys; binary wins); upgrade-result display message-db ids 33007/33008 added to §10; CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME (equip/inventory/shop/upgrade handler set and slot-record model; SmsgEquipItemResult_Handler and SmsgUpgradeItemResult_Handler present and routed; ItemSlotRecord 16B, EquipTable 20×16)
-ida_reverified: 2026-06-24 (SHA 263bd994); CYCLE 14 re-anchor: 2026-06-27
+verification: CONSUMER-CONFIRMED (client-side routing/sizes/offsets confirmed by control flow and consumer reads at f61f66a9; server-authored magnitudes and on-wire VALUE semantics capture/debugger-pending); re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); spec-audit pass (2026-06-24): upgradeitems.scr container corrected (ordered-map/tree keyed on +0x00; +0x04/+0x08 are lookup-time keys; binary wins); upgrade-result display message-db ids 33007/33008 added to §10; CYCLE 14 re-anchor (f61f66a9): handler set and slot-record model re-confirmed (SmsgEquipItemResult_Handler, SmsgUpgradeItemResult_Handler, ItemSlotRecord 16B, EquipTable 20×16); CYCLE 15 (2026-06-30): 4/15 pickup-ack result/subtype selector CONSUMER-CONFIRMED (100/101/else paths pinned, coin-SFX-only correction applied); currency-field identity promoted (gold 64-bit qword at player +0x1FF4/+0x1FF8, cash dword at player +0x10EC, billing dword on separate singleton +0x54); 2/142 CmsgStorageOp added (Op = widget_action_id − 7, §3/§14); equip-ack result-byte branch shape pinned (4/16 truthiness vs 4/12/4/22 explicit == 1; see structs/item.md §7a/§7b)
+ida_reverified: 2026-06-24 (SHA 263bd994); CYCLE 14 re-anchor: 2026-06-27; CYCLE 15 re-anchor: 2026-06-30
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
-evidence: [static-ida]
-conflicts: resolved (4/23 two-level selector restored; 4/25 phase/count offsets re-pinned; upgradeitems.scr container key corrected this pass)
+evidence: [static-ida, consumer-confirmed]
+conflicts: resolved (4/23 two-level selector restored; 4/25 phase/count offsets re-pinned; upgradeitems.scr container key corrected; CYCLE 15: coin gold-credit attribution corrected — handler plays SFX only, gold arrives via 4/108)
 ---
 
 # Inventory, Equipment, Shop & Trade — Clean-Room Specification
@@ -43,6 +43,19 @@ conflicts: resolved (4/23 two-level selector restored; 4/25 phase/count offsets 
 > distinguished from the free-slot capacity gate; §12.3), and the absence of any client-side
 > ground-item despawn timer (server-driven lifetime) was re-affirmed. Item-drop-on-death is not
 > client-computed (penalty magnitudes RUNTIME-ONLY).
+>
+> **CYCLE 15 (2026-06-30).** 4/15 `SmsgItemWorldPickupAck` result/subtype selector fully
+> CONSUMER-CONFIRMED (§12.7): subtype 100 = client-resolved free-slot insert with announce
+> fallback 10006/37003/37004; 101 = plain insert; else = insert + world-entity despawn by
+> `world_key@+0x0C`. Correction: the coin-pickup branch in this handler plays SFX 862030105
+> only — the gold credit arrives via a separate 4/108 balance update. Currency-field identity
+> added to §13: gold is a 64-bit qword on the local-player block (+0x1FF4 low / +0x1FF8 high);
+> item-shop cash is a separate dword at +0x10EC; billing points (4/82) are a dword on a
+> distinct billing singleton (+0x54), not gold. 2/142 `CmsgStorageOp` added (§3/§14): Op byte
+> = widget_action_id − 7; gated on storage panel open (UI actor-visual slot 191). Equip-ack
+> result-byte branch shape pinned for §4.4: 4/16 tests result for truthiness (any non-zero
+> applies), 4/12 and 4/22 require result == 1 exactly — see `structs/item.md` §7a/§7b for the
+> full per-opcode arm table.
 
 ## Status & confidence
 
@@ -187,7 +200,8 @@ The following client→server messages drive this subsystem. Sizes are payload b
 | 2/24 | C2S | 20 | `CmsgTradeSlotUpdate`    | Add / update money or an item in your trade-window half. See §8. | 4/24 |
 | 2/25 | C2S | 2 + 4×N | `CmsgTradeConfirm`     | Confirm / lock or cancel the trade, re-transmitting the own-side offer manifest. See §8. | 4/25 |
 | 2/30 | C2S | 8  | `CmsgGuildAction` (relation/guild op) | Small guild / relation action channel; **not** a trade op (corrected 2026-06-13). See §8.4. | — |
-| 2/50 | C2S | 16 | `CmsgUpgradeItemCommit`  | Timed/progress-channel commit (item upgrade/enchant candidate). See §6. | 4/50 (likely) |
+| 2/50  | C2S | 16 | `CmsgUpgradeItemCommit`  | Timed/progress-channel commit (item upgrade/enchant candidate). See §6. | 4/50 (likely) |
+| 2/142 | C2S | 16 | `CmsgStorageOp`          | Storage / warehouse deposit, withdraw, or move. `op` byte = widget action id − 7; gated on storage panel open (UI actor-visual slot 191). See §14. | — |
 
 Confidence: routing (`major/minor` + direction) **and payload size** are `CONFIRMED` for
 **every** row above (re-verified byte-exact in each send builder, 2026-06-16). For **2/50**
@@ -265,19 +279,29 @@ authoritative; `UNVERIFIED` whether the client greys out ineligible items at all
 
 ### 4.4 Result acks
 
-- **4/12 `EquipItemResult` (S2C, 16 bytes fixed)** — layout in `structs/item.md`
-  (`EquipItemResult`). The handler reads a 16-byte body, takes the **result byte at +8**,
-  and the **slot type at +0x0C**; on `result == 1` it applies the slot to the item model;
-  if the slot type is **15**, it then runs the visual / appearance gear rebuild. On
-  `result == 0` it shows a generic error. Offsets `CONFIRMED` (re-verified 2026-06-16);
-  the result/slot **values** are read straight from the wire (server-authored).
+> **Per-opcode result-byte arm table** (what each result value does, what the apply helper
+> does, and what is a no-op) lives in `structs/item.md` §7a (4/22) and §7b (4/12) — the
+> authoritative location. Only the flow-level facts and the cross-opcode distinctions that
+> are implementation-relevant are repeated here.
+
+- **4/12 `EquipItemResult` (S2C, 16 bytes fixed)** — the handler reads a 16-byte body;
+  **result at +8**; **slot type at +0x0C**. On `result == 1` it applies the equip result;
+  if the slot type is **15**, it runs the visual/appearance gear rebuild. On `result == 0` it
+  shows a generic error. Values `>= 2` are a **no-op** (the handler has no arm for them).
+  See `structs/item.md` §7b for the full arm table. Offsets `CONFIRMED` (re-verified
+  2026-06-16); no C2S send is issued from this handler on any result value. CONSUMER-CONFIRMED
+  (CYCLE 15).
 - **4/16 `EquipChangeResult` (S2C, 20 bytes fixed)** — same family; routing `confirmed`.
-  The handler reads a **20-byte (0x14) body**: **result at +8**, equip sub-bytes at **+0x0A
-  and +0x0B**, where the slot-15 visual-rebuild test is on the byte at **+0x0B** (the
-  16-bit-equip-result slot-15 byte sits at +0x0C; the 20-bit equip-change-result slot-15
-  byte sits at +0x0B). On success the handler re-syncs the **20 × 16** equip array from the
-  local-player item block (§1.1). Offsets `CONFIRMED` (re-pinned 2026-06-16); the deeper
-  per-field meanings of the +0x0A/+0x0B sub-bytes are `UNVERIFIED`.
+  The handler reads a **20-byte (0x14) body**: **result at +8**. **Key distinction from 4/12
+  and 4/22: 4/16 tests result for truthiness only** (any non-zero value applies — the handler
+  has `if (result) { apply… }` with no `== 1` comparison, so a server result of `2` would
+  apply under 4/16 but be a no-op under 4/12/4/22). On the apply path: the byte at **+0x0A**
+  gates the slot-15 visual rebuild (rebuild runs only when +0x0A is `0`); the **slot byte at
+  +0x0B** is then tested `== 15` to drive the visual/appearance gear rebuild. The handler
+  then bulk re-syncs the **20 × 16** equip array from the local-player item block (§1.1). On
+  `result == 0` it shows a generic error. Offsets `CONFIRMED` (re-pinned 2026-06-16);
+  the deeper per-field meanings of the +0x0A/+0x0B sub-bytes are `UNVERIFIED`. No C2S send
+  is issued from this handler on any result value. CONSUMER-CONFIRMED (CYCLE 15).
 
 ---
 
@@ -441,8 +465,10 @@ The post-sale gold magnitude is server-authored (`capture-pending`).
 
 A buy-variant region (4/13), an NPC shop-slot-clear ack (4/21), a shop-page-update
 (3/8 `SmsgShopPageUpdate`), and the item-shop / cash-shop family (4/71, 4/113, 4/114,
-4/115) are all routed `confirmed` in `opcodes.md`. They are referenced here for context
-only; their layouts are out of scope for this spec.
+4/115) are all routed `confirmed` in `opcodes.md`. The billing-points opcode 4/82 and the
+gold-balance opcode 4/108 are also in this routing family. Layouts for **4/82, 4/108,
+and 4/115** (currency balance updates) are documented in §13; 4/71/4/113/4/114 are out of
+scope for this spec.
 
 ---
 
@@ -722,9 +748,15 @@ walks to build its per-occupied-slot record list (§8.1).
 | Pickup distance gate = < 20 game units | Metric proximity check against the ground-item actor on the 2/15 send path; a separate gate from the free-slot threshold above, sharing the value 20 (added CYCLE 7 2026-06-20). | CONFIRMED |
 | 4/14 drop-ack result byte at +0x0C (`0` = close panel, `1` = drop SFX + grid update) | Drop-ack handler located CYCLE 7; corrects the prior doc-asserted result@+0x08 (added 2026-06-20). | CONFIRMED |
 | Drop SFX 862030106; coin-pickup SFX 862030105 | Ground-item A/V cues (added 2026-06-13). | LIKELY |
-| Drop announce string 2146; pickup announce 10006 / 37003; other-player pickup notice 10018 | Ground-item chat cues, CP949 (added 2026-06-13). | LIKELY |
-| Pickup error strings 10001…10005 | 4/15 failure subtypes 1…5; 10005 = level/eligibility (added 2026-06-13). CP949. | CODE-CONFIRMED |
+| Pickup insert SFX 862030104 | Non-coin item pickup; played by the shared insert helper on success (added CYCLE 15 2026-06-30). | CONSUMER-CONFIRMED |
+| Drop announce string 2146; pickup announce 10006 / 37003 / 37004; other-player pickup notice 10018 | Ground-item chat cues, CP949. 37004 added CYCLE 15 (subtype-100 no-free-slot path). | LIKELY |
+| Pickup error strings 10001…10005 | 4/15 failure subtypes 1…5; 10005 = level/eligibility (added 2026-06-13). CP949. | CONSUMER-CONFIRMED |
 | Rare-drop chat strings 64001 / 64002 | 5/14 `notice_flag` one-shot line (added 2026-06-13). CP949. | CONFIRMED |
+| Gold: 64-bit qword on local-player block; low dword at player +0x1FF4, high dword at +0x1FF8 | Set by 4/108 (unconditional) and 4/115 (on success). Gold is always a single 64-bit pair (added CYCLE 15 2026-06-30). | CONSUMER-CONFIRMED |
+| Item-shop cash: single dword on local-player block at player +0x10EC | Set by 4/115 alongside gold on success. A separate wallet from gold (added CYCLE 15 2026-06-30). | CONSUMER-CONFIRMED |
+| Billing points: single dword on billing singleton at offset +0x54 | Set by 4/82 (mode 1). A distinct runtime object, NOT the local-player block and NOT gold (added CYCLE 15 2026-06-30). | CONSUMER-CONFIRMED |
+| "3 balance dwords" on 4/115 wire = gold-low + gold-high + cash | NOT a 3-dword gold; gold is always the 64-bit pair at (+0x1FF4, +0x1FF8); cash at +0x10EC is the third dword (added CYCLE 15 2026-06-30). | CONSUMER-CONFIRMED |
+| 2/142 `CmsgStorageOp` Op formula: Op = widget_action_id − 7 | Op byte encodes the storage operation (deposit/withdraw/move). Widget action ids assigned in the storage context-menu builder. Storage panel = actor-visual singleton slot 191. context_id = game-context singleton field at offset +1576. value gate: > 0. (added CYCLE 15 2026-06-30). | CONSUMER-CONFIRMED |
 | 5/14 spawn SFX 863600001 | Played for a fixed set of effect-id ranges on ground-item spawn (added 2026-06-16). | CONFIRMED |
 | 4/15 pickup announce 10006 / 37003 / 37004 (own); 902 (others) | Pickup chat cues (refined 2026-06-16). CP949. | CONFIRMED |
 
@@ -783,10 +815,12 @@ walks to build its per-occupied-slot record list (§8.1).
     combat-effect-instance spawn; the bytes the ground-item handler does not consume (the hole at
     +16 and the +33…+43 region) are capture-unverified. Confirm the server sends a full 48 bytes
     for a drop.
-16. **4/15 pickup success subtypes 100 / 101 / else** (added 2026-06-13) — the three success
-    sub-paths (share/party-split, plain insert, insert+echo) were read structurally; the server
-    policy that selects each (party loot rules) is server-side and not fully decidable from the
-    client. The echoed dwords at +12 / +0x1C / +0x20 are `PLAUSIBLE` only.
+16. **(Resolved CYCLE 15 2026-06-30.)** 4/15 pickup success subtypes 100 / 101 / else are
+    CONSUMER-CONFIRMED (§12.7): 100 = client-resolved free-slot insert with name-announce fallback
+    (10006/37003/37004); 101 = plain insert; else = insert + world-entity despawn by
+    `world_key@+0x0C`. The server policy selecting the subtype (party-loot rules) is server-side
+    and not client-determinable. The echoed dwords at +0x1C/+0x20 remain PLAUSIBLE for exact
+    semantics; `world_key@+0x0C` and `slot_param@+0x10` are CONSUMER-CONFIRMED.
 17. **Despawn authority** (added 2026-06-13) — 5/15 is the explicit ground-item despawn; the 4/15
     "else" success path also runs a local remover for the picker. Whether a 5/15 always follows a
     4/15 for the picker, or the client self-despawns and 5/15 is only for observers, is
@@ -816,6 +850,12 @@ walks to build its per-occupied-slot record list (§8.1).
     any items lost on death arrive as ordinary server-driven ground-item spawns / inventory
     updates. Death-penalty magnitudes (dropped items, and any XP / durability loss) are
     **RUNTIME-ONLY / server-authoritative**.
+23. **Storage op deposit/withdraw/move label binding (2/142)** (CYCLE 15 2026-06-30) — the formula
+    Op = widget_action_id − 7 is CONSUMER-CONFIRMED (§14); which Op value (0, 1, 2) maps to
+    deposit vs withdraw vs move is assigned in the storage context-menu builder (off the send path)
+    and cannot be read from the consumer side. R-CAP: break at the storage send site, read the
+    incoming widget action_id, correlate with the UI action performed (deposit / withdraw / move),
+    then map action_id − 7 to the human label.
 
 ---
 
@@ -982,29 +1022,54 @@ announces it.
 | Off | Size | Type | Meaning | Conf |
 |---|---|---|---|---|
 | +0..+7 | 8 | — | valid / echo region | PLAUSIBLE |
-| +8  | 1 | u8  | **result** (`0` = error; non-zero = ok) | CODE-CONFIRMED |
-| +9  | 1 | u8  | **subtype** — see below | CODE-CONFIRMED |
-| +12 | 4 | i32 | echoed dword (use-flag / slot region) | PLAUSIBLE |
-| +16..+0x17 | — | — | echoed bytes (consumed by the slot insert) | PLAUSIBLE |
-| +0x18 (24) | 4 | u32 | **item / actor id** (world lookup key; == 217000501 ⇒ coin) | CODE-CONFIRMED |
-| +0x1C (28) | 4 | i32 | echoed dword | PLAUSIBLE |
-| +0x20 (32) | 4 | i32 | echoed dword | PLAUSIBLE |
+| +8  | 1 | u8  | **result** (`0` = error; non-zero = ok) | CONSUMER-CONFIRMED |
+| +9  | 1 | u8  | **subtype** — see below | CONSUMER-CONFIRMED |
+| +0x0C (12) | 4 | u32 | **world_key** — ground-item world-entity id; used to remove the actor from the world registry on the insert+despawn ('else') success path | CONSUMER-CONFIRMED |
+| +0x10 (16) | 4 | u32 | **slot_param** — destination slot argument passed to the share-slot registrar on subtype 100 | CONSUMER-CONFIRMED |
+| +0x18 (24) | 4 | u32 | **item_id** — item/template id; `== 217000501` ⇒ coin; also the actor-lookup key for the cross-player announce | CONSUMER-CONFIRMED |
+| +0x1C (28) | 4 | i32 | **count** — quantity echoed into the cross-player announce ("X got Y" line) | PLAUSIBLE |
+| +0x20 (32) | 4 | i32 | opaque / echoed dword | PLAUSIBLE |
 
-The **subtype** byte at +9 is interpreted by result:
-- **Failure** (`result == 0`): subtype values `1…5` select error strings **10001…10005**
-  (10005 = a level / eligibility error, also used at request time, §12.3).
-- **Success** (`result != 0`): subtype selects the insert path —
-  - **100** = share / party-split: find the next free bag slot, insert, refresh the slot UI; if no
-    slot is free, fall back to a name announce ("you got %s", strings 10006 / 37003).
-  - **101** = plain insert.
-  - **else** = insert plus a local despawn/echo on the picker's grid, then announce.
+The **subtype** byte at +9 is interpreted conditional on **result** (+8):
 
-If the id at +0x18 equals the coin id **217000501** the pickup is a coin: it credits gold and
-plays coin SFX **862030105** instead of an item insert. The own pickup announce uses strings
-**10006** / **37003** / **37004**; the announce to other players in the same context uses
-**902**. The exact server policy choosing subtype 100 vs 101 vs else is server-side (§11 #16).
-`CONFIRMED` (size 36, result@+8, subtype@+9, the 100/101/else split, the 1–5 → 10001–10005 failure
-map, the coin branch; re-verified 2026-06-16).
+**Failure (`result == 0`):** the handler first closes the pickup/drop UI panels, then a switch
+on `subtype` selects a warning string:
+
+| subtype | message id (CP949) | meaning |
+|---|---|---|
+| 1 | 10001 | pickup error subtype 1 |
+| 2 | 10002 | pickup error subtype 2 |
+| 3 | 10003 | pickup error subtype 3 |
+| 4 | 10004 | pickup error subtype 4 |
+| 5 | 10005 | level / eligibility error (same id used by the 2/15 client-side request gate, §12.3) |
+
+The switch has no default: `subtype` of 0 or > 5 on failure closes panels but shows no message.
+`CONSUMER-CONFIRMED` (CYCLE 15; the 1–5 → 10001–10005 map is control-flow-hard).
+
+**Success (`result != 0`):** the shared insert helper (which plays pickup SFX **862030104**
+for non-coin items and writes the item into the inventory grid) is invoked, then `subtype`
+selects the post-insert path:
+
+| subtype | path | behaviour |
+|---|---|---|
+| 100 | client-resolved free-slot insert (share / party-split) | client finds its own next free bag slot; on success inserts and registers the chosen slot (args: `slot_param`@+0x10). If no free slot exists, does NOT insert — instead announces by actor name: strings **10006** + **37003** + **37004**, displayed in the standard pickup-announce highlight colour. |
+| 101 | plain insert | runs the shared insert helper only; no client slot-resolution, no world-entity removal. |
+| else (any other value) | insert + local world-entity despawn | runs the shared insert helper, then removes the ground-item world actor by `world_key`@+0x0C from the world/battle registry, then closes the drop panel. |
+
+After the subtype branch (all success cases):
+- If `item_id`@+0x18 `== 217000501` (coin id): the handler plays coin SFX **862030105**.
+  **Correction (CYCLE 15):** this handler does NOT itself credit gold — the gold balance update
+  arrives via a separate **4/108** packet (§13) or inside the insert helper. The earlier note
+  "credits gold" is withdrawn.
+- Else if an actor resolves from `item_id` and it is not the coin id: broadcast a cross-player
+  "X got Y" line using strings **902** + **10006** with `count`@+0x1C, displayed in the standard pickup-announce highlight colour, HUD
+  placement gated on a global UI-mode word.
+
+The own-pickup announce uses strings **10006** / **37003** / **37004** (subtype-100 no-free-slot
+path). The announce to other players uses **902**. The server policy choosing subtype 100 vs 101
+vs else (party-loot rules) is server-side and not client-determinable (§11 #16).
+`CONSUMER-CONFIRMED` (size 36, result@+8, subtype@+9, the 100/101/else split, the 1–5 →
+10001–10005 failure map; CYCLE 15).
 
 ### 12.8 S2C 5/15 `SmsgGroundItemRemove` (16 bytes, read 0x10)
 
@@ -1062,3 +1127,123 @@ A re-implementation should model ground items as pooled scene actors keyed by th
 with the spiral anti-overlap placement, the +1.0 float, the Mob-drop expiry timer, and the
 1000-unit label radius — and use 201011001 as the fallback model whenever the per-template model is
 missing.
+
+---
+
+## 13. Currency balance opcodes (4/82 / 4/108 / 4/115)
+
+(Added CYCLE 15 2026-06-30.) Three server-to-client packets update the player's currency
+balances. They write to **two distinct runtime objects** and maintain **three distinct fields**;
+conflating them produces incorrect balance state.
+
+### 13.1 Currency field identity (CONSUMER-CONFIRMED)
+
+| Currency | Object | Field offset | Width |
+|---|---|---|---|
+| **Gold** | local-player block | low dword at +0x1FF4; high dword at +0x1FF8 | 64-bit qword (split) |
+| **Item-shop cash** | local-player block | +0x10EC | 32-bit dword |
+| **Billing points** | billing singleton (a distinct runtime object) | +0x54 | 32-bit dword |
+
+Gold is always a single 64-bit value split across two consecutive dwords. The "3 balance dwords"
+visible on the 4/115 wire are `gold_lo` + `gold_hi` + `cash` — NOT three dwords of gold. Billing
+points live on a completely separate object and are NOT related to gold or cash.
+
+### 13.2 4/108 `SmsgPlayerGoldBalanceUpdate` (S2C, 16 bytes)
+
+Sets the local player's gold balance unconditionally (no result/selector byte).
+
+| Off | Size | Field | Meaning | Conf |
+|---|---|---|---|---|
+| +0..+7 | 8 | header/echo | not consumed as named fields | — |
+| +8  | u32 | `gold_lo` | gold low dword → player +0x1FF4 | CONSUMER-CONFIRMED |
+| +12 | u32 | `gold_hi` | gold high dword → player +0x1FF8 | CONSUMER-CONFIRMED |
+
+After writing, the gold HUD counter is refreshed. This is the packet that delivers gold balance
+after a coin pickup (§12.7). `CONSUMER-CONFIRMED`.
+
+### 13.3 4/115 `SmsgItemShopBalanceUpdate` (S2C, 24 bytes)
+
+Combined item-shop result: sets gold qword and the separate cash dword, gated by a result byte.
+
+| Off | Size | Field | Meaning | Conf |
+|---|---|---|---|---|
+| +0..+7 | 8 | header/echo | not consumed as named fields | — |
+| +8  | u8 | `result`      | `0` = failure, non-zero = success | CONSUMER-CONFIRMED |
+| +9  | u8 | `fail_reason` | only when `result == 0`: routed to the item-shop failure UI | CONSUMER-CONFIRMED |
+| +12 | u32 | `gold_lo`    | (success) gold low dword → player +0x1FF4 | CONSUMER-CONFIRMED |
+| +16 | u32 | `gold_hi`    | (success) gold high dword → player +0x1FF8 | CONSUMER-CONFIRMED |
+| +20 | u32 | `cash_points` | (success) item-shop cash dword → player +0x10EC | CONSUMER-CONFIRMED |
+
+On `result != 0`: sets both the gold qword and the cash dword; refreshes the item-shop UI.
+On `result == 0`: routes `fail_reason` to the item-shop failure UI; no balance change.
+`CONSUMER-CONFIRMED`.
+
+### 13.4 4/82 `SmsgBillingBalanceUpdate` (S2C, 16 bytes)
+
+Sets **billing points** on the billing singleton — NOT gold. Reads 4 dwords and branches on
+the mode byte.
+
+| Off | Size | Field | Meaning | Conf |
+|---|---|---|---|---|
+| +0..+7 | 8 | header/echo | not consumed as named fields | — |
+| +8  | u8 | `mode`            | `0` = info-panel path (use `submode`@+9); `1` = set billing balance (use `billing_points`@+12) | CONSUMER-CONFIRMED |
+| +9  | u8 | `submode`         | only when `mode == 0`: selects an info-panel category text (submode 0→51, 1→52, 2→53, 3→54, 4→55) | CONSUMER-CONFIRMED |
+| +12 | u32 | `billing_points` | new billing-point balance; only when `mode == 1` | CONSUMER-CONFIRMED |
+
+On `mode == 1`: sets the billing singleton's +0x54 dword to `billing_points`; updates the
+billing HUD counter; broadcasts message **45009** formatted with the delta (new minus previous
+via the getter). The displayed value is the change, not the total. On `mode == 0`: routes
+`submode` to the info-panel category-text builder. Billing points are a **single dword**;
+their magnitude is server-authored (capture-pending). `CONSUMER-CONFIRMED`.
+
+---
+
+## 14. Storage / warehouse operations (C2S 2/142)
+
+(Added CYCLE 15 2026-06-30.) The storage/warehouse subsystem uses a single C2S opcode.
+
+### 14.1 2/142 `CmsgStorageOp` — C2S payload, 16 bytes
+
+The builder writes major=2 / minor=142 and appends exactly 16 bytes. Both send sites gate
+on the **storage/warehouse panel being open** (UI actor-visual singleton slot 191 is the
+storage panel; the "panel is open" flag lives at slot 191 + 140).
+
+| Off | Size | Field | Meaning | Conf |
+|---|---|---|---|---|
+| +0  | u32 | `context_id` | Active storage session / target reference. Copied from the game-context singleton field at offset +1576. A runtime / server-seeded reference, not a static constant. | CONSUMER-CONFIRMED (placement); value RUNTIME-ONLY |
+| +4  | u8  | `op` | **Storage operation = widget_action_id − 7.** Written as a single byte. | CONSUMER-CONFIRMED |
+| +5  | 3 B | (pad) | Not written by the consumer — left as stack contents. Treat as zero; capture-pending on-wire meaning. | UNVERIFIED |
+| +8  | i64 | `value` | 64-bit amount / quantity entered in the amount panel. The consumer gate requires `value > 0` (non-positive values are not sent). | CONSUMER-CONFIRMED (placement + gate); meaning capture-pending |
+
+Field widths sum to 16 bytes (4 + 1 + 3 + 8).
+
+### 14.2 Op-byte derivation (the widget_action_id − 7 formula)
+
+The Op byte is set by the buffer-filling consumer just before the 16-byte buffer is handed to
+the builder. The consumer reads the widget action id from the calling UI context and stores
+`action_id − 7` into payload +4.
+
+**Two send sites, both gated on the storage panel being open:**
+
+1. **Context-menu / OK confirm** — the storage panel's selected menu-action id (`menu_sel`)
+   drives a dispatch. For `menu_sel ∈ {6, 7}` with the storage panel open, the consumer is
+   called with `action_id = menu_sel + 1`. This produces:
+   - `menu_sel 6` → action_id 7 → Op **0**
+   - `menu_sel 7` → action_id 8 → Op **1**
+   (`menu_sel 8` routes to a drop-to-world path and does NOT produce a 2/142 frame.)
+
+2. **Split-amount confirm** — with the storage panel open, the consumer is called with
+   `action_id` read directly from the panel's internal state (panel field +316) and a
+   separate 64-bit amount (panel field +240). This yields a third Op value (Op **2** or
+   another value depending on the action id stored there).
+
+The Op space is a small contiguous enum starting at 0 (action ids 7, 8, 9 → Op 0, 1, 2).
+Which Op value maps to deposit, withdraw, or move (the semantic label) is assigned when the
+storage context-menu is populated (off the send path and not readable from the consumer). This
+is a residual R-CAP — see §11 #23.
+
+### 14.3 No inbound handler for 2/142
+
+Family 2 is entirely client-emitted for this subsystem (§2); there is no inbound major-2
+handler. A server ack (if any) would arrive on a separate major/minor. No dedicated S2C
+storage-ack opcode was identified this pass — this is an open routing gap.

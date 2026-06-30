@@ -25,6 +25,10 @@ conflicts: refines terrain.md §5.4a triangle-selection rule; no contradiction w
 > the pinned anchor; treat them as [static-hypothesis] until a re-validator confirms them against
 > the 263bd994 build.
 >
+> **Corrected 2026-06-30.** §8.8 item 2 (world-opaque terrain/building material state block): the
+> cull mode is **`D3DCULL_CW` (value 2)**, not the "CCW" stated previously — the binary sets
+> clockwise backface culling for the world-opaque pass.
+>
 > **Authoritative cross-references:** `Docs/RE/formats/terrain.md §5.4a` (per-triangle plane
 > interpolation — CODE-CONFIRMED, CYCLE 12), `Docs/RE/formats/terrain.md §5.4` (block-1
 > heights are direct world-space Y), `Docs/RE/formats/terrain.md §5.5` (block-2 normals are
@@ -167,6 +171,109 @@ the builder constructs the unit-normal plane from the three face vertices. It co
 vectors from the vertices, takes their cross product (`nx, ny, nz`), normalizes the result using
 `Vector_NormalizeInPlaceReturnLength`, and sets `d = -dot(normal, V0)` using `Vec3_Dot`. If the
 cross product has zero length (degenerate face), the builder returns failure and the face is skipped.
+
+### 2.5 Binary-exact cell-pick, triangle-pick, and fallback [confirmed — recovered 2026-06-30, f61f66a9 build]
+
+A direct read of the runtime sampler chain on the committed anchor build settles the exact arithmetic
+and the precise fallback behaviour. This subsection is `[confirmed]` and supersedes the
+`[static-hypothesis]` wording above where they differ; the chief differences are the **mode-flag
+semantics** (the two paths were described inverted in §2.1) and the **out-of-bounds Y=0 fallback**,
+which §2.1 omitted.
+
+**(a) Sentinel.** The output float is pre-seeded to the bit pattern that reads as the most-negative
+finite single (`0xFF7FFFFF`, i.e. −FLT_MAX ≈ −3.40282×10³⁸). Every "found" comparison downstream
+tests inequality against this exact value, and the entry point's boolean result is precisely
+`outY != −FLT_MAX`.
+
+**(b) Cell pick from world XZ.** For each axis the cell index is
+`index = 10000 − truncate(coord × (−1/1024))`, where `truncate` rounds toward zero and the scale is
+the exact constant `−0.0009765625`. A negative-axis correction is applied **before** the truncation:
+when `coord < 0` the coordinate has `1024.0` subtracted first, so the floor direction is correct for
+the negative half-axis. This yields `(mapX, mapZ)` matching `terrain_cell.md` (`mapX = 10000 + cellX`,
+`world_x0 = (mapX − 10000) × 1024`).
+
+**(c) Loaded-cell resolution (`Terrain_ResolveLoadedCell3x3`).** Resolution reads the manager's
+**center-cell pointer (manager+92, ring slot 12)**. If it is null, the result is null. Otherwise the
+requested `(mapX, mapZ)` is accepted only when **both** `|mapX − centerMapX| ≤ 1` and
+`|mapZ − centerMapZ| ≤ 1` (Chebyshev ≤ 1 — the inner 3×3 of the 5×5 ring); the cell is then fetched
+from `ring[12 + 5·(mapX − centerMapX) + (mapZ − centerMapZ)]`. The center's `mapX`/`mapZ` are read
+from cell offsets +16252/+16256. **Critically, resolution checks only pointer-non-null and the
+±1 key window — it never reads the cell's `in_use`/loaded flag (cell+24708) and takes no lock.**
+This is the root of the fallback-Y race (see (g)).
+
+**(d) Mode-flag branch.** The sampler selects one of two per-cell evaluators on a single manager-level
+flag at **manager+464** (the area-level map-option / region value of `terrain-manager.md`):
+
+- **Flag == 0 → base-ground path (`Terrain_SampleGroundHeightSteppedXZ`).** Samples the base terrain
+  triangle plane, then additionally queries the EXD extra-terrain layer (cell+16332) at the same patch
+  and **keeps the maximum** of the two.
+- **Flag != 0 → object-grid-only path (`Terrain_SampleObjectGridHeightSteppedXZ`).** Queries **only**
+  the EXD/object grid (cell+16332); the base terrain triangle plane is not consulted.
+
+(Note: §2.1's "Mode A/B" mapping is reversed relative to the binary; this subsection is authoritative.)
+
+**(e) Within-cell patch and triangle pick (base-ground path).**
+
+1. **Patch select (16×16).** With cell origin from cell+16264/+16268 (`world_x0`, `world_z0`):
+   `lx = X − world_x0`, `lz = Z − world_z0`; `pcol = clamp(truncate(lx × 0.015625), 0, 15)`,
+   `prow = clamp(truncate(lz × 0.015625), 0, 15)` (`0.015625 = 1/64`). The subtile is
+   `slot0(cell+16296) + 3076 + 1136 × (prow + 16·pcol)`.
+2. **Sub-quad select (4×4 within the 5×5 vertex patch).** The column is chosen by comparing X against
+   the patch's stored vertex X-coordinates at vertex columns 1/2/3 (a 3-way threshold test yielding a
+   column 0–3); the row is chosen identically by comparing Z against the vertex Z-coordinates at rows
+   1/2/3. No grid search and **no read of the block-4 direction byte** occurs at runtime.
+3. **Triangle within the quad — FIXED anti-diagonal.** The quad corners are
+   `A=(r,c)`, `B=(r,c+1)`, `C=(r+1,c)`, `D=(r+1,c+1)`. It is always split as triangle 1 `= (A, B, C)`
+   and triangle 2 `= (C, B, D)`; the diagonal is always the **B–C anti-diagonal**, independent of any
+   per-quad data. A 2D point-in-triangle XZ test selects triangle 1 first, else triangle 2; if neither
+   contains the point the patch contributes nothing this pass.
+4. **Point-in-triangle convention.** The three signed XZ edge cross-products are computed; the point is
+   inside when all three share sign, and — importantly — **any cross-product that is exactly 0.0 is
+   treated as inside (on-edge counts as contained).**
+5. **Height solve.** The plane `(nx, ny, nz, d)` is built fresh from the chosen triangle's three
+   vertices (cross of two edges, normalized; `d = −dot(n, vertex)`), and
+   `Y = (−d − nx·X − nz·Z) / ny`. The result is written only when **greater** than the current output
+   (running max).
+
+**(f) EXD / object-grid evaluator (used as the supplement in flag==0, and exclusively in flag!=0).**
+Per object-reference in the patch bucket it does an XZ-AABB reject (record floats 0–3 =
+`minX, minZ, maxX, maxZ`), then the same on-edge-inclusive point-in-triangle test on the footprint
+triangle (vertices at record +16/+28/+40). It then takes a height either from a **flat-Y cache
+scalar at record +68 when that scalar is non-zero** (degenerate/flat fast path — this scalar IS read
+here, contrary to a prior note in `terrain_cell.md` that found no reader on the ray-leaf path), or
+otherwise from a **lazily-built, cached plane at record +52** (rebuilt when its stored `ny` component
+is negative) via the same `Y = (−d − nx·X − nz·Z)/ny` solve. The running output is updated to the
+max across all object refs.
+
+**(g) Exact fallback behaviour — three distinct cases.**
+
+1. **Cell not resident (pointer null) or query outside the inner 3×3 ring:** the inner sampler is
+   **not called at all**; the output is left at the −FLT_MAX sentinel and the entry point returns
+   **false**. The Y is NOT held at a previous value and is NOT defaulted to 0 here — it is the
+   sentinel. The grounding wrapper (§3.1) writes that sentinel straight onto the actor, producing the
+   one-frame deep-sink/pop on spawn before streaming completes.
+2. **Cell resident but no triangle contains the query:** both evaluators run a **two-pass retry** —
+   the first pass at the raw XZ, and if nothing is found the query is nudged by `(+0.1, +0.08)` in
+   XZ and retried once; after the second failure the function returns without writing, leaving the
+   sentinel. Additionally, when the query X or Z is exactly on a 1024 cell boundary
+   (`coord mod 1024 == 0`), the entry point nudges that coordinate inward by **−1.1** world units and
+   resolves+samples the **adjacent** cell as well, so a seam-coincident query still lands on a triangle.
+3. **Object-grid-only path (flag != 0), query outside the cell's [−0.001, 1024.001] XZ bounds:** the
+   evaluator **hard-writes Y = 0.0 and returns false.** This is a distinct, non-sentinel fallback — in
+   map-option-non-zero areas, an out-of-bounds ground query snaps the actor to world Y = 0, not to the
+   sentinel and not to a held value.
+
+**(h) Race / ordering hazard (the historical "NPC fallback-Y race").** Because (c) takes no lock and
+never inspects the cell's loaded flag (cell+24708), the Y returned for a fixed (X, Z) is
+non-deterministic with respect to streaming state: it is the correct interpolated Y once the covering
+cell is resident, but the −FLT_MAX sentinel (case g.1) — or 0.0 in map-option areas (case g.3) — while
+the cell is still streaming in or has just rotated out of the inner 3×3 window. Worse, at least one
+consumer (the camera height-follow) reads the output **without testing the boolean valid flag** and
+adds it directly, so a stale sentinel propagates as a garbage Y. **Port guidance to eliminate the
+non-determinism:** treat the boolean result as authoritative — never commit the output Y when the
+sampler returns false; gate actor/NPC grounding on cell residency (sample only against a cell whose
+loaded flag is set) and defer or re-sample placement until the sampler returns true, rather than
+writing the sentinel or the 0.0 out-of-bounds value as a final position.
 
 ---
 
@@ -598,7 +705,9 @@ in this order:
 
 1. Terrain streaming ring tick (cell stability check).
 2. World opaque material state block: sets up a 3-texture-stage opaque material (fog enabled,
-   alpha-test enabled, alpha-blend disabled, CCW cull mode, bilinear min/mag/mip filters). The exact
+   alpha-test enabled, alpha-blend disabled, **`D3DRS_CULLMODE = D3DCULL_CW` (value 2)** cull mode
+   — corrected 2026-06-30 from an earlier "CCW" reading; the binary sets clockwise cull, not
+   counter-clockwise — bilinear min/mag/mip filters). The exact
    D3DTSS and D3DSAMP enum values for a faithful Godot material port require debugger confirmation
    against the target GPU (§8.9.3). `[debugger-confirm]`
 3. **Near mass objects:** `BuildingTree_CullAndDraw` — cull + near/far classification, then

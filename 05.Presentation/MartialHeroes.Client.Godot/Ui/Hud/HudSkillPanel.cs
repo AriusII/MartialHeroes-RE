@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -25,13 +26,17 @@ public sealed partial class HudSkillPanel : Control
 
 
     private bool _open;
+    private int _activePage;
     private VBoxContainer _skillList = null!;
     private Label _titleLabel = null!;
+    private ClientContext? _ctx;
 
 
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
         Name = "HudSkillPanel";
+
+        _ctx = ClientContext.Instance;
 
         Position = new Vector2(ParkX, ParkY);
         Size = new Vector2(SkillPanelW, SkillPanelH);
@@ -127,9 +132,16 @@ public sealed partial class HudSkillPanel : Control
             AddChild(pipePlaceholder);
         }
 
+        UpdateTabHighlight();
+
         GD.Print($"[HudSkillPanel] Built — 964×655 parked at ({ParkX},{ParkY}). " +
                  $"9 tabs (actions 802–810), 4 skill-pipe panels. " +
                  "spec: Docs/RE/specs/ui_system.md §8.8 CODE-CONFIRMED. " +
+                 "spec: Docs/RE/specs/skill_trees.md §1 — 9 GlobalCategory pages, page select is client-local. " +
+                 "Inbound rows BLOCKED: no IHudEventHub skill channel (SkillPointUpdateEvent / SkillHotbarSlotSetEvent / " +
+                 "SkillHotbarAssignResultEvent ride the GameLoop-drained IClientEventBus and are not republished) and " +
+                 "SkillCatalogue exposes no page-enumeration API — skill list + skill-pipes stay empty, no mock data. " +
+                 $"ctx.UseCases present={_ctx?.UseCases is not null} but exposes no learn (2/145) / hotbar-bind (2/41) intent. " +
                  "TODO(spec): skill-pipe exact geometry pending. " +
                  "TODO(spec): hotbar overlay-rect values debugger-pending.");
     }
@@ -148,8 +160,26 @@ public sealed partial class HudSkillPanel : Control
 
     private void OnTabPressed(int tabIdx)
     {
-        GD.Print($"[HudSkillPanel] Tab {TabActionStart + tabIdx} pressed. " +
-                 $"Filter intent deferred (TODO world-campaign). " +
+        if ((uint)tabIdx >= TabCount) return;
+
+        _activePage = tabIdx;
+        UpdateTabHighlight();
+
+        GD.Print($"[HudSkillPanel] Tab {TabActionStart + tabIdx} pressed → active page {tabIdx} (GlobalCategory {tabIdx}). " +
+                 "Client-local page select per Docs/RE/specs/skill_trees.md §1 (no C2S page opcode). " +
+                 "List re-populate BLOCKED: no IHudEventHub owned-skill/page channel and SkillCatalogue has no " +
+                 "page-enumeration API — page filter has no data source, list stays empty (no mock data). " +
                  "spec: Docs/RE/specs/ui_system.md §8.8 — action ids 802–810.");
+    }
+
+    private void UpdateTabHighlight()
+    {
+        for (var t = 0; t < TabCount; t++)
+        {
+            if (_tabs[t] is null) continue;
+            var selected = t == _activePage;
+            _tabs[t].Disabled = selected;
+            _tabs[t].Modulate = selected ? new Color(1f, 1f, 0.7f, 1f) : new Color(0.8f, 0.8f, 0.8f, 1f);
+        }
     }
 }

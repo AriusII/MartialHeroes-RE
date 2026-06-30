@@ -1,6 +1,6 @@
 shader_type spatial;
 
-render_mode unshaded, cull_disabled, depth_draw_always;
+render_mode unshaded, cull_disabled, depth_draw_always, fog_disabled;
 
 uniform bool cel_enabled = false;
 

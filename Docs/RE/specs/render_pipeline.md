@@ -69,6 +69,13 @@
 >   `scene_graph.md §3` reference replaced with explicit citations to `occlusion_culling.md §3
 >   Regime 1` (sphere-vs-plane algorithm, confirmed) and `scene_graph_nodes.md §5` (DFS
 >   pre-order child-list traversal, confirmed); `occlusion_culling.md` added to cross-links.
+> - **render-state / fog / transform-upload corrections (2026-06-30):** §3 step 3 gains the
+>   in-world fog recipe (linear vertex **range** fog: FOGENABLE 1, FOGVERTEXMODE 3, RANGEFOGENABLE 1,
+>   start/end from clamped view distance, colour from a 48-entry time-of-day table). §12 gains the
+>   **global default render-state block** note (global default cull = `D3DCULL_NONE` via engine
+>   ordinal 2; ordinal→device map 0→CW, 1→CCW, 2→NONE; ~17 defaults) and the **transform upload
+>   states** (projection → `SetTransform` state 3, view → state 2; world view = inverse-orthonormal,
+>   no LookAt on world path). §13 item 3 narrowed to the world up-axis direction only.
 > - **cross-links:**
 >   `Docs/RE/specs/rendering.md` (per-pass render-state matrix, glow chain, cel-shader
 >   gating, FVF strides, UI blend modes);
@@ -269,6 +276,16 @@ render-globals block (§8) and takes no significant arguments of its own. Operat
    camera eye position, and a player anchor position. The anchor is the local player's world
    position (read from the local player object) when a local player is present; a static
    default position is used otherwise.
+
+   **Fog recipe (linear vertex range fog).** When fog is enabled the controller sets
+   `D3DRS_FOGENABLE` (state 28) = 1, `D3DRS_FOGVERTEXMODE` (state 140) = 3 (`D3DFOG_LINEAR`
+   vertex fog), and `D3DRS_RANGEFOGENABLE` (state 48) = 1 (radial **range** fog — fog factor
+   keyed on true eye-to-vertex distance, not view-space Z). `FogStart`/`FogEnd` are derived from
+   a clamped per-frame view distance (interpolated for view distances below 1000 world units),
+   and the fog colour is read from a 48-entry time-of-day colour table. The disable path sets
+   `D3DRS_FOGENABLE` (state 28) = 0. A Godot port reproduces this as linear distance fog with the
+   fog factor computed from radial eye distance, the start/end driven by the same clamped view
+   distance, and the colour sampled from the time-of-day table.
 4. **Effects tick and schedule drain**: call `Effects_TickAllManagers` on the EffectManager
    to advance all effect sub-managers for the frame; then call `EffectSchedule_DrainDueEvents`
    to fire any due scheduled effects.
@@ -743,10 +760,30 @@ constants. `rendering.md` §5.1a for the cel gating on the post-process flag.*
   dimensions with identity world and view. **`GTransform` internal matrix convention — confirmed
   row-major, composition order `localMatrix × parentModelView` (local-first, row-vector
   pre-multiplication; the matrix multiply helper reads source rows and destination columns in
-  standard row-major order) — is statically confirmed (deep-3d-cartography pass).** The
-  device-side `SetTransform(WORLD/VIEW/PROJECTION)` upload order (row-vs-column-major to the
-  D3D9 device) and the exact world up-axis direction remain `[debugger-confirm]` — see §13
-  item 3.
+  standard row-major order) — is statically confirmed (deep-3d-cartography pass).**
+
+- **Transform upload states (corrected 2026-06-30 — device-side upload order resolved
+  statically).** The projection matrix is uploaded via `SetTransform` transform-state **3**
+  (`D3DTS_PROJECTION`); the per-pass view matrix is uploaded via transform-state **2**
+  (`D3DTS_VIEW`). On the world path the view matrix is the **inverse-orthonormal of the camera
+  holder world matrix** — there is **no `LookAt` on the world path** (the `D3DXMatrixLookAtLH`
+  call is **shadow-projector-only**). This closes the device-side projection/view upload-order
+  portion of the `[debugger-confirm]` note formerly in §13 item 3; only the exact world up-axis
+  direction remains for a live confirmation.
+
+- **Global default scene render-state block (recorded 2026-06-30).** The scene's global default
+  render-state builder establishes the baseline device state for the frame. **The global default
+  cull-mode is `D3DCULL_NONE` (two-sided / no backface culling)**: the builder writes engine
+  cull ordinal **2**, and the engine-ordinal → device mapping is **0 → `D3DCULL_CW` (2),
+  1 → `D3DCULL_CCW` (3), 2 → `D3DCULL_NONE` (1)** — so ordinal 2 maps to device `D3DCULL_NONE`.
+  Per-material render-state blocks override this default (for example, building/mass-object meshes
+  set `D3DCULL_CW`, and the terrain ground draw sets `D3DCULL_CW`). The block sets roughly **17
+  global default render states**, including: alpha-test compare-function ordinal **5** with
+  reference value **150**; blend factors `SRCALPHA` (5) / `INVSRCALPHA` (6) with **blend-enable
+  OFF**; depth-test `LESSEQUAL` (4); **z-write ON**; **dithering ON**; fill mode **solid**;
+  shade-model **Gouraud** (2); and **transparency OFF**. A port that begins each frame from a
+  two-sided, depth-tested, unblended baseline and applies per-material overrides reproduces this
+  faithfully.
 
 - **No per-object depth sort at the pipeline level** (`rendering.md` §3): the cull performs
   only frustum visibility + LOD detail-scale selection. Draw-order correctness relies on
@@ -779,7 +816,7 @@ are treated as implementation facts. All are NON-BLOCKING for most port work.
 |---|---|---|
 | 1 | Active path — runtime landed value | Decision logic fully resolved statically (§2.3): flag at scene `+178748` defaults to `0` (direct); set to `2` iff `Renderer_InitCelGlowShaders` succeeds AND config-singleton `+0x30` == 1. Remaining: breakpoint `Renderer_DrawScene_Fork` in-world and read the live flag value to record which branch this build/config/GPU actually took. |
 | 2 | Bloom source scope — optional visual cross-check | RT-A/RT-B/RT-C identities and routing are statically confirmed (§5): bloom extracted from RT-A pass 1 (sky+terrain+extras only); cel actors and transparent/UI are added in RT-A pass 2 and the present pass after extraction. Remaining: optional visual capture of RT-A vs RT-C surfaces to confirm glow exclusion in practice. |
-| 3 | World-projection matrix order and up-axis | `GTransform` internal convention now **statically confirmed** (deep-3d-cartography pass): row-major matrix multiply; composition `localMatrix × parentModelView` (local-first, row-vector). Post/composite/present quads confirmed left-handed (`D3DXMatrixOrthoLH`); world path uses RH perspective (per `rendering.md` §2.2). **Remaining `[debugger-confirm]`:** read `SetTransform(WORLD/VIEW/PROJECTION)` live during a world frame to pin the device-side row-vs-column-major upload order and the exact world up-axis direction. |
+| 3 | World up-axis direction | `GTransform` internal convention **statically confirmed** (deep-3d-cartography pass): row-major matrix multiply; composition `localMatrix × parentModelView` (local-first, row-vector). Post/composite/present quads confirmed left-handed (`D3DXMatrixOrthoLH`); world path uses RH perspective (per `rendering.md` §2.2). **Device-side upload order resolved statically (2026-06-30):** projection uploads via `SetTransform` transform-state **3** (`D3DTS_PROJECTION`); the per-pass view uploads via transform-state **2** (`D3DTS_VIEW`); the world view matrix is the inverse-orthonormal of the camera holder world matrix (no `LookAt` on the world path — `LookAtLH` is shadow-only). See §12. **Remaining `[debugger-confirm]`:** only the exact world up-axis direction. |
 | 4 | Multi-view count at runtime | **Partially resolved.** `Docs/RE/structs/render_driver.md §1` confirms two instantiation contexts: a global singleton (used for opening, character-select, and in-world scenes) and private instances embedded in scene-window objects (confirmed for the login scene). The in-world node count and whether a character-preview inset adds a node or uses a separate driver remain `[debugger-pending]` — confirm via live `?ext=dbg` session; route to `re-validator`. |
 | 5 | GView struct reconciliation | **RESOLVED.** The render-view object in §7 IS `Diamond::GView` — same class, confirmed via RTTI (class name `Diamond::GView`). See `Docs/RE/structs/gview.md §1` and `§6.2`. The four field discrepancies in `scene_graph_nodes.md` (+0x24, +0x70, +0x74, +0x130) are corrected there. |
 | 6 | JointEffectManager and scene helper roles | Two JointEffectManager instances and two unnamed scene helpers are cached in the render-globals block (§6.2, slots 7, 9, 10, 13). Resolve their specific rendering roles. Route to effects/sky analyst. |

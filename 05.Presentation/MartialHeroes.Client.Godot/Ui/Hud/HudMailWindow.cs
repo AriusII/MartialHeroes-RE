@@ -1,4 +1,8 @@
+using System.Threading.Channels;
 using Godot;
+using MartialHeroes.Client.Application.Contracts.Events;
+using MartialHeroes.Client.Application.Contracts.Hud;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -40,9 +44,10 @@ public sealed partial class HudMailWindow : Control
     private const int Msg55001 = 55001;
     private const int Msg55002 = 55002;
     private const int Msg55003 = 55003;
+    private const int InboxCap = 8;
     private LineEdit? _bodyBox;
 
-
+    private ClientContext? _ctx;
     private bool _open;
     private Control? _readPanel;
     private bool _readPanelVisible;
@@ -51,9 +56,19 @@ public sealed partial class HudMailWindow : Control
     private Control? _sendPanel;
     private bool _sendPanelVisible;
 
+    private readonly List<MailLetterArrivedEvent> _inbox = new(InboxCap);
+    private ChannelReader<MailLetterArrivedEvent>? _mailLetters;
+    private Label? _fromValue;
+    private Label? _dateValue;
+    private Label? _subjectValue;
+    private Label? _bodyValue;
+    private Label? _inboxList;
+    private int _selectedLetter = -1;
 
-    public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
+
+    public void Build(HudAtlasLibrary atlas, HudTextLibrary text, ClientContext ctx)
     {
+        _ctx = ctx;
         Name = "HudMailWindow";
 
         AnchorLeft = 0f;
@@ -119,11 +134,13 @@ public sealed partial class HudMailWindow : Control
         AddChild(_readPanel);
 
         GD.Print("[HudMailWindow] Built — CarrierPigeonPanal slot 96 (140×195, top-left). " +
-                 "SendPanel (§8.21.3): recipient max 16, body max 199, postage 200000. " +
-                 "ReadPanel (§8.21.4): reply textbox max 199. " +
-                 "C2S 2/70 CmsgCarrierPigeonSend + 2/60 CmsgLetterRequest = TODO(world-campaign). " +
-                 "Inbox populate = TODO(capture: 1/20 arrival only). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.21.2/§8.21.3/§8.21.4 CODE-CONFIRMED.");
+                 "SendPanel: recipient max 16, body max 199, postage 200000. ReadPanel: reply textbox max 199. " +
+                 "WIRED: Send btn -> UseCases.SendMailAsync -> 2/70 CmsgCarrierPigeonSend (attachmentless mode 4); " +
+                 "panel close btns route locally (send + read). " +
+                 "BLOCKED (left + flagged, no invention): inbox populate (no IHudEventHub mail/delivery ChannelReader " +
+                 "+ window not bound by HudMaster.BindHub); reply (mail.md §6 refutes the 2/60 seed = marriage, §5 found " +
+                 "no carrier-pigeon reply opcode, no reply use-case); attach (SendMailAsync has no item/money params). " +
+                 "spec: Docs/RE/specs/mail.md §3/§4/§5/§6.");
     }
 
 
@@ -227,7 +244,7 @@ public sealed partial class HudMailWindow : Control
     }
 
 
-    private static Control BuildReadPanel(HudAtlasLibrary atlas, HudTextLibrary text)
+    private Control BuildReadPanel(HudAtlasLibrary atlas, HudTextLibrary text)
     {
         var panel = new Control
         {
@@ -252,6 +269,7 @@ public sealed partial class HudMailWindow : Control
 
         string[] fieldNames = { "From:", "Date:", "Subject:", "Body:" };
         for (var i = 0; i < fieldNames.Length; i++)
+        {
             panel.AddChild(new Label
             {
                 Text = fieldNames[i],
@@ -259,7 +277,34 @@ public sealed partial class HudMailWindow : Control
                 MouseFilter = MouseFilterEnum.Ignore
             });
 
-        panel.AddChild(new Label
+            var value = new Label
+            {
+                Name = $"FieldValue{i}",
+                Text = string.Empty,
+                Position = new Vector2(70f, 34f + i * 22f),
+                Size = new Vector2(282f, 18f),
+                ClipText = true,
+                MouseFilter = MouseFilterEnum.Ignore
+            };
+            panel.AddChild(value);
+            switch (i)
+            {
+                case 0:
+                    _fromValue = value;
+                    break;
+                case 1:
+                    _dateValue = value;
+                    break;
+                case 2:
+                    _subjectValue = value;
+                    break;
+                default:
+                    _bodyValue = value;
+                    break;
+            }
+        }
+
+        _inboxList = new Label
         {
             Name = "InboxStub",
             Text = string.Empty,
@@ -268,7 +313,8 @@ public sealed partial class HudMailWindow : Control
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             LabelSettings = new LabelSettings { FontSize = 9 },
             MouseFilter = MouseFilterEnum.Ignore
-        });
+        };
+        panel.AddChild(_inboxList);
 
         var replyBox = new LineEdit
         {
@@ -291,8 +337,11 @@ public sealed partial class HudMailWindow : Control
         };
         replyBtn.Pressed += () =>
         {
-            GD.Print("[HudMailWindow] Reply pressed → TODO(world-campaign): C2S 2/60 CmsgLetterRequest. " +
-                     "spec: Docs/RE/specs/ui_system.md §8.21.6 CODE-CONFIRMED.");
+            GD.Print("[HudMailWindow] Reply pressed → BLOCKED: no carrier-pigeon reply intent. governing spec " +
+                     "mail.md §6 REFUTES the old '2/60 CmsgLetterRequest' seed (2/60 is the couple/marriage request, " +
+                     "owned by social.md), and §5 recovered NO carrier-pigeon reply/receive opcode distinct from 4/70. " +
+                     "IApplicationUseCases has no reply use-case, and the addressee would need inbox data that has no " +
+                     "wired source — left unrouted, no invention. spec: Docs/RE/specs/mail.md §5/§6.");
         };
         panel.AddChild(replyBtn);
 
@@ -318,11 +367,61 @@ public sealed partial class HudMailWindow : Control
             Size = new Vector2(20f, 20f),
             MouseFilter = MouseFilterEnum.Stop
         };
+        closeBtn.Pressed += HideReadPanel;
         panel.AddChild(closeBtn);
 
         return panel;
     }
 
+
+    public void BindHub(IHudEventHub hub)
+    {
+        _mailLetters = hub.MailLetters;
+        GD.Print("[HudMailWindow] BindHub: MailLetters channel connected — carrier-pigeon receive " +
+                 "(SmsgSrvLetterReceived) now feeds the read-panel inbox (sender/date/subject/body all carried). " +
+                 "spec: Docs/RE/specs/mail.md §3/§5.");
+    }
+
+    public override void _Process(double delta)
+    {
+        if (_mailLetters is null) return;
+
+        var changed = false;
+        while (_mailLetters.TryRead(out var letter))
+            if (letter is not null)
+            {
+                if (_inbox.Count >= InboxCap) _inbox.RemoveAt(0);
+                _inbox.Add(letter);
+                changed = true;
+            }
+
+        if (!changed) return;
+
+        _selectedLetter = _inbox.Count - 1;
+        RenderInbox();
+        RenderSelectedLetter();
+    }
+
+    private void RenderInbox()
+    {
+        if (_inboxList is null) return;
+
+        var lines = new string[_inbox.Count];
+        for (var i = 0; i < _inbox.Count; i++)
+            lines[i] = $"{i + 1}. {_inbox[i].Sender} — {_inbox[i].Subject}";
+        _inboxList.Text = string.Join("\n", lines);
+    }
+
+    private void RenderSelectedLetter()
+    {
+        if (_selectedLetter < 0 || _selectedLetter >= _inbox.Count) return;
+
+        var letter = _inbox[_selectedLetter];
+        if (_fromValue is not null) _fromValue.Text = letter.Sender;
+        if (_dateValue is not null) _dateValue.Text = letter.Date;
+        if (_subjectValue is not null) _subjectValue.Text = letter.Subject;
+        if (_bodyValue is not null) _bodyValue.Text = letter.Body;
+    }
 
     private void OnOpenReadPanel()
     {
@@ -331,7 +430,16 @@ public sealed partial class HudMailWindow : Control
         if (_sendPanel is not null) _sendPanel.Visible = false;
         if (_readPanel is not null) _readPanel.Visible = true;
         GD.Print("[HudMailWindow] Read panel opened. " +
-                 "TODO(capture): populate inbox. spec: §8.21.7.");
+                 "Inbox populate BLOCKED: GamePacketHandler.Mail publishes MailLetterArrivedEvent (carrier-pigeon " +
+                 "receive) + DeliveryRecordUpdatedEvent (4/70) on IClientEventBus, but IHudEventHub exposes NO mail/" +
+                 "delivery ChannelReader and HudMaster.BindHub does not bind this window, so the 8-slot inbox has no " +
+                 "wired source — panel stays empty (no mock data). spec: Docs/RE/specs/mail.md §3/§5.");
+    }
+
+    private void HideReadPanel()
+    {
+        _readPanelVisible = false;
+        if (_readPanel is not null) _readPanel.Visible = false;
     }
 
     private void OnOpenSendPanel()
@@ -356,27 +464,26 @@ public sealed partial class HudMailWindow : Control
 
         if (string.IsNullOrWhiteSpace(recipient))
         {
-            GD.PrintErr($"[HudMailWindow] Send failed: empty recipient. " +
-                        $"msg.xdb {Msg52001}. spec: §8.21.3 CODE-CONFIRMED.");
+            GD.PrintErr($"[HudMailWindow] Send: empty recipient (msg.xdb {Msg52001}).");
             return;
         }
 
         if (string.IsNullOrWhiteSpace(body))
         {
-            GD.PrintErr($"[HudMailWindow] Send failed: empty body. " +
-                        $"msg.xdb {Msg52002}. spec: §8.21.3 CODE-CONFIRMED.");
+            GD.PrintErr($"[HudMailWindow] Send: empty body (msg.xdb {Msg52002}).");
             return;
         }
 
-        GD.Print($"[HudMailWindow] Mail send intent: to='{recipient}', body={body.Length}B. " +
-                 $"Postage={PostageCost}. TODO(world-campaign): C2S 2/70 CmsgCarrierPigeonSend. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.21.3 CODE-CONFIRMED.");
+        if (_ctx is not null)
+            _ = _ctx.UseCases.SendMailAsync(recipient, body);
     }
 
     private void OnAttachItem()
     {
-        GD.Print("[HudMailWindow] Attach item: TODO(world-campaign): item-attach list (action 6..35). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.21.3 CODE-CONFIRMED.");
+        GD.Print("[HudMailWindow] Attach item: BLOCKED: no attach intent. IApplicationUseCases.SendMailAsync emits " +
+                 "2/70 CmsgCarrierPigeonSend in attachmentless mode 4 (all five item handles forced to 0xFFFFFFFF), " +
+                 "and exposes no recipient-money / item-slot parameters, so the compose panel's attach slots have no " +
+                 "use-case to route to — left unrouted, no invention. spec: Docs/RE/specs/mail.md §4.1.");
     }
 
 

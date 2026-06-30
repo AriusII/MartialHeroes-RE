@@ -1,4 +1,4 @@
-using MartialHeroes.Client.Domain.Simulation.Simulation;
+using MartialHeroes.Client.Domain.Actors.Locomotion;
 using MartialHeroes.Client.Domain.Stats.Stats;
 using MartialHeroes.Shared.Kernel.Numerics;
 
@@ -29,8 +29,11 @@ public sealed class Actor
         CurrentStamina = Math.Min(currentStamina, vitals.MaxStamina);
         Position = position;
         MoveTarget = position;
+        SegmentStart = position;
         Yaw = yaw;
         MoveSpeedRawPerSecond = moveSpeedRawPerSecond;
+        Scale = MoveScale.Default;
+        RunFlag = 0;
         TargetRawId = 0;
         IsAlive = true;
         IsPkEnabled = false;
@@ -56,9 +59,17 @@ public sealed class Actor
 
     public Vector3Fixed MoveTarget { get; private set; }
 
+    public Vector3Fixed SegmentStart { get; private set; }
+
     public int Yaw { get; private set; }
 
     public long MoveSpeedRawPerSecond { get; }
+
+    public MoveScale Scale { get; private set; }
+
+    public byte RunFlag { get; private set; }
+
+    public bool IsRunning => RunFlag == 1;
 
     public uint TargetRawId { get; private set; }
 
@@ -98,6 +109,9 @@ public sealed class Actor
     public void SetMoveTarget(Vector3Fixed target)
     {
         MoveTarget = target;
+        SegmentStart = Position;
+        Scale = MoveScale.Default;
+        FaceTowards(target);
         if (IsAlive && Position != target && Lifecycle != LifecycleState.Dead) Lifecycle = LifecycleState.Walking;
     }
 
@@ -105,6 +119,7 @@ public sealed class Actor
     {
         Position = position;
         MoveTarget = position;
+        SegmentStart = position;
     }
 
     public void SetYaw(int yaw)
@@ -116,10 +131,72 @@ public sealed class Actor
     {
         if (!IsAlive || Position == MoveTarget) return Position == MoveTarget;
 
-        var (next, arrived) =
-            LinearMovement.Step(Position, MoveTarget, MoveSpeedRawPerSecond, deltaMs);
-        Position = next;
-        return arrived;
+        var result = LocomotionStep.Advance(new LocomotionStepInput(
+            Position, SegmentStart, MoveTarget, MoveSpeedRawPerSecond, Scale, deltaMs));
+        Position = result.Position;
+        return result.Arrived;
+    }
+
+    public void SetRunFlag(byte runFlag)
+    {
+        RunFlag = runFlag;
+        if (!IsAlive || Lifecycle == LifecycleState.Dead) return;
+        if (Lifecycle == LifecycleState.Walking || Lifecycle == LifecycleState.Running)
+            Lifecycle = MotionActivity.ResolveLocomotion(false, runFlag);
+    }
+
+    public ReconciliationBand ApplyReconciliation(Vector3Fixed serverTarget, byte motionCode)
+    {
+        var outcome = MovementReconciliation.Classify(Position, serverTarget, motionCode);
+
+        Scale = outcome.Scale;
+
+        if (outcome.SnapToTarget)
+        {
+            Position = serverTarget;
+            SegmentStart = serverTarget;
+        }
+        else
+        {
+            SegmentStart = Position;
+        }
+
+        MoveTarget = serverTarget;
+        FaceTowards(serverTarget);
+
+        if (outcome.ResetToIdle)
+            SetLifecycle(LifecycleState.Refreshing);
+        else if (outcome.Band == ReconciliationBand.NormalInterp ||
+                 outcome.Band == ReconciliationBand.FastCatchUp)
+            RefreshLocomotionState();
+
+        return outcome.Band;
+    }
+
+    public bool BeginMotionFinish(bool isLocalPlayer)
+    {
+        if (MotionFinish.EmitsMotionEnd(isLocalPlayer))
+        {
+            MoveTarget = Position;
+            SegmentStart = Position;
+            Scale = MoveScale.Default;
+            if (IsAlive && Lifecycle != LifecycleState.Dead) Lifecycle = LifecycleState.Refreshing;
+            return true;
+        }
+
+        Scale = MotionFinish.ResolveFinishScale(false, Sort);
+        return false;
+    }
+
+    private void FaceTowards(Vector3Fixed target)
+    {
+        if (Facing.TryHeadingRaw(Position, target, out var yawRaw)) Yaw = yawRaw;
+    }
+
+    private void RefreshLocomotionState()
+    {
+        if (!IsAlive || Lifecycle == LifecycleState.Dead) return;
+        Lifecycle = MotionActivity.ResolveLocomotion(false, RunFlag);
     }
 
 

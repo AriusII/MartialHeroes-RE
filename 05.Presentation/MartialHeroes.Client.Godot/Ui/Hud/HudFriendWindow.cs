@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -40,6 +41,7 @@ public sealed partial class HudFriendWindow : Control
     private double _lastRefreshTime = -RefreshThrottleSecs;
 
 
+    private ClientContext? _ctx;
     private bool _open;
     private Control? _tabAContent;
     private Control? _tabBContent;
@@ -48,8 +50,9 @@ public sealed partial class HudFriendWindow : Control
     private LineEdit? _textboxCut;
 
 
-    public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
+    public void Build(HudAtlasLibrary atlas, HudTextLibrary text, ClientContext? ctx)
     {
+        _ctx = ctx;
         Name = "HudFriendWindow";
 
         AnchorLeft = 1f;
@@ -195,9 +198,12 @@ public sealed partial class HudFriendWindow : Control
 
         GD.Print("[HudFriendWindow] Built — FriendPanel two-tab (add/cut). " +
                  "2 textboxes (95×20, maxlen 16); 10 visible rows/tab (189×17, stride −16 from y=212). " +
-                 "Inbound list: TODO(debugger/capture): inbound friend feed (5/26 candidate). " +
-                 "Outbound: TODO(world-campaign): C2S 2/49 (add/cut) + 2/54 (refresh 3-min throttle). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.14 CODE-CONFIRMED.");
+                 "Outbound WIRED: add→UseCases.AddFriendAsync (C2S 2/49 tag0), cut→RemoveFriendAsync (C2S 2/49 tag1), " +
+                 "refresh→RefreshFriendListAsync (C2S 2/54, 3-min throttle). " +
+                 "Inbound list BLOCKED: no IHudEventHub friend/relation channel and RelationUpdatedEvent (5/26 candidate) " +
+                 "is published in Client.Application but never dispatched to the HUD and carries no friend-name field — " +
+                 "rows stay empty (no mock data). Wiring it needs a hub channel + GameLoop dispatch, both outside this file. " +
+                 "spec: Docs/RE/specs/social.md §7.2 / ui_system.md §8.14 CODE-CONFIRMED.");
     }
 
     private Control BuildTabRows(string tabName, Button[] rowBtns, Label[] statusGlyphs, bool hidden)
@@ -280,8 +286,7 @@ public sealed partial class HudFriendWindow : Control
     {
         if (string.IsNullOrWhiteSpace(name)) return;
         var trimmed = name.Length > TbMaxLen ? name[..TbMaxLen] : name;
-        GD.Print($"[HudFriendWindow] Add friend '{trimmed}' → TODO(world-campaign): C2S 2/49 tag=0. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.14.");
+        if (_ctx is not null) _ = _ctx.UseCases.AddFriendAsync(trimmed);
         if (_textboxAdd is not null) _textboxAdd.Text = "";
     }
 
@@ -289,24 +294,16 @@ public sealed partial class HudFriendWindow : Control
     {
         if (string.IsNullOrWhiteSpace(name)) return;
         var trimmed = name.Length > TbMaxLen ? name[..TbMaxLen] : name;
-        GD.Print($"[HudFriendWindow] Cut friend '{trimmed}' → TODO(world-campaign): C2S 2/49 tag=1. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.14.");
+        if (_ctx is not null) _ = _ctx.UseCases.RemoveFriendAsync(trimmed);
         if (_textboxCut is not null) _textboxCut.Text = "";
     }
 
     private void OnRefresh()
     {
-        var now = Time.GetTicksMsec() / 1000.0;
-        if (now - _lastRefreshTime < RefreshThrottleSecs)
-        {
-            GD.Print("[HudFriendWindow] Refresh throttled (3-min cooldown). " +
-                     "spec: Docs/RE/specs/ui_system.md §8.14.");
-            return;
-        }
-
+        var now = global::Godot.Time.GetTicksMsec() / 1000.0;
+        if (now - _lastRefreshTime < RefreshThrottleSecs) return;
         _lastRefreshTime = now;
-        GD.Print("[HudFriendWindow] action 18 = refresh → TODO(world-campaign): C2S 2/54. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.14.");
+        if (_ctx is not null) _ = _ctx.UseCases.RefreshFriendListAsync();
     }
 
     private void OnConfirm()
@@ -327,9 +324,10 @@ public sealed partial class HudFriendWindow : Control
 
     private void OnRowSelect(int tab, int row)
     {
-        GD.Print($"[HudFriendWindow] tab={tab} row={row} selected. " +
-                 "TODO(debugger/capture): inbound friend feed (5/26 candidate). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.14.");
+        GD.Print($"[HudFriendWindow] tab={tab} row={row} selected — no actionable target. " +
+                 "Row selection has no friend id/name to route because the inbound roster feed is BLOCKED: " +
+                 "no IHudEventHub relation channel + RelationUpdatedEvent (5/26) is not dispatched to the HUD. " +
+                 "spec: Docs/RE/specs/social.md §7.2 / ui_system.md §8.14.");
     }
 
     private void OnScroll(int direction)

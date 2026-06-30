@@ -1,6 +1,8 @@
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.Contracts.Hud;
+using MartialHeroes.Client.Application.UseCases;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -9,34 +11,31 @@ public sealed partial class HudPartyWindow : Control
 {
     private const float PartyW = 318f;
     private const float PartyH = 732f;
-
     private const int MemberCount = 8;
     private const float SlotBaseY = 159f;
     private const float SlotStrideY = 54f;
-
     private const float BarMaxW = 124f;
     private const float BarH = 5f;
-
-    private const int ClassMsgBase = 22001;
-
     private const int MainTexId = 8;
     private const int FooterTexId = 2;
+
     private readonly Label[] _classLabels = new Label[MemberCount];
     private readonly ProgressBar[] _expBars = new ProgressBar[MemberCount];
-
     private readonly ProgressBar[] _hpBars = new ProgressBar[MemberCount];
     private readonly Label[] _levelLabels = new Label[MemberCount];
     private readonly ProgressBar[] _mpBars = new ProgressBar[MemberCount];
     private readonly Label[] _nameLabels = new Label[MemberCount];
+    private readonly uint[] _memberIds = new uint[MemberCount];
 
-
+    private int _selectedMemberIndex = -1;
     private bool _open;
+    private IApplicationUseCases? _useCases;
 
-
-    public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
+    public void Build(HudAtlasLibrary atlas, HudTextLibrary text, ClientContext ctx)
     {
-        Name = "HudPartyWindow";
+        _useCases = ctx.UseCases;
 
+        Name = "HudPartyWindow";
         AnchorLeft = 1f;
         AnchorTop = 0f;
         AnchorRight = 1f;
@@ -45,7 +44,6 @@ public sealed partial class HudPartyWindow : Control
         OffsetTop = 0f;
         OffsetRight = PartyW + PartyW;
         OffsetBottom = PartyH;
-
         Visible = false;
         MouseFilter = MouseFilterEnum.Stop;
 
@@ -74,11 +72,6 @@ public sealed partial class HudPartyWindow : Control
                 };
                 AddChild(mainBd);
             }
-        }
-        else
-        {
-            GD.PrintErr("[HudPartyWindow] skillwindow.dds (uitex 8) unavailable (VFS offline). " +
-                        "spec: Docs/RE/specs/ui_system.md §8.12.");
         }
 
         var footerTex = atlas.GetById(FooterTexId);
@@ -117,15 +110,11 @@ public sealed partial class HudPartyWindow : Control
         };
         closeBtn.Pressed += () => Toggle(false);
         AddChild(closeBtn);
-
-        GD.Print("[HudPartyWindow] Built — 318×732 right-anchored PartyPanel. " +
-                 "8 member slots (stride 54, baseline y=159), 3 bars each (HP/MP/EXP, 124×5). " +
-                 "Member rows stub-empty (TODO world-campaign: S2C 5/21 + 5/38 populate). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.12 CODE-CONFIRMED.");
     }
 
     private void BuildMemberSlot(HudAtlasLibrary atlas, HudTextLibrary text, int k, float baseY)
     {
+        var capturedK = k;
         var rowBtn = new Button
         {
             Name = $"MemberRowBtn{k}",
@@ -134,6 +123,7 @@ public sealed partial class HudPartyWindow : Control
             Flat = true,
             MouseFilter = MouseFilterEnum.Stop
         };
+        rowBtn.Pressed += () => SelectMember(capturedK);
         AddChild(rowBtn);
 
         var nameLbl = new Label
@@ -237,34 +227,55 @@ public sealed partial class HudPartyWindow : Control
         }
     }
 
+    private void SelectMember(int index)
+    {
+        _selectedMemberIndex = index;
+    }
+
     private void OnAction(int actionId)
     {
         switch (actionId)
         {
             case 8:
-                GD.Print("[HudPartyWindow] action 8 = Invite → TODO(world-campaign): C2S 2/35 CmsgPartyInvite.");
                 break;
+
             case 9:
+            case 12:
+                if (_selectedMemberIndex >= 0 && _selectedMemberIndex < MemberCount)
+                {
+                    var leaderId = _memberIds[_selectedMemberIndex];
+                    if (leaderId != 0u)
+                        _ = _useCases?.TransferPartyLeaderAsync(leaderId);
+                }
+                break;
+
             case 10:
-                GD.Print($"[HudPartyWindow] action {actionId} = leader op → TODO(world-campaign): C2S 2/36.");
+                if (_selectedMemberIndex >= 0 && _selectedMemberIndex < MemberCount)
+                {
+                    var kickId = _memberIds[_selectedMemberIndex];
+                    if (kickId != 0u)
+                        _ = _useCases?.KickPartyMemberAsync(kickId);
+                }
                 break;
+
             case 11:
-                GD.Print("[HudPartyWindow] action 11 = member op → TODO(world-campaign): C2S 2/37 CmsgPartyLeaderOp.");
+                _ = _useCases?.LeavePartyAsync();
                 break;
+
             case 13:
-                GD.Print("[HudPartyWindow] action 13 = MiniParty toggle (local UI).");
                 break;
+
             case 14:
                 Toggle(false);
                 break;
         }
     }
 
-
     public void OnRosterSnapshot(RosterSnapshotEvent evt)
     {
         for (var k = 0; k < MemberCount; k++)
         {
+            _memberIds[k] = 0u;
             if (_nameLabels[k] is not null) _nameLabels[k].Text = "";
             if (_levelLabels[k] is not null) _levelLabels[k].Text = "";
             if (_classLabels[k] is not null) _classLabels[k].Text = "";
@@ -273,44 +284,107 @@ public sealed partial class HudPartyWindow : Control
             if (_expBars[k] is not null) _expBars[k].Value = 0.0;
         }
 
-        if (evt.Members.IsDefaultOrEmpty)
-        {
-            GD.Print("[HudPartyWindow] OnRosterSnapshot: empty roster. " +
-                     "spec: Docs/RE/packets/4-1_game_state_tick.yaml (Table A); " +
-                     "Docs/RE/specs/world_systems.md §13.3.");
-            return;
-        }
+        _selectedMemberIndex = -1;
+
+        if (evt.Members.IsDefaultOrEmpty) return;
 
         var rowsFilled = 0;
         foreach (var member in evt.Members)
         {
-            var rowIndex = rowsFilled;
-            if (rowIndex >= MemberCount) break;
-
-            var displayText = $"#{member.KeepGuard} [id:{member.ActorId}]";
-            if (_nameLabels[rowIndex] is not null) _nameLabels[rowIndex].Text = displayText;
-
-            GD.Print(
-                $"[HudPartyWindow] row {rowIndex}: member #{member.KeepGuard} ActorId={member.ActorId} Aux={member.Aux} — " +
-                "name/class/vitals roster-feed-pending (S2C 5/21 + 5/38). " +
-                "spec: Docs/RE/packets/4-1_game_state_tick.yaml (Table A); " +
-                "Docs/RE/specs/world_systems.md §13.3.");
+            if (rowsFilled >= MemberCount) break;
+            _memberIds[rowsFilled] = member.ActorId;
             rowsFilled++;
         }
-
-        GD.Print($"[HudPartyWindow] OnRosterSnapshot: {rowsFilled} member row(s) populated with member# + ActorId. " +
-                 "Name/class/vitals feed-pending (S2C 5/21 + 5/38 channels — TODO world-campaign). " +
-                 "spec: Docs/RE/packets/4-1_game_state_tick.yaml (Table A); " +
-                 "Docs/RE/specs/world_systems.md §13.3.");
     }
 
+    public void OnPartyMemberJoined(PartyMemberJoinedEvent evt)
+    {
+        var slot = evt.Sort < MemberCount ? evt.Sort : FindEmptySlot();
+        if (slot < 0 || slot >= MemberCount) return;
+
+        _memberIds[slot] = evt.ActorId;
+
+        if (_nameLabels[slot] is not null)
+            _nameLabels[slot].Text = evt.Name;
+    }
+
+    public void OnPartyMemberRemoved(PartyMemberRemovedEvent evt)
+    {
+        for (var k = 0; k < MemberCount; k++)
+        {
+            if (_memberIds[k] != evt.RemovedId) continue;
+
+            _memberIds[k] = 0u;
+            if (_nameLabels[k] is not null) _nameLabels[k].Text = "";
+            if (_levelLabels[k] is not null) _levelLabels[k].Text = "";
+            if (_classLabels[k] is not null) _classLabels[k].Text = "";
+            if (_hpBars[k] is not null) _hpBars[k].Value = 0.0;
+            if (_mpBars[k] is not null) _mpBars[k].Value = 0.0;
+            if (_expBars[k] is not null) _expBars[k].Value = 0.0;
+
+            if (_selectedMemberIndex == k)
+                _selectedMemberIndex = -1;
+
+            break;
+        }
+    }
+
+    public void OnPartyMemberVitals(PartyMemberVitalsEvent evt)
+    {
+        var slot = FindSlotById(evt.MemberId);
+        if (slot < 0) return;
+
+        if (_nameLabels[slot] is not null && !string.IsNullOrEmpty(evt.MemberName))
+            _nameLabels[slot].Text = evt.MemberName;
+
+        var maxHp = evt.StatD > 0u ? evt.StatD : 1u;
+        var maxMp = evt.StatF > 0u ? evt.StatF : 1u;
+        var maxExp = evt.StatH > 0u ? evt.StatH : 1u;
+
+        if (_hpBars[slot] is not null)
+            _hpBars[slot].Value = (double)evt.StatC / maxHp;
+
+        if (_mpBars[slot] is not null)
+            _mpBars[slot].Value = (double)evt.StatE / maxMp;
+
+        if (_expBars[slot] is not null)
+            _expBars[slot].Value = (double)evt.StatG / maxExp;
+    }
+
+    public void OnPartyInviteState(PartyInviteStateEvent evt)
+    {
+        if (evt.MemberIds.IsDefaultOrEmpty) return;
+
+        for (var k = 0; k < MemberCount; k++)
+            _memberIds[k] = 0u;
+
+        var filled = 0;
+        foreach (var id in evt.MemberIds)
+        {
+            if (filled >= MemberCount) break;
+            _memberIds[filled] = id;
+            filled++;
+        }
+    }
+
+    public void OnPartyAcceptResult(PartyAcceptResultEvent evt)
+    {
+        if (!evt.Success)
+        {
+            for (var k = 0; k < MemberCount; k++)
+            {
+                _memberIds[k] = 0u;
+                if (_nameLabels[k] is not null) _nameLabels[k].Text = "";
+                if (_hpBars[k] is not null) _hpBars[k].Value = 0.0;
+                if (_mpBars[k] is not null) _mpBars[k].Value = 0.0;
+                if (_expBars[k] is not null) _expBars[k].Value = 0.0;
+            }
+        }
+    }
 
     public void BindHub(IHudEventHub hub)
     {
-        GD.Print("[HudPartyWindow] BindHub: roster-number population wired via OnRosterSnapshot (GameLoop drain). " +
-                 "Name/class/vitals remain TODO(world-campaign): S2C 5/21 + 5/38.");
     }
-
 
     public void Toggle(bool? forceState = null)
     {
@@ -338,5 +412,21 @@ public sealed partial class HudPartyWindow : Control
             Toggle(false);
             GetViewport().SetInputAsHandled();
         }
+    }
+
+    private int FindSlotById(uint actorId)
+    {
+        for (var k = 0; k < MemberCount; k++)
+            if (_memberIds[k] == actorId)
+                return k;
+        return -1;
+    }
+
+    private int FindEmptySlot()
+    {
+        for (var k = 0; k < MemberCount; k++)
+            if (_memberIds[k] == 0u)
+                return k;
+        return -1;
     }
 }

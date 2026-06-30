@@ -21,6 +21,10 @@ public sealed partial class VisualActor : CharacterBody3D
 
     private readonly Dictionary<int, AnimationClip?> _clipByMotId = new();
 
+    private ActorBlobShadow? _blobShadow;
+    private int _optionShadowMode = 1;
+    private bool _optionShadowRead;
+
 
     private CellCollisionManager? _cellCollisionManager;
     private int _combatAppearanceKey;
@@ -106,6 +110,101 @@ public sealed partial class VisualActor : CharacterBody3D
         _walkClip = null;
         _runClip = null;
         _locomotionResolved = false;
+
+        EnsureBlobShadow();
+    }
+
+    private void EnsureBlobShadow()
+    {
+        EnsureOptionShadowMode();
+
+        if (_blobShadow is null || !IsInstanceValid(_blobShadow))
+        {
+            _blobShadow = new ActorBlobShadow();
+            AddChild(_blobShadow);
+        }
+
+        _blobShadow.Configure(_combatAssets);
+        _blobShadow.SetFootprintHalfExtent(ResolveFootprintHalfExtent());
+    }
+
+    private float ResolveFootprintHalfExtent()
+    {
+        if (_skinnedNode is null || !IsInstanceValid(_skinnedNode))
+            return 0f;
+
+        var aabb = _skinnedNode.GetMeshAabb();
+        var ext = MathF.Max(aabb.Size.X, aabb.Size.Z);
+        return ext * 0.5f * SkinnedAvatarScale;
+    }
+
+    private void EnsureOptionShadowMode()
+    {
+        if (_optionShadowRead) return;
+        _optionShadowRead = true;
+        _optionShadowMode = ReadOptionShadowMode();
+
+        GD.Print($"[VisualActor] OPTION_SHADOW resolved to {_optionShadowMode} (DoOption.ini [DO_OPTION], " +
+                 "clamped [1,3], default 1). 3 = native shadows off, blob drawn for all actors; 1/2 = blob is the " +
+                 "FAR fallback beyond DirectionalShadowMaxDistance only. " +
+                 "spec: Docs/RE/structs/shadow_projector.md (mode_flag +312).");
+    }
+
+    private static int ReadOptionShadowMode()
+    {
+        var mode = 1;
+        try
+        {
+            var dir = ClientPathResolver.ResolveClientDir();
+            if (dir is null) return mode;
+
+            var path = Path.Combine(dir, "DoOption.ini");
+            if (!File.Exists(path)) return mode;
+
+            var inSection = false;
+            foreach (var rawLine in File.ReadLines(path))
+            {
+                var line = rawLine.Trim();
+                if (line.StartsWith('['))
+                {
+                    inSection = line.Equals("[DO_OPTION]", StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+
+                if (!inSection) continue;
+
+                var eq = line.IndexOf('=');
+                if (eq < 0) continue;
+
+                var k = line[..eq].Trim();
+                if (!k.Equals("OPTION_SHADOW", StringComparison.OrdinalIgnoreCase)) continue;
+
+                if (int.TryParse(line[(eq + 1)..].Trim(), out var v))
+                    mode = Math.Clamp(v, 1, 3);
+
+                return mode;
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[VisualActor] DoOption.ini OPTION_SHADOW read failed: {ex.Message}");
+        }
+
+        return mode;
+    }
+
+    private void UpdateBlobShadow()
+    {
+        if (_blobShadow is null || !IsInstanceValid(_blobShadow)) return;
+
+        var camera = GetViewport()?.GetCamera3D();
+        var focus = camera is not null ? camera.GlobalPosition : GlobalPosition;
+        var here = GlobalPosition;
+        var dx = here.X - focus.X;
+        var dz = here.Z - focus.Z;
+        var planar = MathF.Sqrt(dx * dx + dz * dz);
+
+        _blobShadow.UpdateState(planar, _optionShadowMode);
     }
 
     public void PlayAttackMotion()
@@ -321,6 +420,8 @@ public sealed partial class VisualActor : CharacterBody3D
             UpdateFacingYaw(faceDir);
 
         UpdateLocomotion(moving);
+
+        UpdateBlobShadow();
     }
 
     private void ApplyTerrainGroundY()

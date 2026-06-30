@@ -5,6 +5,7 @@ verification:   sample-verified   # .box absence + fog file size + cloud_cycle s
 ida_reverified: 2026-06-27         # CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME
 ida_extended: 2026-06-28           # deep-3d-2026 static RE (IDB anchor f61f66a9): §E (render pass — D3D state block, fixed draw order, sub-component geometry); §F (cloud animation — UV scroll, texture ping-pong, day-tint); §A.4 vertex ambiguity resolved HIGH (runtime FVF XYZ|TEX1); §A.7 loader confirmation; §D.2.2 exact sun formula; §D.5.1 (billboard quad construction); §D.6 (moon draw location — transparent pass, not sky pass); KU #5 resolved; KU #10–12 added.
 atm_deep_pass: 2026-06-29          # atmosphere deep-cartography deepening pass: KU #2 CLOSED — fog source-band channel grouping CONFIRMED (high=[+3,+4,+5], low=[-1,+0,+1], stride 192B/slot, output B/G/R); §B.2 updated from MED to CONFIRMED.
+render_corrections: 2026-06-30     # §E.5 step 4 cloud-dome cull corrected to CW (was NONE) + colour-key 0xFF000000 black→transparent, no luminance opacity term; §D.4.2 lens-flare ghost POSITION direction REVERSED (binary: pos_i = centre + POSITION×(sunAnchor − centre); POSITION=1 ON the sun, 0 at centre, negative beyond centre); §D.4.3 RADIUS pinned as a viewport-width fraction (ghost quad half-extent = RADIUS × viewportWidth, not pixels); cloud-dome day-tint cadence aligned to 48 slots × 1800 ms (§B.4/§C).
 ida_reverified_prev: 2026-06-24    # IDB SHA 263bd994 — CYCLE 13 (2026-06-24): on-disk sample census (1005 dat/ files) byte-confirmed all .bin strides; IDA path-template table (printf format-string block) confirmed verbatim; cloud_cycle 7-column layout named HIGH (resolves KU #3); lensflare.txt on-disk text format confirmed + POSITION negative-value range witnessed (resolves KU #8); weather_rain.bin and light_map<n>.txt authoring mirrors documented. CYCLE 12 (2026-06-22): §D.2 thunk mechanism recorded — the "logf_1/logf_2" helpers are cosine/sine thunks (NOT natural-log); the orbit is closed-form trig, the moon is a flat circle (no Z term). ASSET-FIDELITY (2026-06-21) re-confirmed the .box skybox ABSENCE. CYCLE 7 (2026-06-20) added sun→screen→lens-flare transform + lensflare.txt.
 ida_anchor:     f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 readiness:      IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
@@ -356,8 +357,9 @@ Stride between slots is 192 bytes. Alpha output is forced to 0xFF.
 
 Read as a single **9216-byte (0x2400)** star colour grid into the star-dome object. After the read,
 a sentinel is cleared and a two-tier brightness-modulation pass (similar to the cloud grid) drives
-the night-sky star brightness. The canonical byte table (12 keyframes × 192 stars × 4 bytes BGRA) is
-in `environment_bins.md §4`. The exact grid factoring at the parser level is MED.
+the night-sky star brightness. The canonical byte table (**48 day-slots × 48 star instances × 4 bytes
+BGRA**, 1800 ms/slot — corrected 2026-06-30 to match the runtime interpolator) is in
+`environment_bins.md §4`.
 
 > **Star-brightness day curve — global brightness tier.** The per-vertex amber tint above is only the
 > first of two brightness tiers. The second tier — the global grayscale brightness that modulates the
@@ -389,8 +391,9 @@ is **time-indexed, 48 slots covering a full day**.
 > The detailed keyframe-to-time mapping, the BGRA→engine colour conversion, and the per-frame update
 > loop are specified in `Docs/RE/specs/environment.md §2` and `environment_bins.md §0`; this section
 > only fixes the slot count (48), the slot period (1800 s), and the day length (86400 s) as confirmed
-> from the sampler. (Note the coarser **12-slot** cycle used for star-dome / cloud-dome tints — see
-> `environment.md §2.1`.)
+> from the sampler. (The star-dome and cloud-dome day-tint grids use the **same 48-slot, 1800 ms
+> cadence** — corrected 2026-06-30; the earlier "12-slot / 7200 ms" reading for the domes is refuted
+> by the interpolators. See `environment.md §2.1`.)
 
 ---
 
@@ -574,14 +577,17 @@ Given the sun screen anchor `(screen_x, screen_y)` and world position `S`:
   config-load time — see §D.4.3.)
 - **Terrain occlusion:** the terrain manager is queried with the **sun world position** `S`; if the sun
   is **occluded by terrain**, the flare is suppressed.
-- **Ghost chain placement.** The flare sprites are spaced along the line **from the sun screen-anchor
-  toward the viewport centre**: the direction is `dir = (centre − anchor)` where `centre = (biasX,
-  biasY)`. Each flare sprite `i` is placed at:
+- **Ghost chain placement (direction corrected 2026-06-30).** The flare sprites are spaced along the
+  line between the viewport centre and the sun screen-anchor, measured **from the centre toward the
+  sun**: `centre = (biasX, biasY)`. Each flare sprite `i` is placed at:
   ```
-  position_i = anchor + POSITION[i] × dir
+  position_i = centre + POSITION[i] × (anchor − centre)
   ```
   and drawn with its own `RADIUS[i]` and `TEXTURE_ID[i]`. So `POSITION[i]` is a **fraction along the
-  anchor → centre line** (0 = at the sun anchor, 1 = at screen centre), not a world coordinate.
+  centre → sun line**: **POSITION = 1 sits ON the sun anchor, 0 at the screen centre, and negative
+  values fall beyond the centre** (on the side opposite the sun), not a world coordinate. (This
+  REVERSES the earlier "0 = sun anchor, 1 = centre" reading — the binary anchors POSITION = 1 on the
+  sun: `position_i = screenCentre + POSITION × (sunAnchor − screenCentre)`.)
 
 #### D.4.3 Lens-flare config file `data/sky/lensflare.txt` (HIGH)
 
@@ -607,8 +613,8 @@ per-spot blocks (`SPOT N BEGIN` … `SPOT END`):
 | Key | Type | Meaning | Confidence |
 |---|---|---|---|
 | `TEXTURE_ID` | int | 1-based flare-texture index → `data/sky/texture/lensflare<n>.dds` | HIGH |
-| `RADIUS` | f32 | sprite radius `RADIUS[i]` | HIGH |
-| `POSITION` | f32 | fraction along the anchor → centre line `POSITION[i]`; **can be negative** (negative values place sprites beyond the screen centre, creating ghost-past-centre effects; witnessed in production data, CYCLE 13) | HIGH |
+| `RADIUS` | f32 | sprite radius `RADIUS[i]`, expressed as a **viewport-width fraction** (not pixels): the ghost quad half-extent = `RADIUS[i] × viewportWidth` (pinned 2026-06-30) | HIGH |
+| `POSITION` | f32 | fraction along the **centre → sun line** `POSITION[i]` (**1 = on the sun anchor, 0 = screen centre**; corrected 2026-06-30); **can be negative** — negative values place sprites beyond the screen centre (on the side opposite the sun), creating ghost-past-centre effects; witnessed in production data, CYCLE 13 | HIGH |
 | `COLOR` | r,g,b,a (0–255) | per-spot tint → packed ARGB in-memory | HIGH |
 
 **In-memory per-spot struct (20 bytes, filled by the text parser):**
@@ -617,8 +623,8 @@ per-spot blocks (`SPOT N BEGIN` … `SPOT END`):
 |-----------:|-----:|------|-------|-------|------------|
 | +0x00 | 4 | — | (padding / reserved) | sub-offset +0x00 is not a text-parsed field; `TEXTURE_ID` is written at +0x04 | HIGH |
 | +0x04 | 4 | int | `TEXTURE_ID` | 1-based flare-texture index | HIGH |
-| +0x08 | 4 | f32 | `RADIUS` | sprite radius | HIGH (field order confirmed) |
-| +0x0C | 4 | f32 | `POSITION` | anchor→centre fraction; negative values confirmed | HIGH (field order confirmed) |
+| +0x08 | 4 | f32 | `RADIUS` | sprite radius — viewport-width fraction (quad half-extent = RADIUS × viewportWidth) | HIGH (field order confirmed) |
+| +0x0C | 4 | f32 | `POSITION` | centre→sun fraction (1 = on sun, 0 = centre); negative values confirmed | HIGH (field order confirmed) |
 | +0x10 | 4 | u32 | `colour` | per-spot tint (ARGB) | HIGH (field order confirmed) |
 
 - **In-memory record stride: 20 bytes.** `TEXTURE_ID` at sub-offset `+0x04` (HIGH); the `RADIUS` /
@@ -827,10 +833,14 @@ The sky pass executes sub-components in the following fixed sequence:
 > draw order (`RainStreaks_Draw` → `RainSplash_Draw` → `SnowFlakes_Draw`).
 
 **Step 4 — Cloud-dome** (`Clouddome_DrawTwoLayers`, gated by `g_ClouddomeEnable`)
-- State: `D3DRS_SRCBLEND` = SRCALPHA; `D3DRS_DESTBLEND` = INVSRCALPHA (standard alpha blend)
+- State: `D3DRS_SRCBLEND` = SRCALPHA; `D3DRS_DESTBLEND` = INVSRCALPHA (standard alpha blend);
+  `D3DRS_CULLMODE` = **CW** (corrected 2026-06-30 — the cloud dome is CW-culled, NOT NONE)
+- Colour key: clouds use the colour-key **0xFF000000** (black → transparent); there is **no
+  luminance-based opacity term** (corrected 2026-06-30)
 - FVF: `D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1` (stride 24 B)
-- Geometry: **2 layers × 60 vertices × 108 triangles**, dynamic VB (rebuilt CPU-side every frame
-  by the cloud animation system — §F)
+- Geometry: **2 layers × 60 vertices** (each layer a 4-ring × 12-segment dome + 12-vertex skirt); the
+  draw requests **108 primitives** per layer but the builder fills **96 real triangles**; dynamic VB
+  (rebuilt CPU-side every frame by the cloud animation system — §F)
 - Texture stage 0 COLOROP = MODULATE(TEXTURE × DIFFUSE); ALPHAOP = SELECTARG1(TEXTURE); stage 1
   disabled — cloud texture multiplied by per-vertex diffuse colour (the day-tint; §F.3)
 - Layer A: vertex data from the cloud object at byte offset +8 (60 verts × 24 B), texture from
@@ -841,7 +851,13 @@ The sky pass executes sub-components in the following fixed sequence:
 
 > **Moon is drawn LATER** in `RenderPass_TransparentAndParticles` — not in this pass. See §D.6.
 
-**Cull-mode toggle summary across the pass:** NONE → CW (star-dome) → NONE (additive + cloud).
+**Cull-mode toggle summary across the pass:** NONE → CW (star-dome) → NONE (additive sun) → **CW
+(cloud-dome)** (corrected 2026-06-30 — the cloud dome is CW-culled, not NONE).
+
+**Per-component blend / cull recap (sky pass, Z-write off, no depth sort):** star dome = OPAQUE
+(alpha-blend disabled), CW cull; sky-pass billboard (sun) = ADDITIVE (`SRCALPHA` / `ONE`), NONE cull;
+cloud dome = STANDARD ALPHA (`SRCALPHA` / `INVSRCALPHA`), CW cull, colour-key 0xFF000000. (The moon
+billboard draws later in the transparent/particle pass — §D.6.)
 
 ---
 

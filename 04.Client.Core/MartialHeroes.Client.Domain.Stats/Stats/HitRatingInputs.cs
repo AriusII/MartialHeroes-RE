@@ -5,6 +5,7 @@ public readonly record struct HitRatingInputs
     public PrimaryStats Stats { get; init; }
     public int Slot16 { get; init; }
     public int Slot20 { get; init; }
+    public int Slot223 { get; init; }
     public int WeaponTerm { get; init; }
     public int WeaponGrade { get; init; }
     public int AccuracyEquipSum { get; init; }

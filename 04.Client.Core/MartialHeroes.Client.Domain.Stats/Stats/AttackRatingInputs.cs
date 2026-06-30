@@ -10,6 +10,8 @@ public readonly record struct AttackRatingInputs
 
     public int Slot5 { get; init; }
 
+    public int Slot223 { get; init; }
+
     public int WeaponTerm { get; init; }
 
     public int WeaponGrade { get; init; }
