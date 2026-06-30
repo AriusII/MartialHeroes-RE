@@ -28,6 +28,7 @@
 > capture/debugger-pending → terrain.
 > **wave-3 reconciliation (2026-06-28):** §E corrected against `Docs/RE/structs/particle_emitter.md` (CYCLE 14 deep-struct pass, static-confirmed): entry+0x10 renamed from `max_particles` to `blend_additive_flag` (R1); sub-record field labels at +0x02/+0x04 swapped to `spawn_delay`/`lifetime` (R2). Runtime object layouts (ParticleEffect 60 B, GParticleBuffer 248 B, GParticle_State 32 B, GParticle_Render 20 B) are authoritative in `Docs/RE/structs/particle_emitter.md` — §E.5 cross-references that spec.
 > **Deepening pass (2026-06-29):** §E.2.4 alpha-fade floor (0.05f) upgraded to STATIC-CONFIRMED with exact special case (`qfield == 1` → factor = 0.0); cross-referenced to `Docs/RE/structs/particle_emitter.md §9` (CLOSED). No structural change.
+> **Render-path correction (2026-06-30):** four binary-confirmed render facts corrected/closed — (1) `emitter_type` geometry de-transposed in §G.4 / §A.12 / §C.5: only type 0 is a billboard quad, type 1 is a camera-oriented mesh carrying the +90° yaw, type 2 is a world-oriented directional mesh (no yaw, no camera matrix); (2) §G.8 / §G.10 sword-light and sky/weather passes recorded as SRCALPHA/INVSRCALPHA + MODULATE2X (alpha-composited, NOT additive) and a per-subsystem blend/colour-op table added; (3) §E.2.4 / §G.2 global brightness alpha scale (`floor 0.05`, `option == 1 → 0.0`) recorded as applying to BOTH the mesh-element and GPU-particle alpha paths; (4) §G.7 TEXTUREFACTOR `[debugger-confirm]` closed — no effect stage references D3DTA_TFACTOR (stage 0 uses only TEXTURE and DIFFUSE). No on-disk structural change.
 
 ---
 
@@ -444,9 +445,9 @@ formula `4 + 32 × 34 = 1,092` matches the on-disk file size exactly).
 
 | Value | Meaning | Confidence |
 |------:|---------|------------|
-| `0` | Billboard sprite — flat camera-facing quad | CONFIRMED |
-| `1` | Mesh-particle object — per-vertex transform of shared mesh | CONFIRMED |
-| `2` | Directional billboard — camera-facing quad with fixed 90° Y pre-rotation; reads extra rotation in static-state branch (A.4.6) | CONFIRMED |
+| `0` | Billboard quad — flat four-corner camera-facing quad (the only billboard-quad type) | CONFIRMED |
+| `1` | Camera-oriented (billboarded) mesh — per-vertex transform of the shared mesh with a fixed +90° (π/2) yaw, then oriented by the camera view matrix (corrected 2026-06-30 — the +90° yaw and camera orientation belong to type 1; see §G.4) | CONFIRMED |
+| `2` | World-oriented directional mesh — per-vertex transform of the shared mesh rotated by the keyframe rotation then the effect orientation quaternion, NO 90° yaw and NO camera matrix; reads extra rotation in static-state branch (A.4.6) (corrected 2026-06-30 — type 2 is a directional mesh, not a billboard quad; see §G.4) | CONFIRMED |
 | `20` | Parse-inert at load — the value `20` is read and stored but changes nothing in the parse path. Its **render meaning is DBG-pending** (needs live-debugger confirmation); do not assign one. | parse: CONFIRMED inert · render: DBG-pending |
 | other | Behaviour undetermined | UNRESOLVED |
 
@@ -823,7 +824,7 @@ For the complete boot loading sequence, object pools, and spawn factory details,
 2. First-tick init: allocate per-element runtime particle buffers. Elements with `resource_id ≥ 10000` also bridge to the separate GPU particle subsystem (Section E).
 3. Elapsed phase: `elapsed = now − start`; multiply by time-scale; take modulo the loop period.
 4. Proximity cull: if the squared distance to the local player exceeds the render-distance threshold, skip this instance's geometry build.
-5. Element loop: select the active keyframe, compute per-vertex RGBA, build geometry by `emitter_type` (billboard quad for types 0/2; mesh transform for type 1). The `velocity` Vec3 contributes the per-particle displacement (rotated by instance orientation quaternion, scaled, added to world origin). The `size` Vec3 drives billboard half-extents or mesh-axis scaling. UV-scroll flags (A.13) offset texture coordinates.
+5. Element loop: select the active keyframe, compute per-vertex RGBA, build geometry by `emitter_type` (corrected 2026-06-30 — billboard quad for type 0 only; mesh transform for types 1 and 2, where type 1 is camera-oriented with a +90° yaw and type 2 is world-oriented by the effect quaternion; see §G.4). The `velocity` Vec3 contributes the per-particle displacement (rotated by instance orientation quaternion, scaled, added to world origin). The `size` Vec3 drives billboard half-extents or mesh-axis scaling. UV-scroll flags (A.13) offset texture coordinates.
 6. Submit geometry for drawing.
 
 See `specs/effects.md §8` for the full tick math including elapsed-to-frame-index computation, keyframe interpolation, and UV scroll formula.
@@ -1071,14 +1072,16 @@ values at +0x1C..+0x22 are **signed per-second colour deltas**, not indices.
 After a particle's alpha rate is accumulated each step, the resulting alpha is scaled by a global
 display-brightness factor derived from the client brightness option: the factor is `0.05 + 0.95 ×
 (brightness_option / 100)`, where `brightness_option` is `qfield` from the graphics-quality singleton
-at dword index 28 (`+0x70`). The `0.05` floor constant is fixed and confirmed byte-exact from the
-binary. **Special case:** when `brightness_option == 1`, the factor is exactly **0.0** (particles
-rendered fully transparent regardless of colour rates). This is the GPU-particle expression of the same
-"alpha scaled by a global brightness option" behaviour noted for the `.xeff` path
-(`specs/effects.md §17.3`), now pinned to this sub-system with the exact formula and special case.
-A faithful re-implementation applies this alpha scale after the per-step colour-rate accumulation,
-before the colour is written to the vertex diffuse alpha byte. See `Docs/RE/structs/particle_emitter.md §9`
-(CLOSED item).
+at dword index 28 (`+0x70`). Equivalently `factor = floor + brightness_option × (1 − floor) / 100`
+with `floor = 0.05`; the default option `100` gives `factor = 1.0`. The `0.05` floor constant is
+fixed and confirmed byte-exact from the binary. **Special case:** when `brightness_option == 1`, the
+factor is exactly **0.0** (particles rendered fully transparent regardless of colour rates).
+**Applies to BOTH alpha paths (corrected 2026-06-30):** the identical factor (same `0.05` floor, same
+`option == 1 → 0.0` special case) scales the GPU-particle alpha here AND the `.xeff` mesh-element
+diffuse alpha byte on the render path (§G.2) — it is one shared global brightness scale, not a
+GPU-particle-only effect. A faithful re-implementation applies this alpha scale after the per-step
+colour-rate accumulation, before the colour is written to the vertex diffuse alpha byte. See
+`Docs/RE/structs/particle_emitter.md §9` (CLOSED item).
 
 ## E.3 Known unknowns (Section E)
 
@@ -1342,6 +1345,16 @@ The geometry tick writes diffuse as `B = round(colorB × 255)`, `G = round(color
 (passes 2/3/4 — per-keyframe diffuse RGB, §A.4.2) and `alpha` is the sampled alpha track (pass A,
 stored inverted per §A.6).
 
+**Global brightness scale on alpha (CODE-CONFIRMED; corrected 2026-06-30):** before the alpha byte is
+written, `alpha` is multiplied by the global brightness factor `floor + option × (1 − floor) / 100`
+with `floor = 0.05` (`option == 1` forces factor `0.0`; the default `option = 100` gives `1.0`). This
+is the **same** global brightness scale applied to GPU-particle alpha — it applies to BOTH the
+mesh-element alpha here and the GPU-particle path. See §E.2.4 for the formula, the special case, and
+the `qfield` source.
+
+Port note (2026-06-30): the Godot port now scales the sampled mesh-element alpha by this same
+brightness factor, matching the GPU-particle path which already applied it.
+
 Mesh-element draw call: `DrawIndexedPrimitive` with `D3DPT_TRIANGLELIST`, stride 24,
 `PrimitiveCount = index_count / 3`.
 
@@ -1351,6 +1364,10 @@ The keyframe sampler resolves a phase time `p` as follows:
 
 - Frame index `f = (p − anim_base_time) / anim_stride`; fractional part `t = (p mod anim_stride) / anim_stride`.
 - Frame `f` is clamped to the last valid frame; the next frame is `f + 1`.
+
+Port note (2026-06-30): the Godot port's keyframe sampler subtracts `anim_base_time` from the phase
+(clamped at 0) before dividing by `anim_stride`, so its frame index matches `f` above rather than
+`p / anim_stride`.
 
 | Channel | Interpolation method |
 |---|---|
@@ -1372,21 +1389,35 @@ This confirms the 44-byte in-memory keyframe layout (`XEFF_KEYFRAME_STRIDE`):
 
 ## G.4 Geometry Build by `emitter_type` (CODE-CONFIRMED)
 
+> **corrected 2026-06-30:** the type 1 / type 2 geometry was previously transposed — type 2 was
+> wrongly described as "a billboard quad with a 90° yaw" and the +90° yaw / camera orientation was
+> omitted from type 1. The binary branches as below: **only type 0 is a billboard quad**; type 1 is
+> a camera-oriented (billboarded) mesh that carries the +90° yaw; type 2 is a world-oriented
+> directional mesh with no yaw and no camera matrix.
+
 The geometry tick branches on `emitter_type` (§A.12):
 
-**emitter_type 0 — billboard:** four corner vertices at half-extents `±0.5 × size_x` and
-`±0.5 × size_y`. Corners are oriented by the camera view matrix with translation cleared
-(camera-facing quad). Each corner is then rotated by the effect instance orientation quaternion,
-the per-keyframe velocity × effect_scale is added, and the world origin is added.
+**emitter_type 0 — camera-facing billboard quad:** four corner vertices at half-extents
+`±0.5 × size_x` and `±0.5 × size_y`. Corners are oriented by the camera view matrix with translation
+cleared (camera-facing quad). Each corner is then rotated by the effect instance orientation
+quaternion, the per-keyframe velocity × effect_scale is added, and the world origin is added. This is
+the **only** billboard-quad path.
 
-**emitter_type 2 — directional billboard:** identical to type 0 but a fixed +π/2 (90°) yaw
-pre-rotation is composed first. Confirms §A.12 value 2's fixed 90° Y pre-rotation. The static-state
-branch also reads the extra Euler rotation (§A.4.6).
+**emitter_type 1 — camera-oriented (billboarded) mesh:** iterate the source mesh vertices
+(stride 24): scale X/Y/Z by the keyframe size Vec3, rotate by the keyframe rotation quaternion **and**
+a fixed +π/2 (90°) yaw, then orient the result by the camera view matrix (translation cleared); add
+velocity × effect_scale, add world origin; write the per-vertex diffuse from the sampled RGBA. The
++90° yaw and the camera orientation belong to **this** type.
 
-**emitter_type 1 — mesh particle:** per source mesh vertex (stride 24): copy source position, scale
-X/Y/Z by the keyframe size Vec3, rotate by the keyframe rotation quaternion then by the effect
-orientation quaternion, add velocity × effect_scale, add world origin; write the per-vertex diffuse
-from the sampled RGBA.
+Port note (2026-06-30): the Godot port composes the active camera orientation outside the +90° yaw
+and keyframe rotation for this type so the mesh tracks the camera; the type-2 directional mesh keeps
+its world orientation (effect quaternion then keyframe rotation, no yaw, no camera).
+
+**emitter_type 2 — world-oriented directional mesh:** iterate the source mesh vertices (stride 24):
+scale X/Y/Z by the keyframe size Vec3, rotate by the keyframe rotation quaternion **then** by the
+effect instance orientation quaternion — **no** 90° yaw and **no** camera view matrix; add
+velocity × effect_scale, add world origin; write the per-vertex diffuse from the sampled RGBA. The
+static-state branch also reads the extra Euler rotation (§A.4.6).
 
 All three paths write per-vertex diffuse from the sampled RGBA (§G.2).
 
@@ -1422,11 +1453,13 @@ opaque geometry. The pass driver establishes this baseline state before any sub-
 | LIGHTING | 137 | Off — effects are unlit/self-illuminated |
 | Fog | — | Off |
 | ALPHABLENDENABLE | 27 | On |
-| TEXTUREFACTOR | 60 | 0xFF505050 (opaque ~31% grey; set once via lazy-init guard) — `[debugger-confirm]` whether any effect stage references D3DTA_TFACTOR at runtime |
+| TEXTUREFACTOR | 60 | 0xFF505050 (opaque ~31% grey; set once via lazy-init guard) — **not referenced by the effect stages** (resolved 2026-06-30: stage 0 uses only TEXTURE and DIFFUSE; no effect stage references D3DTA_TFACTOR, so the TEXTUREFACTOR value never reaches an effect draw) |
 
 **Texture stage 0:** COLOROP = MODULATE(4), COLORARG1 = TEXTURE(2), COLORARG2 = DIFFUSE(0);
 ALPHAOP = MODULATE(4), ALPHAARG1 = TEXTURE(2), ALPHAARG2 = DIFFUSE(0). Stages 1 and 2:
-COLOROP/ALPHAOP = DISABLE(1). Result: colour and alpha = texture × per-vertex diffuse.
+COLOROP/ALPHAOP = DISABLE(1). Result: colour and alpha = texture × per-vertex diffuse. No effect
+stage references D3DTA_TFACTOR — the baseline TEXTUREFACTOR (above) is set but unused by the effect
+draw (resolved 2026-06-30).
 
 **Sampler 0 and 1:** MIN/MAG/MIP filter = LINEAR (trilinear); ADDRESSU/ADDRESSV = WRAP.
 
@@ -1450,15 +1483,16 @@ in steps 1–4 by `XEffect_DrawElements`. Particle sub-elements (`resource_id �
 into the GPU particle list and drawn in step 7. The mesh-element draw routine explicitly skips
 elements with `resource_id ≥ 10000`.
 
-**Per-sub-system blend overrides:**
+**Per-sub-system blend / colour-op overrides (corrected 2026-06-30 — sword-light and sky/weather are
+MODULATE2X alpha-composited, NOT additive):**
 
-| Step | Src/Dest blend | Notes |
-|---|---|---|
-| 1–4 XEffect mesh | Per element (§G.1) | alpha / opaque / additive chosen per element |
-| 5 SwordLight | SRCALPHA / INVSRCALPHA + MODULATE2X | Trail with brightness boost (§G.10) |
-| 6 Sky/weather | SRCALPHA / INVSRCALPHA + MODULATE2X | Standard alpha |
-| 7 GPU particles | SRCALPHA/INVSRCALPHA or SRCALPHA/ONE | Additive when `blend_additive_flag` (entry+0x10 of `particleEmitter.eff`) is non-zero; stored at `ParticleEffect+0x30` and read by `ParticleEffectList_DrawAll`. CODE-CONFIRMED (CYCLE 14; see §E.2.1 R1 and `Docs/RE/structs/particle_emitter.md` §8). |
-| 8 Lens flare | SRCALPHA / ONE | Additive |
+| Step | Src / Dest blend | Colour-op | Notes |
+|---|---|---|---|
+| 1–4 XEffect / Map / Joint mesh | Per element (§G.1): value 1 → SRCALPHA/INVSRCALPHA (alpha), value 3 → ONE/ZERO (opaque), all other values including 0 → SRCALPHA/ONE (additive) | MODULATE (baseline, §G.7) | alpha / opaque / additive chosen per element; user, map, and joint mesh elements all share the per-element selector |
+| 5 SwordLight | SRCALPHA / INVSRCALPHA | **MODULATE2X** | Trail = texture × diffuse **doubled** then alpha-composited — a brightness boost over the MODULATE baseline, **NOT pure additive** (§G.10) |
+| 6 Sky / weather | SRCALPHA / INVSRCALPHA | **MODULATE2X** | Sky / weather particles = texture × diffuse doubled then alpha-composited — **NOT additive** |
+| 7 GPU particles | SRCALPHA/ONE or SRCALPHA/INVSRCALPHA | MODULATE (baseline) | SRCALPHA/ONE (additive) when `blend_additive_flag` (entry+0x10 of `particleEmitter.eff`) is non-zero, else SRCALPHA/INVSRCALPHA; the flag is stored at `ParticleEffect+0x30` and read by `ParticleEffectList_DrawAll`. CODE-CONFIRMED (CYCLE 14; see §E.2.1 R1 and `Docs/RE/structs/particle_emitter.md` §8). |
+| 8 Lens-flare halo | SRCALPHA / ONE | MODULATE (baseline) | Additive; drawn last |
 
 ## G.9 GPU Particle Draw (CODE-CONFIRMED)
 
@@ -1492,8 +1526,11 @@ Both paths share the per-frame particle simulation (§E.2.2 / §E.2.4) and a sha
   `PrimitiveCount = index_count / 3`.
 - **Two trail lists:** item/weapon trails (with their own texture) then mob trails (separate texture).
   Per active trail: geometry is uploaded, then `DrawIndexedPrimitive` issues the draw.
-- **Blend state:** SRCALPHA/INVSRCALPHA + **MODULATE2X** (COLOROP 5) — trail rendered with a
-  brightness boost vs the main MODULATE baseline.
+- **Blend state:** SRCALPHA/INVSRCALPHA + **MODULATE2X** (COLOROP 5) — the MODULATE2X doubles
+  texture × diffuse, but the doubled result is then **alpha-composited** through SRCALPHA/INVSRCALPHA,
+  so the trail is a brightness-boosted **alpha** blend, **NOT pure additive** (corrected 2026-06-30).
+  The same MODULATE2X-over-SRCALPHA/INVSRCALPHA state is used by the sky/weather particle pass
+  (§G.8 step 6).
 
 `[debugger-confirm]` whether any per-element COLOROP override exists within the XEffect mesh draw
 (none observed in static analysis — the baseline MODULATE appears to hold throughout steps 1–4).

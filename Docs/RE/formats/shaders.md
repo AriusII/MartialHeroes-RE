@@ -19,6 +19,7 @@
 > samples).
 > CYCLE 14 re-anchor (f61f66a9): 2 facts re-confirmed SAME (Renderer_InitCelGlowShaders 5-shader assemble order; D3DXAssembleShader caller census), 1 corrected (post-chain enable gate polarity: see §C5.6b — gate condition is option index 12 == 1, not == 0; gate PASSES on f61f66a9; bloom+cel structurally ON; old 263bd994 comparison or debugger confirm required to distinguish spec-misread from build flip).
 > CYCLE 15 consumer-confirm (f61f66a9, 2026-06-30): `dotoonshading.psh` confirmed NOT an orphan — it is the 2nd of five runtime-assembled cel/post shaders, the normal-state cel pixel shader; loader and name binding consumer-confirmed (assembled at two sites: full-init loader and device-reset hot-reload; handle at renderer `+0x2B894` released and recreated on device reset; bound via SetPixelShader on the non-stealth cel-bind branch). The only assembled-but-discarded output in the cel set is `dotoonshading.vsh` (§C5.6b-ANOMALY, re-confirmed on f61f66a9). Confidence upgraded to CONSUMER-CONFIRMED. Runtime enable-flag reachability is a separate `[R-CAP]` debugger-confirm (non-blocking — does not affect the statically-confirmed loader/binding facts).
+> CYCLE-correction (f61f66a9, 2026-06-30): the cel/composite brightness ×0.5 is REAL, not a decompiler artifact — the `display.lua` loader multiplies `DISPLAY_BASE_BRIGHT_MULTI` and every per-state `DISPLAY_CHAR_BRIGHT_MULTI_*` channel by a literal 0.5 before storing (`ADD` / `ALPHA` / `GLOW_BRIGHT` / `LIGHT_RATIO` unscaled), cancelling the cel/composite shaders' ×2; live composite c0 = 0.525, c1 = 0.3 (net `saturate(scene·1.05 + glow·0.3)`). The per-state PS-constant c0.w is forced to 1.0 and c1.w = the per-state ALPHA. See §C5.5 / §C5.6a / §C5.6b and the Re-authoring Guidance.
 > **ida_reverified:** 2026-06-30 (CYCLE 15, f61f66a9); prior: 2026-06-27 (CYCLE 14, f61f66a9)
 > **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > **evidence:** [static-ida, vfs-sample]
@@ -243,7 +244,7 @@ The text source files are the complete, human-readable description of the shader
 - `lit = lit × 2` (a self-paired `add` doubling).
 - `lit = lit × c0` — multiply by the per-state brightness **MULTI** constant.
 - `rgb = lit + c1` — add the per-state brightness **ADD** constant; **alpha passes through the lit value** (a paired `+mov r0.a`).
-- Net: `out.rgb = (base × toonRamp) × 2 × c0 + c1`, `out.a = lit.a`. This confirms §C5.5 — `c0`/`c1` are the per-state brightness MULTI/ADD pair, applied here.
+- Net: `out.rgb = (base × toonRamp) × 2 × c0 + c1`, `out.a = lit.a`. This confirms §C5.5 — `c0`/`c1` are the per-state brightness MULTI/ADD pair, applied here. **Note (2026-06-30):** this net reduces to `base·toonRamp·MULTI + ADD` only because the `display.lua` loader stores each per-state MULTI channel pre-multiplied by a literal **×0.5**, which cancels the shader's `×2` on the base term; the ADD channel and the per-state ALPHA (carried in `c1.w`) are stored unscaled. So the stored/live `c0` (MULTI) is the file value × 0.5, while the net effective per-channel gain equals the file MULTI value. (`c0.w` is forced to a literal 1.0; `c1.w` = the per-state ALPHA, used by the stealth variant below.)
 
 **`dotoonshading2.psh` (cel tone, STEALTH / 은신 render state) — sample-verified arithmetic:**
 - **Identical** to `dotoonshading.psh` except the alpha write: alpha is taken from **`c1.w`** (the per-state ADD's w component) instead of from the lit value. The ADD constant's w therefore drives the stealth/invisible fade.
@@ -252,7 +253,7 @@ The text source files are the complete, human-readable description of the shader
 - Sample the scene/bright render target into `t0` and the bloom/glow render target into `t1`.
 - `scene = t0 × 2 × c0`, `glow = t1 × c1` — both `c0`/`c1` are composite-scale constants set per pass (NOT per-character brightness).
 - `rgb = scene + glow`; alpha forced opaque from a literal `def c2, 1,1,1,1`.
-- Net: `out = saturate(scene×2×c0 + glow×c1)`, `out.a = 1`. This refines the prior "saturate(2·edge·c0 + bloom·c1)" summary: `t0` = bright/scene RT scaled ×2·`c0`, `t1` = bloom/glow RT scaled by `c1`, `c2` = literal opaque-alpha constant.
+- Net: `out = saturate(scene×2×c0 + glow×c1)`, `out.a = 1`. This refines the prior "saturate(2·edge·c0 + bloom·c1)" summary: `t0` = bright/scene RT scaled ×2·`c0`, `t1` = bloom/glow RT scaled by `c1`, `c2` = literal opaque-alpha constant. **Note (2026-06-30):** the net reduces to `saturate(scene·BASE_BRIGHT + glow·GLOW_BRIGHT)` only because the `display.lua` loader stores `c0` (from `DISPLAY_BASE_BRIGHT_MULTI`) pre-multiplied by a literal **×0.5**, cancelling the shader's `×2` on the scene term; `c1` (from `DISPLAY_GLOW_BRIGHT_MULTI`) is stored unscaled. So the **stored/live** `c0` is the file value × 0.5 — for the shipped file (`BASE_BRIGHT = 1.05`) the live `c0 = 0.525`, **not** the file's 1.05 — while `c1 = 0.3`; the net composite is `saturate(scene·1.05 + glow·0.3)`.
 
 **`power*.psh` (glow/bloom passes):**
 - `power1dx8.psh`: `r0 = tex t0; r0 = r0 * c0` — sample base texture, scale by constant.
@@ -417,8 +418,10 @@ about a hidden numeric "edge" parameter.
 
 What the per-skin pixel-shader constants actually are: once per skinned-character draw, two
 pixel-shader constant registers (registers 0 and 1) are uploaded from a **9-entry table** on the
-renderer object — one multiply triple and one add triple — selected by a per-character **state index**
-in the range 0..8. A display-config loader fills that table from an external display configuration
+renderer object — register 0 = the per-state MULTI rgb with its **w forced to a literal 1.0**, and
+register 1 = the per-state ADD rgb with its **w = the per-state ALPHA** — selected by a per-character
+**state index** in the range 0..8. (The normal cel pixel shader writes output alpha from the lit
+value; the stealth variant writes it from `c1.w` = the per-state ALPHA — see the Re-authoring Guidance.) A display-config loader fills that table from an external display configuration
 file under keys of the form `DISPLAY_CHAR_BRIGHT_{MULTI|ADD}_{R|G|B}_{state}` for the nine states:
 
 | State index | State | Meaning |
@@ -506,10 +509,10 @@ duplicate them.
 
 | Key | Value | Role |
 |-----|-------|------|
-| `BASE_BRIGHT` | 1.05 | Global character brightness multiplier (applied before per-state MULTI) |
-| `GLOW_BRIGHT` | 0.3 | Glow/bloom intensity scale fed to the post chain |
+| `BASE_BRIGHT` | 1.05 | Global character/scene base brightness → composite `c0`. **Stored ×0.5 by the loader (live c0 = 0.525); the cel/composite shader's ×2 cancels it (net 1.05) — corrected 2026-06-30, see §C5.5 note.** |
+| `GLOW_BRIGHT` | 0.3 | Glow/bloom intensity scale fed to the post chain → composite `c1`. **Stored unscaled (live c1 = 0.3).** |
 | `GLOW_RANGE` | 1, 1 | Glow range parameters (width, height; both 1 in the shipped file) |
-| `LIGHT_RATIO` | 0.5 | Light-to-ambient blend ratio |
+| `LIGHT_RATIO` | 0.5 | Light-to-ambient blend ratio (stored unscaled; parsed-but-dead per `rendering.md §6.7`) |
 | `DISPLAY_POWER` | 2 | Shipped glow tap selector — value `2` selects `power2dx8.psh` as the active glow pixel shader |
 
 **Glow-tap chain (corrected from §C5.1).** The glow downsample/blur chain is a **1 / 2 / 4 / 8 / 16 / 32**
@@ -548,11 +551,11 @@ The format for all three is the device backbuffer adapter format. Pass order:
 1. Draw cel/toon world → TEX0.
 2. Clear to black; plain fixed-function fullscreen quad TEX0 → TEX1 (**bright-pass is a copy, not a threshold**; no pixel shader on this pass).
 3. Downscaled ortho quad TEX0 → TEX2; bind **the glow pixel shader** (`power1dx8.psh` by default, configurable via `DISPLAY_POWERSHADER` string — see §C5.1 and `specs/rendering.md §6.4`). Exactly **one** downscale tap; no multi-pass power chain in the binary.
-4. TEX1 (stage 0) + TEX2 (stage 1) → TEX0; bind **`finaldx8.psh`**; upload c0 = `BASE_BRIGHT` (≈1.05 from `display.lua`), c1 = `GLOW_BRIGHT` (≈0.3 from `display.lua`). Then run the FX overlay callback into TEX0.
+4. TEX1 (stage 0) + TEX2 (stage 1) → TEX0; bind **`finaldx8.psh`**; upload c0 = the stored base-brightness (= `BASE_BRIGHT` × 0.5 = **0.525** live, from `display.lua`; the shader's ×2 makes the net 1.05), c1 = `GLOW_BRIGHT` (**0.3**, stored unscaled). Then run the FX overlay callback into TEX0.
 5. Present TEX0 → backbuffer; opaque blit (ONE / ZERO blend, not additive).
 6. UI / HUD callback; end scene.
 
-Net composite arithmetic (SAMPLE-VERIFIED from `finaldx8.psh`): `out.rgb = saturate(TEX1 × 2 × c0 + TEX2 × c1)`, `out.a = 1`. See §C5.6 step 4 and the Re-authoring Guidance.
+Net composite arithmetic (SAMPLE-VERIFIED from `finaldx8.psh`): `out.rgb = saturate(TEX1 × 2 × c0 + TEX2 × c1)`, `out.a = 1`. With the shipped live constants (c0 = 0.525, c1 = 0.3) this reduces to `saturate(TEX1 × 1.05 + TEX2 × 0.3)` — the loader's ×0.5 on `BASE_BRIGHT` cancels the `×2` (corrected 2026-06-30). See §C5.6 step 4 and the Re-authoring Guidance.
 
 **Post-chain enable flag — CYCLE 14 + wave-11 analysis:**
 
@@ -1081,13 +1084,13 @@ field `+0x2D67C` (dword `[44687]`) is **non-zero**; otherwise it tail-calls
 | c4 light dir Z | `+0x2BA0C` | → VS `c4.z` (default 0); `c4.w` is forced 0 at upload |
 | Glow divisor X | `+0x2BA40` | screenW ÷ this = glow RT pixel width |
 | Glow divisor Y | `+0x2BA44` | screenH ÷ this = glow RT pixel height |
-| Composite PS c0 source | `+0x2BB48` | BASE_BRIGHT scalar → finaldx8 PS `c0` broadcast ×4 (≈1.05 from display.lua) |
-| Composite PS c1 source | `+0x2BB4C` | GLOW_BRIGHT scalar → finaldx8 PS `c1` broadcast ×4 (≈0.3 from display.lua) |
+| Composite PS c0 source | `+0x2BB48` | base-brightness scalar → finaldx8 PS `c0` broadcast ×4. **Stored value = BASE_BRIGHT × 0.5 = 0.525 live** (the loader pre-scales by ×0.5; the shader's ×2 nets 1.05) — corrected 2026-06-30 |
+| Composite PS c1 source | `+0x2BB4C` | GLOW_BRIGHT scalar → finaldx8 PS `c1` broadcast ×4 (0.3 from display.lua, stored unscaled) |
 | Glow shader path slot | `+0x2BB54` | Editable filename string; constructor default `power1dx8.psh` |
 | Post / cel enable flag | `+0x2D67C` (dword [44687]) | 0 = FF path; non-zero = cel/post path (§C5.6b) |
-| PS tint mulR [0..8] | dword [44691] | Per-state MULTI R, 9 entries |
-| PS tint mulG [0..8] | dword [44700] | Per-state MULTI G, 9 entries |
-| PS tint mulB [0..8] | dword [44709] | Per-state MULTI B, 9 entries |
+| PS tint mulR [0..8] | dword [44691] | Per-state MULTI R, 9 entries (stored ×0.5-scaled by the loader; cel shader ×2 nets the file MULTI value — corrected 2026-06-30) |
+| PS tint mulG [0..8] | dword [44700] | Per-state MULTI G, 9 entries (stored ×0.5-scaled) |
+| PS tint mulB [0..8] | dword [44709] | Per-state MULTI B, 9 entries (stored ×0.5-scaled) |
 | PS tint addR [0..8] | dword [44718] | Per-state ADD R, 9 entries |
 | PS tint addG [0..8] | dword [44727] | Per-state ADD G, 9 entries |
 | PS tint addB [0..8] | dword [44736] | Per-state ADD B, 9 entries |

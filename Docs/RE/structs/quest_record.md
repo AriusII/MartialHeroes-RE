@@ -123,8 +123,8 @@ requirement-notice renderer.
 | +0x1348 / 4936 | u32 | `prereq_chain_id` | CONFIRMED | Prerequisite-chain / chapter id. The eligibility evaluator compares it against the global chapter-progress state. The AVAILABLE-tab populator iterates the quest registry — bounded by the **active-quest-range count global** (caps iteration to the active range) — selecting records whose `prereq_chain_id` matches the selected chapter index; matched records contribute a row to the AVAILABLE display list (cap 10 rows). Also read by the AVAILABLE-tab detail renderer (mode 2) to confirm the chapter match before populating the detail panel. |
 | +0x1350 / 4944 | u16 | `min_level` | CONFIRMED | Minimum character level. The evaluator returns "too low" when the character level word is below this. |
 | +0x1352 / 4946 | u16 | `max_level` | CONFIRMED | Maximum character level. The evaluator returns "too high" when the character level word exceeds this. |
-| +0x1354 / 4948 | u8[..] | `accepted_flags` | CONFIRMED | Accepted / availability flags, indexed (by an active-quest index). A zero at the indexed slot means "not available to this character slot". |
-| +0x1359 / 4953 | u8 | `class_race_mask` | CONFIRMED | Class / race **bitmask**. Observed values 1 / 2 / 4 are powers of two — a quest can be open to several classes. The evaluator matches it against the character class. |
+| +0x1354 / 4948 | u8[..] | `accepted_flags` | CONFIRMED | Accepted / availability flags. Recovered 2026-06-30 (anchor f61f66a9): the gate indexes this byte array by the **character class index** state (not a generic active-quest index). A zero at `accepted_flags[class_index]` means "not available to this character's class". |
+| +0x1359 / 4953 | u8 | `class_race_mask` | CONFIRMED | Class / stance gate. Recovered 2026-06-30 (anchor f61f66a9): the evaluator applies a single **equality** test — the gate fails when this byte is **non-zero AND not equal to** the player's current **stance / job-type** state. It is **not** a bitwise-AND mask, and it is matched against the stance/job-type state, not the class-index state used by `accepted_flags`. The observed values 1 / 2 / 4 are therefore distinct stance/job-type enum values, not OR-able mask bits. |
 | +0x135A / 4954 | u8 | `secondary_stat_min` | CONFIRMED | Secondary-stat minimum, graded as a tier 1..7. |
 | +0x135B / 4955 | u8 | `secondary_stat_max` | CONFIRMED | Secondary-stat maximum, tier 1..7. |
 | +0x135C / 4956 | u8 | `tertiary_stat_bound` | CONFIRMED | Tertiary-stat bound (single threshold). |
@@ -157,6 +157,42 @@ panel, to a notice message id — see `specs/quests.md §2.2`). If every gate pa
 > those tables are runtime state, not part of the quest record. The server-authored magnitudes the
 > level / stat gates compare against are quest-data values; the *gate fields and their order* are the
 > client-side CONFIRMED facts.
+
+### 5.1 Recovered evaluator semantics (recovered 2026-06-30, anchor f61f66a9)
+
+A re-decompile of the eligibility evaluator on anchor `f61f66a9` re-confirms the §5 gate
+chain **byte-for-byte and in the same order**, and pins the following implementation-exact
+semantics the porter needs:
+
+- **Zero disables a gate.** Each threshold gate fires only when its record field is **non-zero**:
+  `min_level` (+0x1350), `max_level` (+0x1352), `class_race_mask` (+0x1359),
+  `secondary_stat_min` (+0x135A), `secondary_stat_max` (+0x135B) and `tertiary_stat_bound`
+  (+0x135C) are each guarded by a `field != 0` precondition. A field of 0 means "no constraint on
+  this dimension" and the gate is skipped. (`accepted_flags` at +0x1354 is the exception: it gates
+  on the **value being 0** at the indexed slot, so 0 = blocked there.)
+- **Comparand state (character-side).** A **single character-level word** is compared against
+  *both* `min_level` (fail when `min_level > level`) and `max_level` (fail when `max_level < level`).
+  A **single secondary-stat byte** backs both secondary bounds (fail when `secondary_stat_min >
+  stat`, fail when `secondary_stat_max < stat`). The **tertiary-stat byte** is a floor: the gate
+  fails when `tertiary_stat_bound > tertiary_stat`. The class/stance gate compares
+  `class_race_mask` for **equality** against the player stance/job-type state (§4); the accepted
+  gate indexes `accepted_flags` by the character **class index** (§4).
+- **Active-quest scratch tables are 6 entries each.** Gate 9 (same-category) scans the first
+  runtime `u16[]` active-quest table — **6 entries** — and for each non-empty active id looks the
+  record up in the quest registry and compares the `category` byte (+0x002); a match fails the gate.
+  Gate 10 (same-id) scans the immediately-following second `u16[]` table — **6 entries** — and
+  compares each entry against `quest_id` (+0x000); a match fails the gate.
+- **Prerequisite-chain polarity (gate 11).** Reading `prereq_chain_id` (+0x1348) as `c` and the
+  global **chapter-progress** state as `p`: the evaluator returns the **available / offerable**
+  status state when `c == 0` **OR** `c > p` (prerequisite chain not yet reached, or no chain), and
+  returns the distinct **in-chain** status state when `0 < c <= p` (prerequisite chapter already
+  satisfied). This is the only gate that does not "fail to a notice" — it selects between two
+  positive status states.
+- **Result is a status-state global, never a boolean.** Every gate returns a distinct
+  runtime-resolved **status-state global** (graded later to the 18501..18515 label set,
+  `specs/quests.md §15.7.1`); the **literal integer values of those status states remain
+  capture/debugger-pending** (globals initialised once at startup). The evaluator returns the first
+  gate that resolves; "all gates pass" is itself one of the positive status states from gate 11.
 
 ---
 

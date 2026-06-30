@@ -1,5 +1,6 @@
 ---
 verification: static analysis, IDB SHA f61f66a9 (CYCLE deep-3d-wave3, 2026-06-28); no debugger; open items noted below
+corrected 2026-06-30: mode word source resolved (OPTION_SHADOW / DoOption.ini, options struct +40); sun-angle fallback is a clamp (π/2, 3π/2) not 1.594/4.69; near=projected / far=blob LOD handoff via actor +1824 documented; RT mip-count is 0 (full chain) not 1
 ida_reverified: 2026-06-28
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
@@ -53,9 +54,11 @@ The object has two distinct duties:
   `(0,0) / (1,0) / (1,1) / (0,1)`, and builds the two static matrices (`+112` and `+240`). No
   vtable pointer is written; no Direct3D resource is created.
 - **Resource initialisation (`ShadowManager_Init`):** creates the blob base texture
-  (`data/effect/tex/shadow.dds`) into `+84` if absent; reads the quality/mode word from the
-  graphics-quality config singleton into `+312`; sizes and creates the RT texture (`+96`), its
-  surface level 0 (`+92`), and the render-to-surface wrapper (`+88`); sets `enabled_flag` (`+0`)
+  (`data/effect/tex/shadow.dds`) into `+84` if absent; copies the mode word from the options
+  struct into `+312` (the options loader reads `OPTION_SHADOW` from `DoOption.ini` under
+  `[DO_OPTION]`, clamps it to `[1, 3]` with default `1`, and stores it at options-struct byte
+  offset `+40`, the 11th DWORD); sizes and creates the RT texture (`+96`), its surface level 0
+  (`+92`), and the render-to-surface wrapper (`+88`); sets `enabled_flag` (`+0`)
   to 1. When `mode_flag` (`+312`) equals 3 (shadows disabled) the RT creation is skipped entirely.
   Called from the boot data-table corpus loader and a renderer (re)init path.
 - **Teardown (`ShadowProjector_ReleaseResources`):** COM-Releases `+92`, `+96`, `+88` in that
@@ -84,9 +87,9 @@ memory addresses.
 | +112        | 64   | f32[16]  | `persp_matrix`           | **Static light-perspective matrix** — `D3DXMatrixPerspectiveFovLH(fovY = π/8, aspect = 1.0, zNear = 0.0, zFar = 10000.0)`. Built once by the constructor. Set as `D3DTS_PROJECTION` during the shadow-map RT render pass. | confirmed |
 | +176        | 64   | f32[16]  | `composed_matrix`        | **Runtime composed projection-texture matrix** — recomputed every frame as `invCamView · lightView · persp(+112) · UVbias(+240)`. Set as the stage-1 `D3DTS_TEXTURE1` transform in the terrain pass. See **Four-matrix chain** below. | confirmed |
 | +240        | 64   | f32[16]  | `uvbias_matrix`          | **Static UV-bias matrix** — `D3DXMatrixScaling(0.5, −0.5, 1.0) · D3DXMatrixTranslation(0.5, 0.5, 0.0)`. Built once by the constructor. Maps clip space to [0, 1]² with a V-flip. | confirmed |
-| +304        | 4    | f32      | `light_azimuth`          | Light azimuth angle (radians), recomputed per frame from the `EnvironmentLightScene` sun angle. Fallback constants apply when the sun-elevation term is ≤ 0.5 (approximately 1.594 for the low-angle branch and 4.69 for the other). | confirmed |
+| +304        | 4    | f32      | `light_azimuth`          | Light azimuth angle (radians), recomputed per frame from the `EnvironmentLightScene` sun angle. When the sun-elevation term is ≤ 0.5 the read angle is **clamped**: an angle ≤ 1.5700 is replaced by 1.5700 (π/2, truncated), an angle ≥ 4.7100 is replaced by 4.7100 (3π/2, truncated), and an angle between the two has π added. The clamp endpoints are the same values used as the comparison thresholds. | confirmed |
 | +308        | 4    | f32      | `elevation_scalar`       | Light elevation/distance scalar. Default 60.0; mode 2 sets this to 25.0 during RT init. Multiplies the light-eye offset from the player target position. | confirmed |
-| +312        | 4    | i32      | `mode_flag`              | Projector quality/mode setting sourced from the graphics-quality config singleton. 3 = shadows disabled (per-frame render gated on ≠ 3); 1 = wide-quality (actor cull radius² = 23104.0, i.e. 152²); 2 = 1024-px RT with `elevation_scalar` forced to 25.0; other values = narrow quality (cull radius² = 1936.0, i.e. 44²). Constructor initialises to 3. | confirmed |
+| +312        | 4    | i32      | `mode_flag`              | Projector quality/mode setting copied from the options struct (`OPTION_SHADOW`, clamped to `[1, 3]`, default 1). **1 = high:** actor cull radius² = 23104.0 (152²), RT square dimension = device back-buffer width clamped ≤ 4096, `elevation_scalar` = 60.0. **2 = medium:** actor cull radius² = 1936.0 (44²), RT forced to 1024, `elevation_scalar` forced to 25.0. **3 = off:** projected RT skipped and the per-frame render gated off (≠ 3), but the blob pass still draws the local player's blob. Constructor initialises to 3. | confirmed |
 | —           | —    | —        | *(end)*                  | **Total object size = 316 bytes.** | confirmed |
 
 ---
@@ -109,9 +112,15 @@ the only vtables accessed:
 
 Gated on: `enabled_flag` (`+0`) nonzero, a local player present, and `mode_flag` (`+312`) ≠ 3.
 
+At the top of this pass the per-actor shadow flag (the byte at actor offset `+1824`) is set to 1
+for **every** battle actor; the RT silhouette pass below then clears it back to 0 for each actor it
+actually draws as a projected silhouette (see **Near = projected / far = blob handoff**).
+
 1. **Light azimuth (`+304`).** Derived from the `EnvironmentLightScene` sun angle. When the scene
-   sun-elevation term is ≤ 0.5 a fixed-angle fallback is applied (approximately 1.594 or 4.69);
-   otherwise the angle is computed from the player XZ position and written to `+304`.
+   sun-elevation term is ≤ 0.5 the read angle is clamped rather than replaced by a fixed pair:
+   an angle ≤ 1.5700 becomes 1.5700 (π/2, truncated), an angle ≥ 4.7100 becomes 4.7100 (3π/2,
+   truncated), and any angle between them has π added. Otherwise the angle is computed from the
+   player XZ position and written to `+304`.
 
 2. **Light view matrix.** Target = the local player's world position. Eye = target + an offset
    built from the azimuth direction and `elevation_scalar` (`+308`) as:
@@ -143,8 +152,9 @@ Follows immediately after the matrix build in the same function.
 - `D3DTS_VIEW` ← per-frame `lightView`; `D3DTS_PROJECTION` ← static `persp_matrix` (`+112`).
 - Draw the local player silhouette (`Actor_DrawPartsForShadow`), then iterate the battle-actor
   list. For each actor with its drawable flag set and within XZ distance² of the player below the
-  `mode_flag`-selected cull threshold (23104.0 for mode 1 / wide; 1936.0 for other / narrow),
-  draw its silhouette and clear its per-frame shadow flag.
+  `mode_flag`-selected cull threshold (23104.0 for mode 1 / high; 1936.0 for mode 2 / medium),
+  draw its silhouette and clear that actor's per-frame shadow flag (the byte at actor offset
+  `+1824`) to 0.
 - `EndScene` on `render_to_surface` (`+88`).
 
 Net result: a white RT with flat mid-gray actor silhouettes rendered from the light's viewpoint.
@@ -160,20 +170,40 @@ normal part meshes are redrawn flat-gray under the TFACTOR / SELECTARG1 state se
 
 ### Blob-quad shadow (`ActorShadow_DrawBlobQuads`)
 
-Independent of the projected shadow-map path. Gated on `enabled_flag` (`+0`) and a local player.
-Binds `blob_texture` (`+84`) to stage 0 and sets FVF `0x102`. For the local player (when
-`mode_flag` (`+312`) = 3) or for each visible battle actor (otherwise), builds a 4-vertex ground
+The low-quality companion to the projected shadow-map path; the two cooperate as a per-actor LOD
+(see **Near = projected / far = blob handoff** below). Gated on `enabled_flag` (`+0`) and a local
+player. Binds `blob_texture` (`+84`) to stage 0 and sets FVF `0x102`. Draws a blob for the local
+player only when shadows are off (`mode_flag` (`+312`) = 3), and for each **visible battle actor
+whose per-frame shadow flag (actor offset `+1824`) is still 1** — i.e. the far actors that the RT
+pass did not consume as projected silhouettes. For each such target it builds a 4-vertex ground
 quad into `blob_quad_vertices` (`+4`): center at the actor's world position, half-extent sourced
 from the AnimCatalog entry for the current animation, quad lifted +0.4 units in Y. UVs are the
 preset unit-quad corners. Then `DrawPrimitiveUP(TRIANGLEFAN, 2 primitives, ptr = +4, stride = 20)`.
 This is the fallback/low-quality ground blob and is NOT the projected stage-1 shadow texture.
 
+### Near = projected / far = blob handoff
+
+The projected RT silhouette and the blob quad are a mutually-exclusive per-actor LOD, arbitrated by
+the per-actor byte flag at actor offset `+1824`:
+
+1. At the top of the per-frame look-at pass the flag is set to 1 for every battle actor.
+2. During the RT silhouette pass each actor that is drawable and within the `mode_flag`-selected XZ
+   cull radius is drawn as a projected silhouette, and its flag is cleared to 0.
+3. The blob pass then draws a ground blob only for visible battle actors whose flag is still 1.
+
+So a **near** actor (inside the cull radius) receives the projected silhouette and **no** blob,
+while a **far** actor (outside it, or skipped) receives a blob and **no** projected silhouette —
+exactly one of the two per actor per frame. The **local player** is a special case: it always
+renders into the projected RT in modes 1 and 2, and only receives a blob when shadows are off
+(mode 3, where the RT pass is skipped entirely).
+
 ### RT sizing rule (resolves `formats/terrain.md §11.8.1` open item)
 
 In `ShadowManager_Init`: base dimension = device backbuffer width, clamped to ≤ 4096. When
 `mode_flag` (`+312`) = 2 the dimension is forced to 1024 and `elevation_scalar` (`+308`) is set to
-25.0 (otherwise 60.0). The RT texture is created square (dim × dim), usage RENDERTARGET, 1 mip
-level, format = the global backbuffer color format. On CreateTexture failure the dimension is halved
+25.0 (otherwise 60.0). The RT texture is created square (dim × dim), usage RENDERTARGET, with a
+requested mip-level count of 0 (full chain), format = the global backbuffer color format. On
+CreateTexture failure the dimension is halved
 once and retried; the surface level 0 and the render-to-surface wrapper are then obtained in order.
 
 ---
@@ -184,8 +214,8 @@ once and retried; the surface level 0 and the render-to-surface wrapper are then
 |------|--------|
 | `+100`..`+111` (12 bytes) | Not written by any traced path (constructor or init). Purpose unconfirmed — likely reserved or padding. A live runtime read of the singleton would settle this. |
 | `composed_matrix` (`+176`) runtime value | The four-matrix formula is statically certain (see **Four-matrix chain** above); the per-frame numeric value requires a live `?ext=dbg` inspection to confirm. |
-| `mode_flag` (`+312`) → quality-config mapping | Values 1 / 2 / 3 are inferred from branch analysis; the mapping from the graphics-quality config singleton's quality word to the integer stored at `+312` needs live confirmation. |
-| Sun-angle fallback constants (≈ 1.594, ≈ 4.69) | Observed in static branch analysis; confirm exact float encoding via live debugger if sub-radian precision is required. |
+| `mode_flag` (`+312`) → quality-config mapping | **Resolved 2026-06-30.** Source is `OPTION_SHADOW` in `DoOption.ini` under `[DO_OPTION]`; the options loader clamps it to `[1, 3]` (default 1) and stores it at options-struct byte offset `+40` (11th DWORD), and `ShadowManager_Init` copies it into `+312`. 1 = high (cull² 23104, RT = back-buffer width ≤ 4096, elevation 60.0); 2 = medium (cull² 1936, RT 1024, elevation 25.0); 3 = off (RT skipped, per-frame pass gated off, local-player blob still drawn). Changing `OPTION_SHADOW` rewrites the ini and re-inits the shadow manager. |
+| Sun-angle fallback constants | **Resolved 2026-06-30.** The low-sun branch (sun-elevation term ≤ 0.5) is a **clamp**, not a fixed 1.594 / 4.69 pair: angles ≤ 1.5700 → 1.5700 (π/2, truncated), angles ≥ 4.7100 → 4.7100 (3π/2, truncated), in-between angles get π added. The endpoints equal the comparison thresholds. |
 
 ---
 

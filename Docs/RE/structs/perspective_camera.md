@@ -1,11 +1,11 @@
 ---
-verification: confirmed (static IDA on IDB SHA f61f66a9, 2026-06-28) — every offset and field role recovered from static control-flow + operand analysis on this build; closes the four open questions from the wave-1 camera lane.
+verification: confirmed (static IDA on IDB SHA f61f66a9, 2026-06-28) — every offset and field role recovered from static control-flow + operand analysis on this build; closes the four open questions from the wave-1 camera lane. corrected 2026-06-30: fovy storage resolved statically (no longer debugger-pending) — the in-world setter argument is (π·65/180)/aspect, so the effective perceived vertical FOV is 65/aspect (~48.75° at 4:3), not a flat 65°.
 ida_reverified: 2026-06-28
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 sample_verified: false      # in-memory C++ object layout, not a packed-file format
 subsystems: [render_pipeline, world_systems]
-conflicts: none-open        # wave-1 left/right swap corrected; vtable slot count corrected; no remaining open items except the debugger-pending fovy storage note
+conflicts: none-open        # wave-1 left/right swap corrected; vtable slot count corrected; fovy storage resolved statically 2026-06-30 (effective vertical FOV = 65/aspect); no remaining open items
 ---
 
 # Struct: GPerspectiveCamera — field offset table
@@ -95,7 +95,7 @@ constructor.
 | +156 | +0x9C | 4 | float | **frustum right** | Off-centre right extent. Corrected from wave-1 draft (which had left/right swapped); the debug-print reads +156 as "right" and +152 as "left". | confirmed |
 | +160 | +0xA0 | 4 | float | **frustum bottom** | Off-centre bottom extent. Symmetric mode: `bottom = −top`. | confirmed |
 | +164 | +0xA4 | 4 | float | **frustum top** | Off-centre top extent. Symmetric mode: `top = near × tan(fovy / 2)`. | confirmed |
-| +168 | +0xA8 | 4 | float | **fovy** (vertical FOV, radians) | Constructor default **π/4 (45°)**; scene construction sets **65°** (in-world) or **50°** (character-select). See **fovy storage note** below. | confirmed |
+| +168 | +0xA8 | 4 | float | **fovy** (vertical-FOV argument, radians) | Constructor default **π/4 (45°)**; in-world scene construction sets **(π·65/180)/aspect** and character-select **(π·50/180)/aspect** — the angle numerator is divided by the screen aspect at the build call site, so the stored value is **not** the raw 65°/50° radian measure. See **fovy storage note** below. | confirmed |
 | +172 | +0xAC | 4 | float | **fovx** (derived horizontal FOV, radians) | Computed by `UpdateProjection` from near / left / right. Constructor default **π/3 (60°)**. Consumed by culling and LOD detail-scale. | confirmed |
 | +176 | +0xB0 | 4 | float | **aspect ratio** | Screen width / screen height. Constructor initializes to 4/3 (≈ 1.333) then immediately resets to the live screen ratio. The parameter setter ignores any passed aspect argument — this field always tracks the live screen resolution. | confirmed |
 | +180 | +0xB4 | 4 | ptr | **device / renderer back-pointer** | Set in the constructor to the renderer singleton. Passed to `SetTransform` when applying the projection matrix. | confirmed |
@@ -109,13 +109,19 @@ bottom faces of the frustum. They are built from the 8 frustum corner points (de
 left/right/bottom/top/near/far) using a triangle-edge cross product to obtain the normal, a
 normalization step, and then solving for `d`.
 
-### fovy storage note [debugger-pending]
+### fovy storage note [confirmed — resolved statically 2026-06-30]
 
-The value stored at +0xA8 may be `(π · degrees / 180) / aspect` (i.e., the radian measure divided by
-the aspect ratio at the build call site), rather than the raw radian measure. Whether the perceived
-vertical FOV at the device equals 65° or `65° / aspect` requires a live `?ext=dbg` read of +0xA8 on a
-running session. This does not affect the struct layout or any other field, and is a carry-over open
-item from the prior wave.
+The value stored at +0xA8 **is** `(π · degrees / 180) / aspect` (the radian measure divided by the
+screen aspect `screenWidth/screenHeight` at the build call site), not the raw radian measure. The
+in-world build site passes `(π·65/180)/aspect` and the character-select site passes
+`(π·50/180)/aspect`. The frustum derivation then applies the half-angle at this value:
+`top = near · tan(fovy · 0.5)`, `bottom = −top`, `right = aspect · top`, `left = −right`, built
+off-centre right-handed (`D3DXMatrixPerspectiveOffCenterRH`). Substituting `fovy = (65°)/aspect`
+makes the **effective perceived VERTICAL FOV = 65/aspect** (≈ **48.75°** at 4:3) and the **effective
+HORIZONTAL FOV = 2·atan(aspect · tan((65/aspect)/2))** (≈ **62.2°** at 4:3), with near = 5.0,
+far = 15000.0. The earlier "perceived vertical FOV equals 65° or 65°/aspect" question is therefore
+**resolved to 65/aspect by static derivation** — no live `?ext=dbg` read is required. This does not
+affect the struct layout or any other field.
 
 ---
 
@@ -215,9 +221,11 @@ resolution.
 
 ## Notes and open items
 
-1. **fovy storage [debugger-pending].** The exact value at +0xA8 may be `(π · deg / 180) / aspect`
-   rather than the raw radian measure. A live `?ext=dbg` read on a running session is the definitive
-   test. Struct layout is unaffected.
+1. **fovy storage [confirmed — resolved statically 2026-06-30].** The value at +0xA8 is
+   `(π · deg / 180) / aspect`, not the raw radian measure: the in-world setter argument is
+   `(π·65/180)/aspect`. Through the `top = near·tan(fovy/2)` frustum derivation this yields an
+   effective perceived **vertical FOV = 65/aspect** (≈ 48.75° at 4:3) and **horizontal FOV
+   ≈ 62.2°** at 4:3. No live `?ext=dbg` read is required. Struct layout is unaffected.
 2. **std::string size [confirmed].** The 28-byte extent of the name field (+8..+35) is fixed by the
    binary's own constructor offsets (string constructor at +8, near-plane field at +36). Consistent
    with VC7.1 release `std::string`. A live read would confirm the SSO / heap-pointer split if ever

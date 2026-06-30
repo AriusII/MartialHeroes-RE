@@ -41,6 +41,7 @@ evidence:       [static-ida, vfs-sample]
 atm_deep_pass:  2026-06-29         # atmosphere-deep-cartography pass (f61f66a9): §2.4 fog synth channel grouping CONFIRMED (high=[+3,+4,+5], low=[-1,+0,+1] relative to slot base, stride 192 B/slot, output B/G/R); §2.5 MED item CLOSED; §4 star-dome corrected to 48 keyframes × 48 stars/keyframe (not 12 × 192); §9.1 section layout corrected to 8 consumer-validated sections (Gap A/B = enable bytes; D = point-intensity; E = device-ambient BGRA; fallback = 32-byte sun/key-light block at 0x14A0); §9.2 color_C corrected from UNREAD to CONFIRMED LERPED (all three groups committed Ambient/Diffuse/Specular); §9.4 sun/key-light block revised to 32 B starting at 0x14A0
 conflicts:      §7.5-resolved     # §7.5 quality-tier alpha scalars corrected (wave-9 reconciliation, 2026-06-28) per Docs/RE/specs/weather_render.md §7 (IDB anchor f61f66a9); all other env-bin numerics remain RE-CONFIRMED
 wave9_reconciliation: 2026-06-28  # §7.5 alpha scalars corrected to binary-won values (tier 1: 1.0/1.0/1.0, tier 2: 0.4/0.4/0.8, tier 3: 0.15/0.15/0.7); authority: Docs/RE/specs/weather_render.md §7
+render_geom_correction: 2026-06-30 # §4.3 star dome is a 72-vertex TEXTURED TRIANGLE dome (6 rings × 12 segments), NOT point sprites (D3DRS_POINTSPRITEENABLE off; draw requests 132 prims / 120 real tris); §5.1/§5.3/§5.4 cloud day-tint regrouped from "12 keyframes × 240 entries" to 48 day-slots × 60 per-vertex BGRA (1800 ms/slot, same cadence as stars/lighting); each cloud layer is a 60-vertex dome (4 rings × 12 + 12-vertex skirt; draw 108 / 96 real tris). Geometry facts mirrored in Docs/RE/structs/skybox.md §6/§7.
 cycle7_additions:                  # CYCLE 7 static re-walk (all HIGH immediates unless noted)
   - in-memory engine fog struct layout pinned: type@+44 (1=EXP/2=EXP2/3=LINEAR), colour@+48 (4-byte ARGB), start@+52 f32, end@+56 f32, density@+60 f32 (§10.3)
   - material SYNTH default (missing material.bin): ambient 0.30000001, diffuse 0.8, specular 0.0, emissive 0.0 (§3.4)
@@ -136,7 +137,9 @@ frac           = (current_time_ms mod 1800) / 1800.0
 ```
 
 Values between adjacent keyframes are linearly interpolated at runtime. The **cloud-dome** colour
-table uses a coarser 12-keyframe cycle (one keyframe = 7200 s = four lighting keyframes). The
+table uses the **same 48-slot, 1800 ms cadence** as the lighting and star-dome systems (corrected
+2026-06-30 — the earlier "12-keyframe / 7200 s" reading mis-grouped each per-layer block into
+12 × 240 entries instead of the correct 48 day-slots × 60 per-vertex entries; see §5). The
 **star-dome** colour table was previously described as 12-keyframe; the runtime interpolator
 (`StarDome_InterpolatePerStar`) has been confirmed to use a **48-keyframe cycle at 1800 s/keyframe**
 — the same cadence as the main lighting system (atmosphere deep-cartography pass 2026-06-29;
@@ -186,7 +189,7 @@ are little-endian.
 | 0x00 | 4 | u32 | `MOVE_DUNGEON` | `is_dungeon` | 0 = outdoor / field; 1 = dungeon (dungeon-type movement zone). | CONFIRMED |
 | 0x04 | 4 | u32 | `SIGHT_FIX` | `sight_distance` | Camera sight-clamp distance. 0 = free range; otherwise a fixed clamp (observed e.g. 300, 800). NOT a water surface Y. | CONFIRMED |
 | 0x08 | 4 | u32 | `LENSFLARE` | `lensflare_enable` | 0 = off; 1 = sun lens-flare screen-space sprites. | CONFIRMED |
-| 0x0C | 4 | u32 | `STARDOME` | `stardome_enable` | 0 = off; 1 = star-dome point sprites rendered. | CONFIRMED |
+| 0x0C | 4 | u32 | `STARDOME` | `stardome_enable` | 0 = off; 1 = star-dome rendered (a textured triangle dome, not point sprites — see §4.3). | CONFIRMED |
 | 0x10 | 4 | u32 | `CLOUDDOME` | `clouddome_enable` | 0 = off; 1 = cloud-dome hemisphere rendered. | CONFIRMED |
 | 0x14 | 4 | u32 | `SUN` | `sun_enable` | 0 = off; 1 = sun billboard. Stored separately from MOON below. | CONFIRMED |
 | 0x18 | 4 | u32 | `MOON` | `moon_enable` | 0 = off; 1 = moon billboard. **Stored as its own u32 word**, distinct from SUN at 0x14, even though both carry the same value in every observed area. Whether the client reads them independently is UNVERIFIED; the storage is two separate words. | CONFIRMED (as stored) |
@@ -476,7 +479,20 @@ copies = 24 derived + 48 primary = 72 total dome verts — atmosphere deep-carto
 This **refutes** the earlier "uniform tint across all stars per keyframe" reading and the "192 entries"
 count (which was a misread of the slot-count vs. entry-count relationship).
 
-Stars are point-sprite particles textured from `data/sky/texture/star.dds`.
+**Geometry — textured triangle dome, NOT point sprites (corrected 2026-06-30).** The star dome is a
+**72-vertex textured triangle mesh** of **6 elevation rings × 12 segments**, drawn from
+`data/sky/texture/star.dds`. It is **not** a point-sprite particle system —
+`D3DRS_POINTSPRITEENABLE` is OFF on the draw. Vertex positions are
+`X = 4000 × sin(ring) × cos(seg)`, `Y = 3500 × cos(ring)`, `Z = 4000 × sin(ring) × sin(seg)` with
+ring elevation angles 0° / 30° / 60° / 90° / 120° / 150° (the lower rings dip below the horizon);
+horizontal radius 4000, vertical radius 3500. Fisheye texture coordinates are
+`u = cos(seg) × (ring / 6) + 8.0`, `v = sin(seg) × (ring / 6) + 8.0`, tiled under WRAP addressing.
+The dome is drawn **OPAQUE** (alpha-blend disabled) with **CW** face culling; global star brightness
+is pushed via `D3DRS_TEXTUREFACTOR` (with a **0.1 visibility cutoff** below which the dome is
+skipped). The per-vertex BGR day tint (§4.1) is written to the **48 primary vertices**; the remaining
+**24 vertices are derived copies**. The draw call requests **132 primitives** but the geometry builder
+fills only **120 real triangles** (the index buffer is over-allocated). The runtime object layout is
+in `Docs/RE/structs/skybox.md §6`.
 
 Day keyframes contain bright orange/amber values — these pre-colour the stars even during
 daylight when they are invisible (overridden by sky brightness), so that stars immediately show
@@ -496,8 +512,8 @@ The file contains two equal-sized sections, one per cloud layer:
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| 0x0000 | 11520 | u8[12][240][4] | `cloud_layer1_colors` | Inner cloud layer: 12 keyframes × 240 BGRA entries | CONFIRMED |
-| 0x2D00 | 11520 | u8[12][240][4] | `cloud_layer2_colors` | Outer/haze layer: 12 keyframes × 240 BGRA entries | CONFIRMED |
+| 0x0000 | 11520 | u8[48][60][4] | `cloud_layer1_colors` | Layer A (inner): **48 day-slots × 60 per-vertex BGRA entries** (240-byte slot stride; 1800 ms/slot). Loaded to the runtime object's layer-A day-colour grid (`structs/skybox.md §7`, base +0x16A8). | CONFIRMED |
+| 0x2D00 | 11520 | u8[48][60][4] | `cloud_layer2_colors` | Layer B (outer/haze): **48 day-slots × 60 per-vertex BGRA entries** (240-byte slot stride; 1800 ms/slot). Loaded to the layer-B day-colour grid (base +0x43A8). | CONFIRMED |
 
 Section 2 starts at byte offset 0x2D00 = 11520.
 
@@ -505,23 +521,35 @@ Section 2 starts at byte offset 0x2D00 = 11520.
 
 Same byte order as §2.2 (Blue, Green, Red, Alpha). Alpha is always 0 in all sampled data.
 
-### 5.3 Keyframe cycle
+### 5.3 Day-tint cycle (corrected 2026-06-30)
 
-Same 12-keyframe, 7200 ms-per-step cycle as `stardome%d.bin` (§4).
+**48 day-slots at 1800 ms/slot** — the same cadence as the lighting, fog, and star-dome (§4)
+systems, NOT a coarser 12-keyframe / 7200 ms cycle. Each layer's grid holds 48 slots of 60
+per-vertex BGRA entries (240-byte slot stride); the tint is linearly interpolated between adjacent
+slots. Of the 60 per-layer vertices the **48 primary** dome vertices receive interpolated tints and
+the **12 skirt** vertices are derived. The earlier "12 keyframes × 240 entries" reading mis-grouped
+the per-layer block (12 × 240 instead of 48 × 60).
 
-### 5.4 Geometry
+### 5.4 Geometry (corrected 2026-06-30)
 
-The cloud dome is a **hemispheric mesh** (not a particle system). The 240 BGRA entries per
-keyframe represent per-vertex tints applied to the dome mesh vertices. The total vertex count
-of the cloud-dome mesh is 240 (confirmed by the array size).
+Each cloud layer is a **60-vertex dome** (a hemispheric mesh, not a particle system): **4 rings × 12
+segments** (ring radius = `ringIndex × 750`, height = `(3 − ringIndex) × 333.3`) plus a **12-vertex
+skirt** at height −200, for 60 vertices per layer. Horizontal radius ≈ 2250, height ≈ 1000. Fisheye
+UVs are centred at (0.5, 0.25) with **only V scrolled** (layer B scrolls at 2× layer A's rate,
+wrapping). The **240-byte figure is the per-day-slot byte stride** (60 verts × 4 bytes BGRA), NOT a
+240-vertex count — the earlier "240-vertex mesh" reading mis-read the slot stride as a vertex count.
+Per-layer triangle budget: the draw requests **108 primitives** but the builder fills **96 real
+triangles**. The runtime object layout (per-layer day-colour grids at +0x16A8 / +0x43A8) is in
+`Docs/RE/structs/skybox.md §7`.
 
 ### 5.5 Known unknowns
 
-- **240-vertex mesh layout:** The sphere tessellation scheme (UV-sphere, icosphere, or other)
-  is not documented in these binary files; it is implicit in the client's cloud-dome geometry
-  generator.
-- **Layer separation (inner vs. outer):** The assignment of layer 1 to the inner and layer 2 to
-  the outer dome is inferred from rendering order; not directly verified from binary analysis.
+- **Tessellation scheme:** RESOLVED 2026-06-30 — each layer is a **4-ring × 12-segment dome plus a
+  12-vertex skirt** (60 verts/layer); see §5.4. (The earlier "240-vertex mesh layout" unknown is
+  closed; the 240 was a per-slot byte stride, not a vertex count.)
+- **Layer separation (A vs. B):** The assignment of layer A (band 0, grid base +0x16A8) vs. layer B
+  (band 1, base +0x43A8) — where layer B scrolls at 2× layer A's V rate — is inferred from rendering
+  order (`structs/skybox.md §7`); not independently re-verified from binary analysis.
 
 ---
 
@@ -1348,7 +1376,7 @@ All sky textures are **DDS** files under `data/sky/texture/`. Confirmed entries 
 | `data/sky/texture/sun.dds` | Sun billboard texture | No | Single file |
 | `data/sky/texture/moon%d.dds` | Moon phase textures | No | Numbered variants |
 | `data/sky/texture/cloud%d.dds` | Cloud dome textures | Ping-pong 2-frame (layer 1) / 4-frame (layer 2) | Indexed by `cloud_cycle%d.bin` |
-| `data/sky/texture/star.dds` | Star point-sprite texture | No | Single file |
+| `data/sky/texture/star.dds` | Star-dome texture (textured triangle dome, not point sprites — §4.3) | No | Single file |
 | `data/sky/texture/lensflare%d.dds` | Lens-flare layers | No | Numbered; gated by `lensflare_enable` |
 | `data/sky/texture/wind%d.dds` | Foliage-sway / wind material | No | Indexed by `wind%d.bin` record `tex_id` (+0x14), bound only when `source_flag != 0` — §12.2; never exercised in the shipping corpus (`source_flag = 0` everywhere) |
 | `data/sky/texture/rain_drop.dds` | Rain drop splash | No | Weather only; rain built procedurally at runtime (§8) |

@@ -82,13 +82,26 @@
 >   **clamp-to-last-bone** in the engine, NOT a skip (the spec previously implied the engine skips;
 >   "skip" is retained only as the *recommended importer hardening*, §8(e)); (2) the child-bone
 >   translation lock is **interior-bone-only** (a bone with both a parent and a grandparent and at
->   least one child), narrower than the previous "every non-root bone" phrasing. The core math
+>   least one child) **and second-layer-only** (it fires only on the second-and-later commit, when
+>   blending onto an already-committed layer with committed weight ≠ 0; corrected 2026-06-30 — §6.3),
+>   narrower than the previous "every non-root bone" phrasing. The core math
 >   (deform equation, quaternion order, Hamilton product, active rotation, both world walks, scale
 >   source, raw-seconds alpha, 28-byte keyframe, XYZW) was reproduced with **no correction**. A third
 >   conflict was resolved against the **visual oracle** on 2026-06-21: the `.skn` geometry height-axis is
 >   **native X** (requiring a +90°-Z importer remap), correcting the CYCLE-7 "identity / Y-up import"
 >   reading of the asset geometry (the placement/heading Y-up convention is unaffected).
 > - **consolidation 2026-06-29:** §1.1–§1.2 added — Cal3D framework origin + wrapper class catalog and five-stage pipeline function names; sourced from dirty-room scan; marked `[static-hypothesis]`; no confirmed claim in the master is altered.
+> - **corrected 2026-06-30:** two `.mot` sampler/blend facts re-pinned to the binary. (1) **Rotation
+>   SLERP is RAW-DOT (no hemisphere flip)** — the binary does NOT negate the second quaternion when
+>   `dot < 0`; a > 180° pair travels the long way, and only the exact-antipodal (`dot ≤ −1`) degenerate
+>   case is special-cased (§6.1). This SUPERSEDES the earlier "shortest-arc SLERP" wording wherever it
+>   appears (status table, §6.1, §10.1). **The Godot port deliberately keeps a shortest-arc SLERP and a
+>   maintainer must NOT change it toward the binary** — it is safer and never visibly different for real
+>   10 fps data. (2) **The interior-bone translation lock is SECOND-LAYER-ONLY** — it fires only on the
+>   second-and-later commit (blending onto an already-committed layer, committed weight ≠ 0); the
+>   first/only commit of a single layer takes the sampled translation even for interior bones (§6.1
+>   step 3, §6.3). For shipped single-layer playback the result is identical (interior `.mot`
+>   translation keyframes equal bind-local), so the distinction matters only when two layers are blended.
 
 Neutral, data-only model of how the legacy *Martial Heroes* client **deforms and animates** skinned
 characters: how the bind pose is built from a `.bnd` skeleton, how the inverse-bind transform is
@@ -149,12 +162,12 @@ documented in the container spec.
 | Runtime pose bone stride **88 bytes**; in-memory bind bone **72 bytes**; bone count is a single **u8** (≤ 255 bones) | HIGH (recovered CAMPAIGN 10 — see §3.4) |
 | Major/minor influence split + per-vertex normalization to sum 1.0; drop weight < 0.0099999998f (exact f32; nearest to 0.01; `coreskin.cpp` line 294); denominator floor `Math::DELTA = 0.001` (`coreskin.cpp` line 306) | HIGH (code) + SAMPLE-VERIFIED (corpus: min weight 0.010, 1140 multi-weight skins); exact threshold confirmed deep-cartography f61f66a9 |
 | LBS deform equation (weighted sum of bone-local rest placed by animated bone world transform) | **CONFIRMED end-to-end at the per-vertex level (CYCLE 7)** — runtime two-pass deform read directly: major pass WRITES, minor pass ACCUMULATES; `vertex_world = Σ wᵢ·(boneWorldQuat·(restPos·scale)+boneWorldTrans)`, normals same without translation |
-| `.mot` sampling: `floor(t·10)` @ 10 fps, LERP translation, shortest-arc SLERP rotation, 28-byte keyframe | HIGH (re-confirmed) |
+| `.mot` sampling: `floor(t·10)` @ 10 fps, LERP translation, **raw-dot SLERP rotation (no hemisphere flip)**, 28-byte keyframe | HIGH (re-confirmed; SLERP corrected 2026-06-30 — raw-dot not shortest-arc, §6.1) |
 | Per-frame clip time `t` advances (real `dt = ms × 0.001`; mixer ticked every frame; never pinned to 0) | HIGH (control-flow-confirmed — `formats/animation.md` §Per-frame clip-time advance) |
 | Standing/stand-still idle clip = actormotion **column 16** (in-memory record +0x44, direction array A element 1), keyed by the **appearance key** (not col2/skin_class), resolved via the **motlist.txt clip registry** (motion id == `.mot` header id_b), NOT a `g{id}.mot` sprintf | **CONFIRMED static (CYCLE 7)** — every motion-kind-0 idle read-site reads record +0x44; record +0x40 (col15, array A element 0) has ZERO read-sites (statically dead). Supersedes the prior "col15 / `motion_ids_a[0]`" claim and the `g{id}.mot` resolution assumption (§8(e), §10) |
 | Which idle slot the live engine plays for a standing human | RESOLVED statically to the column-16 stand clip (record +0x44); the live-vs-static slot question is settled by the static read-site evidence (§10) |
 | Interpolation alpha is RAW seconds in `[0, 0.1]`, not renormalized to `[0,1]` | HIGH (observed); intentional-vs-defect UNVERIFIED |
-| Pose composition: `parentWorld ⊗ bindLocal ⊗ animLocal`; **interior** bones rotate-only; root + leaf/near-root translate | HIGH (lock narrowed to interior bones, CAMPAIGN 10 — §6.3) |
+| Pose composition: `parentWorld ⊗ bindLocal ⊗ animLocal`; **interior** bones rotate-only **(only on the second-and-later commit, when blending onto an already-committed layer)**; root + leaf/near-root translate | HIGH (lock narrowed to interior bones, CAMPAIGN 10; second-layer-only corrected 2026-06-30 — §6.3) |
 | Quaternion convention: XYZW (scalar W last), Hamilton product, active rotation, parent-on-left | HIGH (re-confirmed) |
 | Out-of-range bone id is **clamped to the last bone** (NOT skipped) | HIGH (re-confirmed CAMPAIGN 10 — the engine clamps; "skip" is importer hardening only, §8(e)) |
 | NO axis flip inside the skinning math | HIGH — there is no single-axis negation or remap *inside* the deform/bake math; bone space and rest-mesh space are the same native space (§7). This is distinct from the importer orientation knob below |
@@ -1237,16 +1250,27 @@ layout (8-byte track preamble + 28-byte keyframes, translation XYZ then quaterni
 At clip time `t` (seconds), a track is sampled as:
 
 ```
-n     = floor(t · 10.0)                       # fixed 10 fps; duration = frame_count · 0.1
-nNext = (n < key_count − 1) ? n + 1 : n        # clamp to the last key within a track
+n     = min( floor(t · 10.0), key_count − 1 )  # fixed 10 fps; FIRST index clamped to the last key
+nNext = (n < key_count − 1) ? n + 1 : 0        # SECOND index WRAPS to keyframe 0 at the loop seam
 alpha = t − n / 10.0                           # RAW seconds in [0, 0.1] — NOT renormalized to [0,1]
 trans = lerp ( key[n].translation, key[nNext].translation, alpha )
-rot   = slerp( key[n].rotation,    key[nNext].rotation,    alpha )   # shortest-arc
+rot   = slerp( key[n].rotation,    key[nNext].rotation,    alpha )   # raw-dot, no hemisphere flip
 ```
 
 - Translation is **linear interpolation**.
-- Rotation is **shortest-arc SLERP**: if `dot(a, b) < 0`, negate `b` before SLERP; near-identical
-  quaternions fall back to normalized LERP, antipodal quaternions to a perpendicular path.
+- **Index clamp/wrap (corrected 2026-06-30):** the **first** index is clamped to `key_count − 1`; the
+  **second** index `nNext` **wraps to keyframe 0** at the loop seam (it is NOT clamped to the last key).
+  So a track with `key_count ≤ frame_count` interpolates `key[last] → key[0]` during its final 0.1 s
+  window (raw-seconds alpha in `[0, 0.1)`); a **single-keyframe** track short-circuits to that one key
+  (`n = nNext = 0`) and never wraps.
+- Rotation is a **raw-dot SLERP with NO hemisphere flip (corrected 2026-06-30):** the binary does
+  **not** negate `b` when `dot(a, b) < 0`, so the interpolation runs on the raw dot and a > 180° pair
+  travels the long way around. The **only** special case is the exact-antipodal degenerate (`dot ≤ −1`),
+  handled by a perpendicular axis. There is no shortest-arc sign flip in the shipping client.
+  > **Port note (do NOT "fix" toward the binary).** The Godot port deliberately uses a normal
+  > **shortest-arc** SLERP (negate `b` when `dot < 0`). This is the safer choice and is never visibly
+  > different from the binary for real 10 fps `.mot` data — consecutive keyframes 0.1 s apart are never
+  > an antipodal pair. A maintainer must **not** change the port toward the binary's raw-dot SLERP.
 - **The `alpha` quirk:** the blend factor is raw seconds (≤ 0.1), **not** normalized to `[0, 1]`. This
   makes legacy playback effectively near-keyframe-snapped. To reproduce legacy motion bit-for-bit,
   replicate the raw-seconds alpha; for smooth motion, renormalize `alpha /= 0.1`. This is a documented
@@ -1262,14 +1286,18 @@ Each frame the mixer builds the animated pose in passes:
    LERP/SLERP by `w_new / (w_acc + w_new)`, the denominator floored at 0.001 — see note below on
    the `logf` guard that selects the floor branch).
 3. **Commit pass:** fold the accumulated sample into each node's **local animated** translation/rotation
-   slots, blended against any previously committed value. **Interior-bone translation lock:** the local
-   **translation is forced to the bind-pose local translation** only for an **interior** bone — one
-   that has **both a parent AND a grandparent AND at least one child**. Such interior bones keep their
-   fixed bind-pose bone length and only rotate. The **root**, the root's **direct children**, and the
-   **leaf** bones instead take the blended (LERP'd) accumulator translation. (This is narrower than the
-   prior phrasing "every non-root bone is locked" — see §6.3.) The first contributor assigns; later
-   contributors blend by `w_new / (w_acc + w_new)` with the denominator floored at 0.001 — same `logf`
-   guard as the accumulate pass.
+   slots, blended against any previously committed value. **Interior-bone translation lock (conditional
+   on a prior committed layer — corrected 2026-06-30):** when this commit is blending onto an
+   **already-committed** value (committed weight ≠ 0 — i.e. the second-or-later layer in a blend), the
+   local **translation is forced to the bind-pose local translation** for an **interior** bone — one
+   that has **both a parent AND a grandparent AND at least one child** — so such interior bones keep
+   their fixed bind-pose bone length and only rotate. On the **first/only** commit of a single layer
+   (committed weight == 0) the lock does **not** fire: the sampled accumulator translation is taken
+   **even for interior bones**. The **root**, the root's **direct children**, and the **leaf** bones
+   always take the blended (LERP'd) accumulator translation. (The interior set is narrower than the
+   prior phrasing "every non-root bone is locked", and the lock is now also known to be second-layer-only
+   — see §6.3.) The first contributor assigns; later contributors blend by `w_new / (w_acc + w_new)`
+   with the denominator floored at 0.001 — same `logf` guard as the accumulate pass.
 
 > **The 0.001 denominator floor uses a genuine `logf` guard (static-confirmed).** The floor branch is
 > taken when `logf(committedWeight + accumWeight) < 0.001`; in that branch the denominator is forced to
@@ -1288,14 +1316,35 @@ Each frame the mixer builds the animated pose in passes:
    root world rotation folds in the smoothed heading (yaw) quaternion.
 6. **World walk:** fill every node's animated world transform from the committed local poses (§6.6).
 
-### 6.3 The translation lock is INTERIOR-bone-only (the practical rule is unchanged)
+> **Mixer layer dynamics cross-reference (recovered 2026-06-30).** The exact per-frame layer math that
+> drives steps 2–4 above — the action one-shot blend-in/play/blend-out FSM, the cycle-layer weight ramp
+> toward a target, the sync-phase advance, and the start/refresh call sites — is recovered in
+> `Docs/RE/structs/anim_runtime.md` (§ Mixer dynamics). Two facts matter for a faithful port: **(a)** the
+> action blend-in and blend-out **durations are play-call arguments**, and **every shipped call site
+> passes 0** for both, so shipped one-shot actions switch weight 0↔1 with no cross-fade (the blend
+> machinery exists but the data never exercises it); **(b)** the commit pass first **clamps the pass's
+> accumulated weight to at most (1 − committed weight)** before folding, so a bone never over-accumulates
+> past unit weight across the action-then-cycle passes. The accumulate fraction `w_new / (w_acc + w_new)`,
+> the commit fraction `accum / (committed + accum)`, and the `logf`-guarded 0.001 floor described in §6.2
+> were all re-read at instruction level this pass with no change.
+
+### 6.3 The translation lock is INTERIOR-bone-only AND second-layer-only (the practical rule is unchanged)
 
 This is the rule from step 3 restated because it matters for the importer. The exact legacy condition
-is a **three-way interior test**: a bone's animated local translation is forced to its bind-pose local
-translation **only when it has a parent, a grandparent, AND at least one child**. The root, the root's
-direct children, and leaf bones take the blended accumulator translation instead. The prior phrasing
-"child bones keep their fixed bind-pose bone length; only the root translates" had the right intent but
-was slightly over-broad — strictly it is *interior* bones that are locked.
+is a **three-way interior test gated by a prior committed layer**: a bone's animated local translation
+is forced to its bind-pose local translation **only when (a) it has a parent, a grandparent, AND at
+least one child, AND (b) this commit is blending onto an already-committed layer (committed weight ≠ 0)**
+(corrected 2026-06-30). On the **first/only** commit of a single layer the lock does not fire — even an
+interior bone takes the sampled translation. The root, the root's direct children, and leaf bones take
+the blended accumulator translation regardless. The prior phrasing "child bones keep their fixed
+bind-pose bone length; only the root translates" had the right intent but was slightly over-broad —
+strictly it is *interior* bones, and locked only on the second-and-later blend layer.
+
+> **Single-layer playback is identical either way.** For shipped single-layer idle / locomotion
+> playback the lock never fires (there is no second committed layer), yet the result is unchanged
+> because the interior bones' `.mot` translation keyframes already equal their bind-local translation.
+> The first-commit-vs-locked distinction therefore becomes observable **only when two layers are
+> blended**. The practical importer rule below is unaffected.
 
 **The practical importer rule is unchanged:** feed **rotation tracks for non-root bones and a position
 track for the root only**, to match legacy behaviour. This is safe because the on-disk idle clips carry
@@ -1714,7 +1763,7 @@ recovered idle chain resolves (whichever clip the column-16 stand slot resolves 
 The engine feeds the animation mixer **real elapsed time every frame** and advances every active
 layer's clock; the per-track sampler therefore always sees a moving `t` for an active layer. There is
 no code path that samples a started, weighted layer at a fixed `t = 0`. The math (10 fps `floor(t·10)`
-frame pair, raw-seconds alpha, LERP translation + shortest-arc SLERP rotation) is exactly §6.1; the
+frame pair, raw-seconds alpha, LERP translation + raw-dot SLERP rotation) is exactly §6.1; the
 per-frame `dt = ms × 0.001` source and the cycle-layer time advance (free-run `local_time += rate·dt`
 with modulo wrap, or sync-mode `t = duration × phase/range`) are documented in
 `formats/animation.md` §Per-frame clip-time advance and §Wrap and loop behaviour. **Consequence:** a

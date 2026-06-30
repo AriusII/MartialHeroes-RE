@@ -9,6 +9,7 @@
 > re-verified again (2026-06-21): BANI body is now DECODED (identical standard track/keyframe layout, sample residual 0); the BANI "all-files-constant" claims are CORRECTED (the `unknown_field` and `track_count` are NOT constant — three rig groups exist); the oversized standard clip is identified. See §BANI variant and §Oversized standard clip.
 > re-verified (2026-06-24): static-analysis + five-sample on-disk re-confirmation pass (IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee). Zero structural drift. Confirmed: header read order (id_a → id_b → name LenStr → frame_count), 10-fps duration rule, track-array layout (8-byte preamble + key_count×28 keyframes), keyframe 7 f32 vec3+quat XYZW, track_descriptor low-byte=bone_id (upper 3 bytes reserved/zero on all observed tracks), id_b load-time registry key, motlist.txt → data/char/mot/ prefix + id_b-keyed registry (no g{id}.mot sprintf), 80-byte clip object. Five standard samples parsed to zero residual. BANI variant accepted from prior pass (one g170350513 file confirmed BANI by magic). No corrections required.
 > re-verified (2026-06-27, CYCLE 14, f61f66a9): header field layout (id_a, id_b, name LenStr, frame_count × 0.1 duration, track_count), 28-byte keyframe (7 f32: translation XYZ then quaternion XYZW), 8-byte per-track preamble (track_descriptor low-byte = bone_id, key_count), and id_b-keyed clip registry with no g{id}.mot sprintf all re-confirmed SAME. No corrections.
+> corrected 2026-06-30: (1) the per-track keyframe sampler clamps only the FIRST index to `key_count − 1`; the SECOND interpolation index WRAPS to keyframe 0 at the loop seam (NOT clamped to the last key), so a `key_count ≤ frame_count` track interpolates `keyframe[last] → keyframe[0]` over its final 0.1 s window — single-keyframe tracks short-circuit (§Timing). (2) the rotation SLERP is RAW-DOT (no hemisphere / shortest-arc sign flip); only the exact-antipodal `dot ≤ −1` degenerate case is special-cased (§Rotation interpolation). No on-disk layout change.
 > ida_reverified: 2026-06-16; CYCLE 7 (2026-06-20); 2026-06-21; 2026-06-24; 2026-06-27
 > ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > evidence: [static-ida, vfs-sample]
@@ -380,10 +381,14 @@ specified in `specs/skinning.md` (§6 keyframe sampling, §5 deform).
 
 - **Fixed frame rate: 10 fps.**
 - **Clip duration** (seconds) = `frame_count × 0.1`.
-- At playback time `t` (seconds), the sample index is `floor(t × 10.0)`. The next index is
-  `sample_index + 1`, clamped to `key_count − 1`. Clamp-to-last is applied within the
-  per-track sample function when addressing keyframes; wrap-to-zero is handled at the clip level
-  by the runtime cycle layer (see §Wrap and loop behaviour).
+- At playback time `t` (seconds), the **first** sample index is `floor(t × 10.0)`, **clamped to
+  `key_count − 1`**. The **second** sample index is the next keyframe, but at the loop seam it **wraps
+  to keyframe 0** — it is **NOT** clamped to `key_count − 1` (corrected 2026-06-30). So a track whose
+  `key_count ≤ frame_count` interpolates `keyframe[last] → keyframe[0]` during the final 0.1 s window,
+  with the raw-seconds alpha in `[0, 0.1)`; a track with a **single** keyframe short-circuits to that
+  one key and never wraps. (This per-track first-index-clamp / second-index-wrap happens inside the
+  sample function; the looping of `t` itself across whole cycles is still the runtime cycle layer's
+  concern — see §Wrap and loop behaviour.)
 - **Interpolation parameter** `alpha` = `t − (sample_index / 10.0)`. This is expressed in raw
   seconds in the range `[0, 0.1]` and is passed directly as the blend factor to both the
   translation and rotation interpolators. It is not re-normalized to `[0, 1]` before use. Whether
@@ -453,19 +458,21 @@ blended_translation = lerp(key[n].translation, key[n+1].translation, alpha)
 
 ### Rotation interpolation
 
-Spherical linear interpolation (SLERP) between consecutive rotation quaternions, with dot-product
-sign flip to enforce the shortest-arc path:
+Spherical linear interpolation (SLERP) between consecutive rotation quaternions. **The shipping client
+uses a RAW-DOT SLERP with NO hemisphere flip** (corrected 2026-06-30): it does **not** negate the
+second quaternion when the dot is negative, so a > 180° pair interpolates the long way around. The
+**only** special case is the exact-antipodal degenerate (`dot ≤ −1`), handled by a perpendicular axis:
 
 ```
-if dot(key[n].rotation, key[n+1].rotation) < 0:
-    negate key[n+1].rotation before slerp
-blended_rotation = slerp(key[n].rotation, key[n+1].rotation, alpha)
+blended_rotation = slerp(key[n].rotation, key[n+1].rotation, alpha)   # raw dot — no sign flip
 ```
 
-Degenerate cases: nearly-identical quaternions (dot close to 1.0) fall back to normalized linear
-interpolation. Antipodal quaternions (dot close to −1.0) are handled by a 90-degree perpendicular
-path. These are implementation-level concerns for `Assets.Parsers` / runtime; the on-disk format
-is unaffected.
+Degenerate case: the exact-antipodal pair (`dot ≤ −1.0`) is handled by a 90-degree perpendicular path;
+there is **no** shortest-arc sign flip for the ordinary `dot < 0` case. **Porter note:** a faithful 1:1
+reproduction omits the sign flip, but the Godot port deliberately uses a normal shortest-arc SLERP
+(negate the second quaternion when `dot < 0`) — safer and never visibly different for real 10 fps
+`.mot` data, and a maintainer must NOT change it toward the binary; see `specs/skinning.md` §6.1. These
+are runtime concerns for `Assets.Parsers` / `Client.Application`; the on-disk format is unaffected.
 
 ---
 

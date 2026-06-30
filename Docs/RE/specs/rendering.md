@@ -20,10 +20,15 @@
 >   `data/script/display.lua` glow/bloom config values (GLOW_BRIGHT_MULTI=0.3, GLOW_RANGE 1×1,
 >   POWER=2→power2dx8.psh) and the `DISPLAY_CHAR_BRIGHT_*` 9-state character-tint table (§6.6,
 >   §6.7) — read verbatim from the real VFS file. *static-hypothesis* for the per-scene frame-rate
->   field's per-window default value. *(CYCLE 11: c0/c1 defaults corrected to 1.0 / 1.0 — the
->   earlier ×0.5 derivation was an FP-stack artifact, not a real code-side halving; particle/UI
->   vertex strides upgraded to CONFIRMED; apply-site for 9-state character tint pinned. See §6.3,
->   §5.2, §6.7.) *(2026-06-21: the glow `.psh` question is RESOLVED — see the C5 note below and §6.4.)*
+>   field's per-window default value. *(CYCLE 11: c0/c1 **constructor** defaults are 1.0 / 1.0 — used
+>   only when a config key is absent; particle/UI vertex strides upgraded to CONFIRMED; apply-site for
+>   9-state character tint pinned. See §6.3, §5.2, §6.7.)* **corrected 2026-06-30:** the ×0.5 is NOT a
+>   decompiler artifact — the `display.lua` config loader applies a real ×0.5 (a stored IEEE-754 double)
+>   to every `DISPLAY_CHAR_BRIGHT_MULTI_{R,G,B}` channel and to `DISPLAY_BASE_BRIGHT_MULTI` before storing
+>   them (the ADD / ALPHA / `GLOW_BRIGHT_MULTI` / `LIGHT_RATIO` keys are stored unscaled). That ×0.5
+>   deliberately cancels the cel and composite shaders' ×2 on the base/scene term, so the LIVE composite
+>   constants are c0 = 0.525 (= 1.05 × 0.5) and c1 = 0.3, NOT c0 ≈ 1.05. See §6.3.
+>   *(2026-06-21: the glow `.psh` question is RESOLVED — see the C5 note below and §6.4.)*
 >   *capture/debugger-pending* for the matrix major-order /
 >   up-axis, any on-screen colour verdict, and the front-end blend final confirmation (§4.2, CYCLE 11
 >   DOWNGRADED to DEBUGGER-PENDING — see §4.2 CYCLE 11 re-open note); in-game HUD per-quad
@@ -36,7 +41,7 @@
 >   DEBUGGER-PENDING as noted above.)* CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME
 >   (D3DXCreateRenderToSurface 4 sites / 2 systems / none-for-water); 1 corrected (offscreen-enable
 >   flag stored at >=2 sites in the device-creation context — see §6.1).
-> - **ida_reverified:** 2026-06-27 (CYCLE 14 re-anchor, f61f66a9): 1 fact re-confirmed SAME (D3DXCreateRenderToSurface 4 call sites in 2 systems; none for water); 1 corrected (offscreen-enable flag stored at >=2 sites, not exactly 1 — see §6.1 CYCLE 14 note and `formats/shaders.md §C5.6b`). Prior: 2026-06-24 *(CYCLE 12 audit (263bd994): world projection confirmed RH (D3DXMatrixPerspectiveOffCenterRH); UI ortho confirmed LH (D3DXMatrixOrthoOffCenterLH/OrthoLH) — RH/LH split per pass is a static fact; DisplayConfig_ParseFramerate identified as the display.lua loader (confirms §6.3/§9.4 shared display-config apply-path provenance). Prior: CYCLE 11 (2026-06-22, 263bd994): brightness = composite PS constants (NOT a gamma ramp), defaults 1.0 (the 0.5 was an FP-stack artifact); DISPLAY_LIGHT_RATIO confirmed parsed-but-dead; 9-state character tint apply-site pinned; UI/particle stride 24 (UI via D3DX sprite helper); §4.2 FRONT-END one/one additive verdict DOWNGRADED to debugger-pending (sprite Begin may override it) — in-game HUD per-quad opt-in unaffected. IDB SHA 263bd994)*
+> - **ida_reverified:** 2026-06-27 (CYCLE 14 re-anchor, f61f66a9): 1 fact re-confirmed SAME (D3DXCreateRenderToSurface 4 call sites in 2 systems; none for water); 1 corrected (offscreen-enable flag stored at >=2 sites, not exactly 1 — see §6.1 CYCLE 14 note and `formats/shaders.md §C5.6b`). Prior: 2026-06-24 *(CYCLE 12 audit (263bd994): world projection confirmed RH (D3DXMatrixPerspectiveOffCenterRH); UI ortho confirmed LH (D3DXMatrixOrthoOffCenterLH/OrthoLH) — RH/LH split per pass is a static fact; DisplayConfig_ParseFramerate identified as the display.lua loader (confirms §6.3/§9.4 shared display-config apply-path provenance). Prior: CYCLE 11 (2026-06-22, 263bd994): brightness = composite PS constants (NOT a gamma ramp), constructor defaults 1.0 (corrected 2026-06-30: the ×0.5 is a REAL config-loader scale on BASE_BRIGHT/MULTI, not an FP-stack artifact — live composite c0 = 0.525, c1 = 0.3); DISPLAY_LIGHT_RATIO confirmed parsed-but-dead; 9-state character tint apply-site pinned; UI/particle stride 24 (UI via D3DX sprite helper); §4.2 FRONT-END one/one additive verdict DOWNGRADED to debugger-pending (sprite Begin may override it) — in-game HUD per-quad opt-in unaffected. IDB SHA 263bd994)*
 > - **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > - **readiness:** IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 > - **evidence:** [static-ida, sample-vfs]
@@ -49,9 +54,10 @@
 >   **clear colour 0xFF505050** dark-grey ARGB — §2.0.1 (reaffirmed).
 > - **conflicts:** CYCLE 14 (f61f66a9): (C6) offscreen-enable flag stored at >=2 sites (not exactly 1 as shaders.md §C5.6b previously stated) — corrected in §6.1. Prior: four corrections vs. the prior text, now applied — (C1) Present runs *inside*
 >   the per-iteration device-step, not an "outer frame driver" (§2.1); (C2) the "four scene
->   callbacks" abstraction hides ≥6 real callback slots (§2); (C3) the cel vertex shader receives
->   light/material/luma constants in registers 4..10 (incl. the BT.601 luma weights), **not** a
->   world-view-projection matrix constant (§5.1a); (C4) the frame-rate cap is a configurable
+>   callbacks" abstraction hides ≥6 real callback slots (§2); (C3) **corrected 2026-06-30:** the cel
+>   vertex shader receives light/material/luma constants in registers 4..10 (incl. the BT.601 luma
+>   weights) AND a transposed world×view×projection matrix in registers 0..3 — the earlier "no WVP
+>   constant" reading is retracted (§5.1a); (C4) the frame-rate cap is a configurable
 >   per-scene rate, with 60 being only the device-reset presentation refresh-rate default (§2.0).
 >   **RESOLVED (2026-06-21, binary-won) — `display.lua` vs §6.4 glow chain (C5):** the §6.4 reading
 >   wins. The binary's shader string set is exactly five files (the cel vertex shader, two cel pixel
@@ -87,7 +93,7 @@
 | Render-state cache (18-slot lazy compare-and-apply) | CONFIRMED — re-confirmed 2026-06-21 (the per-state-type render-state objects, one cache slot per state type; blend setter forwards the bare integer to the device blend state; Z-write toggled imperatively). See §4.1. |
 | Per-bucket render-state matrix | CONFIRMED previously (D3DBLEND enum bytes byte-verified; two transparent buckets DO write depth); NOT re-walked this lane — re-confirm pending. See §4.2. |
 | Per-object material/texture binding (cel = skinned actors only, gated on post-process flag) | CONFIRMED. See §5. |
-| Cel shader binding (cel VS gets light/luma constants in regs 4..10, NOT a WVP matrix) | CONFIRMED. See §5.1a. |
+| Cel shader binding (cel VS gets a transposed WVP matrix in regs 0..3 AND light/luma constants in regs 4..10) | CONFIRMED (corrected 2026-06-30). See §5.1a. |
 | Shader set (5 shaders: 2 cel PS + cel VS + composite + editable glow; VFS-first load) | CONFIRMED. See §6 / §6.5. |
 | Per-class vertex stride / FVF | CONFIRMED for world geometry (terrain/building/static/skinned = 32-byte XYZ+N+UV) and FX (24-byte XYZ+DIFFUSE+UV). Particle stride CONFIRMED (CYCLE 11, 24 bytes). UI/HUD CONFIRMED-via-sprite-helper (CYCLE 11, 24 bytes, no client vertex buffer). See §5.2. |
 | Glow/bloom post chain (3 render targets, ordered pass list) | CONFIRMED (load + execution). No bright-pass threshold; single blur pass; present is an opaque copy; composite weights config-driven. See §6. |
@@ -519,22 +525,27 @@ actor binds the cel pair and draws from the stride-32 skinned vertex buffer. **T
 therefore coupled to the post-process feature**: turning post-process off removes the cel shading from
 skinned actors. This matters for Godot fidelity.
 
-> **Correction (C3) — what the cel vertex shader actually receives.** The earlier text said the cel
-> path "builds the composite world-view-projection matrix and uploads it to the cel vertex shader as
-> a single matrix constant (four vec4 registers)". That is **imprecise** and is corrected here:
-> - The toon constant-upload routine sets **vertex-shader constant registers 4 through 10** (seven
->   four-float registers). Register 4 carries a **3-vector light/sky direction** (padded to four
+> **Correction (C3) — RETRACTED 2026-06-30: the cel vertex shader DOES receive a WVP matrix.** An
+> earlier text said the cel path "builds the composite world-view-projection matrix and uploads it to
+> the cel vertex shader as a single matrix constant (four vec4 registers)"; a subsequent note then
+> claimed the opposite — that no WVP constant is uploaded and the transform comes only through
+> `SetTransform`. **The binary contradicts that second claim, and it is retracted here.** What the cel
+> draw actually uploads:
+> - The per-character cel draw multiplies **world × view × projection**, **transposes** the result,
+>   and uploads it to **vertex-shader constant registers 0 through 3** (the four rows of the transposed
+>   WVP matrix). So the cel VS does transform geometry from a hand-uploaded MVP constant.
+> - In addition, the toon constant-upload routine sets **vertex-shader constant registers 4 through 10**
+>   (seven four-float registers). Register 4 carries a **3-vector light/sky direction** (padded to four
 >   floats); registers 5..10 carry **light / material / luma constants**, and among them are the
 >   literal **BT.601 luminance weights ≈ 0.299, 0.587, 0.114** — the weights that key the toon-ramp
 >   lookup (matching the ramp-luma note in `formats/shaders.md`).
-> - These registers are **not** a world-view-projection matrix and **not** a bone palette. The
->   world / view / projection transform is pushed through the device's **`SetTransform`** path (the
->   engine's world-0 / view transform setters), **not** uploaded as a vertex-shader constant in this
->   routine.
+> - Registers 4..10 are **not** a bone palette; the skinning is performed CPU-side before the cel VS runs.
 >
-> For a Godot port this means the cel material's per-frame inputs are the **light direction and the
-> luma weights / material constants**, with the geometry transform supplied the ordinary way — do
-> not model the cel VS as consuming a hand-uploaded MVP matrix.
+> For a Godot port this means the cel material's per-frame inputs are the WVP matrix (regs 0..3) plus
+> the **light direction and the luma weights / material constants** (regs 4..10). Godot supplies the
+> model-view-projection through its own vertex path, so the practical port impact of this correction is
+> **spec accuracy only** — the original cel VS is a normal MVP-transforming vertex shader, not one whose
+> geometry transform is left to `SetTransform`.
 >
 > *Cross-link: `Docs/RE/specs/character_rendering.md §3.1/§4` confirms the per-part programmable
 > draw detail: `SetStreamSource` with stride 32 (step 8 of §3.1), `DrawIndexedPrimitive` with
@@ -651,17 +662,35 @@ see §6.1 `[open-question]` note and `Docs/RE/specs/post_processing.md §4.1`).
 
 **Composite weights c0 / c1 — apply path and defaults (CYCLE 11, binary-won).** In-world scene brightness is applied as **pixel-shader constants in the offscreen composite stage** — there is **no device gamma-ramp call** (no SetGammaRamp / SetDeviceGammaRamp path exists in the binary). The composite pass uploads two scalar pixel-shader constants from code (reads them off the scene/post object and broadcasts each one 4-wide to a register): **a base-brightness multiplier feeds composite pixel-shader constant slot 0 (c0)** and **a glow-brightness multiplier feeds slot 1 (c1)**, both uploaded just before the fullscreen toon/glow composite quad. Stage 0 binds the bright/edge-extract RT, stage 1 binds the bloom RT, and the two scalars weight them. **The upload itself is CONFIRMED.**
 
-**Constructor defaults are 1.0 / 1.0 (CYCLE 11 binary-won).** An earlier reading reported uploaded defaults of **c0 = c1 = 0.5**, derived from an inferred ×0.5 code-side half-scaling applied to 1.0 base multipliers. CYCLE 11 re-walk found this ×0.5 was a **floating-point-stack decompiler artifact, not a real halving** — the constructor seeds both multipliers at **1.0** and there is no code-side ×0.5 divide in the producer site. The correct binary defaults are therefore **c0 = 1.0** (base-brightness) and **c1 = 1.0** (glow-brightness). These are the **two tunable knobs** for the glow — they are **not** hardwired white. The binding is consistent with a `saturate(edge·c0 + bloom·c1)`-style composite. The exact pixel-shader arithmetic lives in the external `.psh` and is documented in `formats/shaders.md` — only the c0 / c1 scalars come from code.
+**Constructor defaults vs. live values — the ×0.5 is REAL (corrected 2026-06-30).** The **constructor**
+seeds both composite multipliers at **1.0** (c0 = 1.0 base-brightness, c1 = 1.0 glow-brightness); those
+1.0 values are the defaults used **only when a config key is absent**. An earlier CYCLE-11 note went
+further and asserted that the ×0.5 once derived for these scalars was "a floating-point-stack decompiler
+artifact, not a real halving" and that "there is no code-side ×0.5 divide in the producer site." **That
+assertion is wrong and is corrected here.** The `display.lua` config loader multiplies every
+`DISPLAY_CHAR_BRIGHT_MULTI_{R,G,B}` channel **and** `DISPLAY_BASE_BRIGHT_MULTI` by a literal constant
+**exactly equal to 0.5** (a stored IEEE-754 double) before storing them; the `DISPLAY_CHAR_BRIGHT_ADD_*`,
+`DISPLAY_CHAR_BRIGHT_ALPHA`, `DISPLAY_GLOW_BRIGHT_MULTI`, and `DISPLAY_LIGHT_RATIO` keys are stored
+**without** scaling. The cel pixel shader computes `base·toonRamp·2·c0 + c1` and the composite shader
+computes `saturate(scene·2·c0 + glow·c1)`; the loader's ×0.5 deliberately **cancels** each shader's ×2 on
+the base/scene term. So the NET is `tint = base·toonRamp·MULTI + ADD` and
+`composite = saturate(scene·BASE_BRIGHT + glow·GLOW_BRIGHT)`. For the shipped file
+(`DISPLAY_BASE_BRIGHT_MULTI = 1.05`, `DISPLAY_GLOW_BRIGHT_MULTI = 0.3`) the **live** composite constants
+are therefore **c0 = 0.525** (= 1.05 × 0.5) and **c1 = 0.3** (unscaled) — **NOT c0 ≈ 1.05** — and the net
+composite is `saturate(scene·1.05 + glow·0.3)`. These remain the **two tunable knobs** for the glow. The
+exact pixel-shader arithmetic lives in the external `.psh` and is documented in `formats/shaders.md`; only
+the c0 / c1 scalars come from code.
 
 > **Config source (SAMPLE-VERIFIED) — `data/script/display.lua` glow brightness.** The shipped
 > `data/script/display.lua` sets `DISPLAY_GLOW_BRIGHT_MULTI = 0.3` and `DISPLAY_BASE_BRIGHT_MULTI =
 > 1.05` (SAMPLE-VERIFIED values; the world-geometry `DISPLAY_BASE_BRIGHT_MULTI` is owned by
 > `environment.md §9`). `DISPLAY_GLOW_BRIGHT_MULTI = 0.3` is the **glow/bloom post-pass multiplier**
-> — intentionally dim (30%). This is the live glow-brightness that feeds c1 at runtime. With the CYCLE
-> 11 binary-won defaults of 1.0 / 1.0, the shipped config values (base ≈ 1.05, glow 0.3) are read
-> verbatim from the VFS file and overwrite the defaults — so the live uploaded values are approximately
-> `c0 = 1.05` and `c1 = 0.3` (capture/config-sourced). The producer site that writes c0/c1 onto the
-> scene object from the display config is **IDA-pending** (§6.4 / C5). `// spec: Docs/RE/specs/rendering.md §6.3`
+> — intentionally dim (30%), and it is stored **unscaled**, feeding c1 = 0.3 at runtime.
+> `DISPLAY_BASE_BRIGHT_MULTI = 1.05` is read but the config loader multiplies it by the literal **0.5**
+> before storing (corrected 2026-06-30 — see the paragraph above), so the **live** base-brightness c0 is
+> **0.525** (= 1.05 × 0.5), **not** ≈ 1.05. The producer site is the `display.lua` config loader (the
+> `DisplayConfig_ParseFramerate` shared display-config apply-path — §6.6), which applies the ×0.5 to the
+> MULTI / BASE_BRIGHT channels; this is **no longer IDA-pending**. `// spec: Docs/RE/specs/rendering.md §6.3`
 
 **Present blend (corrects earlier "additive present" wording).** Structurally the present pass blits
 the composited TEX0 to the backbuffer as a straight **opaque copy** — **source = ONE, destination =
@@ -745,7 +774,7 @@ shaders and loads the toon-ramp LUT:
 
 | Shader | Role |
 |--------|------|
-| Cel **vertex** shader | Skinned-actor toon vertex shader; receives the light/luma constants of §5.1a (regs 4..10). |
+| Cel **vertex** shader | Skinned-actor toon vertex shader; transforms geometry from a transposed WVP matrix in regs 0..3 and receives the light/luma constants of §5.1a (regs 4..10). |
 | Cel **pixel** shader **#1** | Primary toon-shading pixel shader. |
 | Cel **pixel** shader **#2** | A **second** toon-shading pixel shader (a variant) — uploaded to its own handle slot alongside #1. |
 | Composite **pixel** shader | The glow/composite shader bound in pass 4 (the `finaldx8` composite — see `formats/shaders.md`). |
@@ -826,7 +855,7 @@ own cel slot (see §6.1 / `formats/shaders.md`).
 > selected, hit, poisoned, etc.). This is a distinct render feature from the world-geometry and
 > glow brightness scalars; it is **not yet reproduced in the Godot port**.
 >
-> **Apply mechanism (CYCLE 11: apply site + state→tint mapping confirmed).** The per-actor tint is applied at the skinned-actor cel draw as **two pixel-shader constants — a multiply colour in slot 0 (alpha 1) and an add colour in slot 1 (with alpha)** — giving `out = multiply·in + add`. The active tint is selected by a per-actor state field decoded one-hot to an ordinal 0..8 (nine states: default / choice / hit / alpha / hidden / poison / type / anger / auto) indexing the nine-entry tint table (4-byte stride). (CYCLE 11: apply site + state→tint mapping confirmed; the nine tint VALUES were already sample-verified.)
+> **Apply mechanism (CYCLE 11: apply site + state→tint mapping confirmed; alpha / forced-w pinned 2026-06-30).** The per-actor tint is applied at the skinned-actor cel draw as **two pixel-shader constants — register c0 = the per-state MULTI rgb with its w forced to a literal 1.0, and register c1 = the per-state ADD rgb with its w = the per-state ALPHA** — giving `out.rgb = MULTI·in + ADD`. The output **alpha** depends on the bound cel pixel shader: the **normal** cel shader takes output alpha from the lit value, while the **stealth / concealment** variant takes output alpha from **c1.w** (the per-state ALPHA). The active tint is selected by a per-actor state field decoded one-hot to an ordinal 0..8 (nine states: default / choice / hit / alpha / hidden / poison / type / anger / auto) indexing the nine-entry tint table (4-byte stride). Note that the loader stores each per-state MULTI channel pre-multiplied by ×0.5 (a stored IEEE-754 double); the cel shader's ×2 on the base term cancels it, so the **net** per-channel gain equals the file MULTI value shown in the table below (the ADD and ALPHA channels are stored unscaled — see §6.3). (CYCLE 11: apply site + state→tint mapping confirmed; the nine tint VALUES were already sample-verified.)
 
 Each of the 9 states defines a per-channel multiply (`MULTI_R/G/B`), a per-channel add
 (`ADD_R/G/B`), and an `ALPHA`. The applied formula is per-channel `y = MULTI · x + ADD`, where `x` is
@@ -877,9 +906,11 @@ Notes:
   glow multiplier, whereas §6.4 reads the binary as a single-tap `power1dx8` with `power2`/`power4`
   absent and a composite scalar default of 0.5. The resumed IDA pass must settle (a) which `.psh` the
   loader actually opens at POWER=2; (b) whether `power2dx8.psh` is VFS-loaded vs. hardcoded; (c)
-  whether the single-blur-pass structure holds with it bound; (d) whether the ×0.5 code-side multiply
-  is applied to the config values (0.3 / 1.05) or only to the binary defaults. Values SAMPLE-VERIFIED;
-  apply-path / reconciliation IDA-PENDING. See §6.3 / §6.4 / §6.6.
+  whether the single-blur-pass structure holds with it bound; (d) **RESOLVED 2026-06-30** — the ×0.5
+  config-loader multiply is applied to `DISPLAY_BASE_BRIGHT_MULTI` (and every `DISPLAY_CHAR_BRIGHT_MULTI_*`
+  channel), **not** to `DISPLAY_GLOW_BRIGHT_MULTI`; so live c0 = 1.05 × 0.5 = 0.525 and c1 = 0.3 (unscaled),
+  and the net composite is `saturate(scene·1.05 + glow·0.3)` — see §6.3. Remaining items (a)–(c)
+  SAMPLE-VERIFIED; apply-path / reconciliation IDA-PENDING. See §6.3 / §6.4 / §6.6.
 - **`display.lua` glow-value apply-paths (IDA-PENDING).** `DISPLAY_GLOW_BRIGHT_MULTI = 0.3`,
   `DISPLAY_GLOW_RANGE_X/Y = 1`, `DISPLAY_FRAMERATE = 0` — values SAMPLE-VERIFIED; the exact
   render-pipeline field / D3D state each maps into is not yet recovered (the dirty IDA lane crashed
@@ -887,10 +918,12 @@ Notes:
 - **`DISPLAY_CHAR_BRIGHT_*` per-state character tint apply-path (CYCLE 11 CONFIRMED — NOT-YET-PORTED).** The 9-state tint/alpha values (§6.7) are SAMPLE-VERIFIED; the apply-site and state→tint mapping are now CONFIRMED (CYCLE 11): two pixel-shader constants at the skinned-actor cel draw (multiply slot 0, add slot 1), state decoded one-hot to ordinal 0..8 indexing the nine-entry table (4-byte stride). This remains a **recovered-but-unported** character render feature. See §6.7.
 - **Live display-config values** — the actual shipped glow-range divisors, base/glow brightness
   multipliers, and the power-shader override are now SAMPLE-VERIFIED from `data/script/display.lua`
-  (§6.6); the binary defines the defaults (2,2 / 1.0 / `power1dx8`). Note: the ×0.5 code-side scaling
-  previously inferred is RETRACTED (CYCLE 11: FP-stack artifact — binary defaults are 1.0 / 1.0 with
-  no halving). The reconciliation between the shipped config and the binary defaults is IDA-PENDING
-  (§6.4).
+  (§6.6); the binary defines the **constructor** defaults (2,2 / 1.0 / `power1dx8`), used only when a
+  key is absent. **Corrected 2026-06-30:** the ×0.5 config-loader scaling is REAL (it was wrongly
+  retracted as an FP-stack artifact in CYCLE 11) — the loader multiplies `DISPLAY_BASE_BRIGHT_MULTI` and
+  every `DISPLAY_CHAR_BRIGHT_MULTI_*` channel by 0.5 before storing, cancelling the cel/composite shaders'
+  ×2, so the **live** composite scalars are c0 = 0.525 and c1 = 0.3 (net `saturate(scene·1.05 + glow·0.3)`).
+  See §6.3 / §6.7.
 - **Internal per-primitive logic of the opaque sub-draws** (terrain / buildings / objects / actors)
   — their role and order in the opaque bucket is confirmed; their internal logic was out of scope.
 - **Whether terrain actually populates the NORMAL field** — the world geometry format declares a
@@ -903,9 +936,10 @@ Notes:
   by `Docs/RE/specs/post_processing.md §8.1` (wave-5 walk of `Renderer_DrawScene_OffscreenRT_0`).
   SrcBlend = D3DBLEND_ONE (value 2), DestBlend = D3DBLEND_ZERO (value 1) — opaque copy of TEX0 to
   backbuffer. See §6.3.
-- **Composite c0 / c1 producer site (§6.3)** — the upload is confirmed, but the site that *writes* the
-  two scalars onto the scene/post object (and thus the ×0.5 half-scaling and the 1.0 defaults) was not
-  opened; the values are read pre-computed. STATIC-HYPOTHESIS.
+- **Composite c0 / c1 producer site (§6.3)** — RESOLVED (2026-06-30): the producer is the `display.lua`
+  config loader, which applies a literal ×0.5 to `DISPLAY_BASE_BRIGHT_MULTI` (and the per-state MULTI
+  channels) before writing the scalars onto the scene/post object, leaving `DISPLAY_GLOW_BRIGHT_MULTI`
+  unscaled. Live c0 = 0.525, c1 = 0.3; the constructor defaults 1.0 / 1.0 apply only when a key is absent.
 - **Per-scene frame-rate default (the +48 / +0x30 rate field, §2.0)** — the field is seeded 60 in the
   engine constructor and unoverwritten on the static paths read, but the per-window scene constructors
   (login / loading / opening / character-select / world) were not traced to confirm none of them
@@ -924,8 +958,11 @@ Notes:
   stand in: set the glow **HDR threshold ≈ 0** (there is no bright cutoff in the original), use
   **one** effective blur level (a single half-res blur — do not stack a multi-level Gaussian
   pyramid), and treat the glow base/intensity knobs as the two composite scalars (base-bright c0 and
-  glow-bright c1, binary defaults **1.0 / 1.0** — CYCLE 11 binary-won; the earlier "0.5 each" was a
-  decompiler artifact; shipped config values are base ≈ 1.05, glow 0.3 — SAMPLE-VERIFIED). The additive "glow add" happens inside the composite
+  glow-bright c1, **constructor** defaults **1.0 / 1.0** used only when a config key is absent — corrected
+  2026-06-30: the ×0.5 is a REAL config-loader scale on the MULTI / BASE_BRIGHT channels, not a decompiler
+  artifact, so with the shipped config the **live** scalars are c0 = 0.525 (= base 1.05 × 0.5) and c1 = 0.3,
+  and the net composite is `saturate(scene·1.05 + glow·0.3)`; for a Godot Glow set base ≈ 1.05 and glow ≈ 0.3
+  (the file values directly, since Godot has no ×2-in-shader to cancel)). The additive "glow add" happens inside the composite
   before present, so use the additive glow blend for the contribution but do **not** double-add at
   present. The cel/toon look needs the toon ramp material from `formats/shaders.md`.
   > **Shipped display-config (SAMPLE-VERIFIED, §6.6):** the real `data/script/display.lua` sets glow
@@ -952,9 +989,11 @@ Notes:
   the blend modes wrong changes the look even with the same textures.
 - The skinned character feeds the cel shader through the stride-32 layout (§5.2); pair this spec with
   `formats/shaders.md` and `specs/skinning.md`. Feed the cel material the **light direction + the
-  BT.601 luma weights / material constants** (the cel VS's regs 4..10, §5.1a) — **not** a
-  hand-uploaded model-view-projection matrix; the geometry transform comes through the normal vertex
-  transform path.
+  BT.601 luma weights / material constants** (the cel VS's regs 4..10, §5.1a). Note (corrected
+  2026-06-30): in the original the cel VS **does** also receive a transposed world×view×projection
+  matrix in regs 0..3 and transforms geometry from it; Godot supplies the model-view-projection through
+  its own vertex path, so you do not hand-upload it — the impact of this correction is spec accuracy,
+  not port behaviour.
 - **Frame structure (cross-link `game_loop.md`).** Each scene/state drives its own run loop; the
   scene draw, the `Present`, and the device-lost recovery are one device-step routine (§2.0), not a
   separate present driver. Run at the **configurable per-scene rate** (the field seeded 60 and never

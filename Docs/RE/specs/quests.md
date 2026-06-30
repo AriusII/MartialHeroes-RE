@@ -906,8 +906,8 @@ give-up gate reads — full table in `structs/quest_record.md §4`):
 | +4936 (0x1348) | prerequisite-chain reference (u32, compared against a global prereq state). | CONFIRMED |
 | +4944 (0x1350) | **min level** (u16) — compared against the character-level word (the accept-gate "26" word, §4.3). | CONFIRMED |
 | +4946 (0x1352) | **max level** (u16). | CONFIRMED |
-| +4948 (0x1354) | per-index accepted/availability flag (indexed by an active-quest index). | CONFIRMED |
-| +4953 (0x1359) | class/race match byte. | CONFIRMED |
+| +4948 (0x1354) | per-index accepted/availability flag (indexed by the **character class index**; recovered 2026-06-30). | CONFIRMED |
+| +4953 (0x1359) | class/stance gate byte — **equality** compare against the player stance/job-type state, not a bitmask (recovered 2026-06-30). | CONFIRMED |
 | +4954 (0x135A) | secondary-stat minimum. | CONFIRMED |
 | +4955 (0x135B) | secondary-stat maximum. | CONFIRMED |
 | +4956 (0x135C) | tertiary-stat bound. | CONFIRMED |
@@ -956,9 +956,15 @@ notice message id by the field's small-integer value:
 | Prerequisite chain | `prereq_chain_id` (+0x1348, u32) | chapter-progress compare | 18019 | CONFIRMED |
 | Same quest id already active | `quest_id` (+0x000) scan | — | 18071 | CONFIRMED |
 
-> `class_race_mask` taking values 1 / 2 / 4 (powers of two) means it is a **bitmask** — a quest can
-> be open to several classes at once. These notice ids are localized CP949 message codes, not
-> opcodes and not wire enum values.
+> These notice ids are localized CP949 message codes, not opcodes and not wire enum values.
+>
+> **Recovered 2026-06-30 (anchor f61f66a9) — `class_race_mask` is not a bitmask.** The *notice
+> renderer* selects among ids 18010 / 18011 / 18012 by the field's small-integer value (1 / 2 / 4),
+> but the *eligibility evaluator* applies a single **equality** test (`field != 0 && field !=
+> stance/job-type state`) — there is no bitwise-AND. So 1 / 2 / 4 are distinct stance/job-type enum
+> values, not OR-able mask bits; a record carries exactly one such value and is open to exactly one
+> stance/job type (or 0 = open to all). See `structs/quest_record.md §4`–§5.1 for the recovered
+> evaluator semantics (zero-disables-gate, comparand state, 6-entry active tables, prereq polarity).
 
 ---
 

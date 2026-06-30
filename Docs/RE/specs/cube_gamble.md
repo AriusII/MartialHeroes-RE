@@ -241,6 +241,64 @@ pair `(d5a+1, d5b+1)` in either order. Indicator slot `a5` is set to the first m
 conditions, and the 6-entry special-combination table. This evaluator controls only which board
 indicators glow; it does NOT determine the money outcome — that is `delta` in §2.3(a).)*
 
+#### (c) Independent re-recovery of the deterministic evaluation rule (recovered 2026-06-30)
+
+The phase-5 settlement evaluator was re-walked end-to-end and the rule below is confirmed
+deterministic — no live/server value participates in the local evaluation; only the two
+already-received inputs (the `0x10` settled-money u64 and the four reel-dice bytes) drive it.
+
+**Money outcome (authoritative, §2.3(a)) — exact rule.** Let `delta = newMoney − oldMoney` as a
+signed 64-bit difference, where `newMoney` is the `0x10` u64 and `oldMoney` is the local player's
+prior money baseline (a 64-bit currency global, the same value later overwritten with `newMoney`
+by the shared set-money routine). The branch is taken purely on the sign of `delta`: the
+non-negative test inspects the difference's high-dword sign bit, and a separate non-zero test
+splits zero from positive. `delta > 0` → WIN; `delta < 0` → LOSS; `delta == 0` → PUSH. The label
+alignment code passed to the result line is `0` for WIN, `1` for LOSS, `2` for PUSH. The stakes
+line (msg 58018) is formatted from the spin stake field; the delta line (msg 58017) is formatted
+from `delta` itself (signed). Only on WIN, and only when `newMoney ≠ oldMoney`, are the win sound
+and win-banner raise issued. The daily-play counter is incremented iff the spin stake field was
+`> 0`. *(Re-recovered 2026-06-30; matches §2.3(a).)*
+
+**Dice convention.** Each wire die byte is `0..9`; the evaluator adds `+1` to every die before
+use, so all comparisons run on 1-based face values `1..10`. `pairA = (d5a+1)+(d5b+1)` and
+`pairB = (d4a+1)+(d4b+1)`.
+
+**Special-combination table — exact stored values (recovered 2026-06-30).** The 6-entry table is
+two parallel 3-row groups of 1-based face-value byte pairs. Stored values, scanned slot `0 → 2`,
+first match wins; the phase-5 face pair `(d5a+1, d5b+1)` is tested against each row in **either
+order**:
+
+| Indicator slot `a5` | Group 1 face pair | Group 2 face pair |
+|--------------------:|-------------------|-------------------|
+| 0 | (1, 2) | (5, 6) |
+| 1 | (2, 3) | (4, 5) |
+| 2 | (1, 4) | (3, 6) |
+
+The table is plain face-value data (no addresses cited); the values above are the literal stored
+bytes. *(Confirms the §2.3(b) table.)*
+
+**Panel indicator-offset map (recovered 2026-06-30).** Each win line lights one GU sub-component
+held in the panel struct; offsets are struct-relative to the panel object and are given for the
+porter so the indicator set can be modelled as a fixed array:
+
+| Win line | Panel-relative indicator slot |
+|----------|-------------------------------|
+| Equal phase-5 faces (`d5a==d5b`) doubles indicator | `+320 + 4·(d5a+1)` (indexed by face value) |
+| Special combo (slot `a5`) | `+348 + 4·a5`, `a5 ∈ {0,1,2}` |
+| Phase-5 both-odd | `+360` |
+| Phase-5 both-even | `+364` |
+| Phase-5 low (`pairA < 7`) | `+368` |
+| Phase-5 high (`pairA > 7`) | `+372` |
+| Phase-5 seven (`pairA == 7`) | `+376` |
+| Pair-sum high (`pairA > pairB`) | `+920` |
+| Pair-sum low (`pairA < pairB`) | `+924` |
+| Pair-sum tie (`pairA == pairB`) | `+928` |
+| All-four-equal jackpot (`d5a==d5b==d4a==d4b`) | `+932` |
+
+The both-odd / both-even line fires only when `(d5a+1)` and `(d5b+1)` share parity; the
+all-four-equal line fires only when all four 1-based faces are equal. *(Re-recovered 2026-06-30;
+no live value is consulted — the evaluator is fully deterministic on the received dice.)*
+
 ---
 
 ## 3. `CmsgCubeGambleSubmit` — C2S `2/141` (76-byte body)
