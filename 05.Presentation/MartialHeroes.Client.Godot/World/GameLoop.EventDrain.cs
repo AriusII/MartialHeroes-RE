@@ -325,6 +325,14 @@ public sealed partial class GameLoop
                 _hudHub?.PublishDeliveryRecord(deliveryRecord);
                 break;
 
+            case TradeSlotUpdatedEvent tradeSlot:
+                _hudHub?.PublishTradeSlot(tradeSlot);
+                break;
+
+            case TradeSessionPhaseEvent tradeSession:
+                _hudHub?.PublishTradeSession(tradeSession);
+                break;
+
             case ChatBroadcastEvent:
                 break;
 

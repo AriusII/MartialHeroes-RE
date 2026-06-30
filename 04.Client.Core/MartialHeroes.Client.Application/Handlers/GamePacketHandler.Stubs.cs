@@ -1,3 +1,4 @@
+using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Network.Protocol.Packets;
 using MartialHeroes.Network.Protocol.Packets.Login.Packets;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
@@ -37,10 +38,30 @@ public sealed partial class GamePacketHandler
 
     public void Handle(in SmsgUserTradeSlotUpdate packet)
     {
+        const byte applyResult = 1;
+        const byte moneyCategory = 0xFF;
+        var localId = _world.LocalActorKey?.RawId ?? 0u;
+
+        _eventBus.Publish(new TradeSlotUpdatedEvent(
+            packet.Result == applyResult,
+            packet.OwnerId == localId,
+            packet.Category == moneyCategory,
+            packet.Category,
+            packet.SlotIndex,
+            packet.ItemId,
+            packet.OwnerId));
     }
 
     public void Handle(in SmsgUserTradeFullResponse packet)
     {
+        var localId = _world.LocalActorKey?.RawId ?? 0u;
+
+        _eventBus.Publish(new TradeSessionPhaseEvent(
+            packet.Phase,
+            packet.OwnerId == localId,
+            packet.Coin,
+            packet.OwnerId,
+            (int)packet.Count));
     }
 
     public void Handle(in SmsgMotionWeaponFxSwap packet)

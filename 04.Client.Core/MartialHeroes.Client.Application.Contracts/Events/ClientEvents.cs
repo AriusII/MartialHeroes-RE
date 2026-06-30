@@ -477,3 +477,19 @@ public sealed record DeliveryRecordUpdatedEvent(
     string Sender,
     long Money,
     int EntryKey) : IClientEvent;
+
+public sealed record TradeSlotUpdatedEvent(
+    bool Apply,
+    bool IsLocalSide,
+    bool IsMoneySlot,
+    byte Category,
+    byte SlotIndex,
+    uint ItemId,
+    uint OwnerId) : IClientEvent;
+
+public sealed record TradeSessionPhaseEvent(
+    byte Phase,
+    bool IsLocalSide,
+    long Coin,
+    uint OwnerId,
+    int RecordCount) : IClientEvent;

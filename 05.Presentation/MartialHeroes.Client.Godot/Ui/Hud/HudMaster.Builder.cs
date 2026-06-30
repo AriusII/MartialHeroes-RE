@@ -177,6 +177,7 @@ public sealed partial class HudMaster
         _skillHotbar?.BindHub(hub);
         _mailWindow?.BindHub(hub);
         _deliveryWindow?.BindHub(hub);
+        _tradeWindow?.BindHub(hub);
 
         GD.Print(
             "[HudMaster] BindHub: QuestWindow now bound (QuestLog/QuestCompleted channels exist on IHudEventHub). "

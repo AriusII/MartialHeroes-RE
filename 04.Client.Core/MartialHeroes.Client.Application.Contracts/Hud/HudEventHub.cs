@@ -31,6 +31,12 @@ public sealed class HudEventHub : IHudEventHub
     private readonly Channel<SkillHotbarSlotSetEvent> _skillHotbarSlots =
         CreateBounded<SkillHotbarSlotSetEvent>(AppendCapacity);
 
+    private readonly Channel<TradeSlotUpdatedEvent> _tradeSlots =
+        CreateBounded<TradeSlotUpdatedEvent>(AppendCapacity);
+
+    private readonly Channel<TradeSessionPhaseEvent> _tradeSessions =
+        CreateBounded<TradeSessionPhaseEvent>(AppendCapacity);
+
     private readonly Channel<StatAllocationView> _statAllocations =
         CreateBounded<StatAllocationView>(LatestWinsCapacity);
 
@@ -109,6 +115,22 @@ public sealed class HudEventHub : IHudEventHub
 
     public ChannelReader<SkillHotbarSlotSetEvent> SkillHotbarSlots => _skillHotbarSlots.Reader;
 
+    public ChannelReader<TradeSlotUpdatedEvent> TradeSlots => _tradeSlots.Reader;
+
+    public ChannelReader<TradeSessionPhaseEvent> TradeSessions => _tradeSessions.Reader;
+
+    public bool PublishTradeSlot(TradeSlotUpdatedEvent slot)
+    {
+        ArgumentNullException.ThrowIfNull(slot);
+        return _tradeSlots.Writer.TryWrite(slot);
+    }
+
+    public bool PublishTradeSession(TradeSessionPhaseEvent session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        return _tradeSessions.Writer.TryWrite(session);
+    }
+
     public bool PublishMailLetter(MailLetterArrivedEvent letter)
     {
         ArgumentNullException.ThrowIfNull(letter);
@@ -162,6 +184,8 @@ public sealed class HudEventHub : IHudEventHub
         _mailLetters.Writer.TryComplete();
         _deliveryRecords.Writer.TryComplete();
         _skillHotbarSlots.Writer.TryComplete();
+        _tradeSlots.Writer.TryComplete();
+        _tradeSessions.Writer.TryComplete();
     }
 
     public bool PublishTargetChanged(TargetChangedEvent target)

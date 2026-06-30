@@ -35,6 +35,10 @@ public interface IHudEventHub
 
     ChannelReader<SkillHotbarSlotSetEvent> SkillHotbarSlots { get; }
 
+    ChannelReader<TradeSlotUpdatedEvent> TradeSlots { get; }
+
+    ChannelReader<TradeSessionPhaseEvent> TradeSessions { get; }
+
     bool PublishChatLine(ChatLineEvent line);
 
     bool PublishBuffState(BuffStateEvent buffs);
@@ -62,6 +66,10 @@ public interface IHudEventHub
     bool PublishDeliveryRecord(DeliveryRecordUpdatedEvent record);
 
     bool PublishSkillHotbarSlot(SkillHotbarSlotSetEvent slot);
+
+    bool PublishTradeSlot(TradeSlotUpdatedEvent slot);
+
+    bool PublishTradeSession(TradeSessionPhaseEvent session);
 
     void Complete();
 }
