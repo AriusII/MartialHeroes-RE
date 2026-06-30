@@ -14,11 +14,11 @@ public readonly struct SmsgQuestComplete
 
     public readonly HeadBuffer Head;
 
-    public readonly uint Gate;
+    public readonly uint Apply;
 
-    public readonly byte Subtype;
+    public readonly byte RewardState;
 
-    public readonly BodyBuffer Body;
+    public readonly BodyRemainderBuffer BodyRemainder;
 
     [InlineArray(8)]
     public struct HeadBuffer
@@ -27,7 +27,7 @@ public readonly struct SmsgQuestComplete
     }
 
     [InlineArray(331)]
-    public struct BodyBuffer
+    public struct BodyRemainderBuffer
     {
         private byte _element0;
     }

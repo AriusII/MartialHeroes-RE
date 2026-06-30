@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -42,7 +43,7 @@ public sealed partial class HudMailWindow : Control
     private const int Msg55003 = 55003;
     private LineEdit? _bodyBox;
 
-
+    private ClientContext? _ctx;
     private bool _open;
     private Control? _readPanel;
     private bool _readPanelVisible;
@@ -52,8 +53,9 @@ public sealed partial class HudMailWindow : Control
     private bool _sendPanelVisible;
 
 
-    public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
+    public void Build(HudAtlasLibrary atlas, HudTextLibrary text, ClientContext ctx)
     {
+        _ctx = ctx;
         Name = "HudMailWindow";
 
         AnchorLeft = 0f;
@@ -356,21 +358,18 @@ public sealed partial class HudMailWindow : Control
 
         if (string.IsNullOrWhiteSpace(recipient))
         {
-            GD.PrintErr($"[HudMailWindow] Send failed: empty recipient. " +
-                        $"msg.xdb {Msg52001}. spec: §8.21.3 CODE-CONFIRMED.");
+            GD.PrintErr($"[HudMailWindow] Send: empty recipient (msg.xdb {Msg52001}).");
             return;
         }
 
         if (string.IsNullOrWhiteSpace(body))
         {
-            GD.PrintErr($"[HudMailWindow] Send failed: empty body. " +
-                        $"msg.xdb {Msg52002}. spec: §8.21.3 CODE-CONFIRMED.");
+            GD.PrintErr($"[HudMailWindow] Send: empty body (msg.xdb {Msg52002}).");
             return;
         }
 
-        GD.Print($"[HudMailWindow] Mail send intent: to='{recipient}', body={body.Length}B. " +
-                 $"Postage={PostageCost}. TODO(world-campaign): C2S 2/70 CmsgCarrierPigeonSend. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.21.3 CODE-CONFIRMED.");
+        if (_ctx is not null)
+            _ = _ctx.UseCases.SendMailAsync(recipient, body);
     }
 
     private void OnAttachItem()

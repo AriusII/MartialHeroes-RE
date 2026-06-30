@@ -12,22 +12,14 @@ public readonly struct SmsgPartyRosterEvent
 
     public const int WireSize = 12;
 
-    public readonly Pad0Buffer Pad0;
-
     public readonly byte Event;
 
     public readonly byte MemberSlot;
 
-    public readonly Pad1Buffer Pad1;
+    public readonly TrailingPadBuffer TrailingPad;
 
-    [InlineArray(8)]
-    public struct Pad0Buffer
-    {
-        private byte _element0;
-    }
-
-    [InlineArray(2)]
-    public struct Pad1Buffer
+    [InlineArray(10)]
+    public struct TrailingPadBuffer
     {
         private byte _element0;
     }

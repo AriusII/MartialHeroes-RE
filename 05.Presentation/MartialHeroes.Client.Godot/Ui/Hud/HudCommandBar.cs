@@ -247,8 +247,7 @@ public sealed partial class HudCommandBar : Control
 
             case 4006:
             case 4008:
-                GD.Print($"[HudCommandBar] action {actionId} → RelationPanel slot 193 — TODO(world-campaign). " +
-                         "spec: Docs/RE/specs/ui_system.md §8.23.3 CODE-CONFIRMED.");
+                _onRelation?.Invoke();
                 break;
 
             case 4007:

@@ -48,16 +48,16 @@ public sealed partial class HudMaster
         _optionsWindow.Build(atlas, text);
 
         _partyWindow = AddPanel<HudPartyWindow>();
-        _partyWindow.Build(atlas, text);
+        _partyWindow.Build(atlas, text, ctx);
 
         _tradeWindow = AddPanel<HudTradeWindow>();
         _tradeWindow.Build(atlas, text);
 
         _friendWindow = AddPanel<HudFriendWindow>();
-        _friendWindow.Build(atlas, text);
+        _friendWindow.Build(atlas, text, ctx);
 
         _guildWindow = AddPanel<HudGuildWindow>();
-        _guildWindow.Build(atlas, text);
+        _guildWindow.Build(atlas, text, ctx);
 
         _questWindow = AddPanel<HudQuestWindow>();
         _questWindow.Build(atlas, text);
@@ -73,13 +73,13 @@ public sealed partial class HudMaster
         _emoticonWindow.Build(atlas, ctx);
 
         _tenderWindow = AddPanel<HudTenderWindow>();
-        _tenderWindow.Build(atlas, text);
+        _tenderWindow.Build(atlas, text, ctx);
 
         _mailWindow = AddPanel<HudMailWindow>();
-        _mailWindow.Build(atlas, text);
+        _mailWindow.Build(atlas, text, ctx);
 
         _deliveryWindow = AddPanel<HudDeliveryWindow>();
-        _deliveryWindow.Build(atlas, text);
+        _deliveryWindow.Build(atlas, text, ctx);
 
 
         _commandBar = AddPanel<HudCommandBar>();
@@ -103,10 +103,12 @@ public sealed partial class HudMaster
 
         _announcePanel = AddPanel<HudAnnouncePanel>();
         _announcePanel.Build();
+        _announcePanel.SetTextLibrary(text);
 
         _errorPanel = AddPanel<HudErrorPanel>();
         _errorPanel.Build();
         _errorPanel.SetAnnounceDelegate(_announcePanel);
+        _errorPanel.SetTextLibrary(text);
 
         _petPanel = AddPanel<HudPetPanel>();
         _petPanel.Build(atlas, text);
@@ -132,7 +134,7 @@ public sealed partial class HudMaster
         _guildWarInfoWindow.Build(atlas);
 
         _relationPanel = AddPanel<HudRelationPanel>();
-        _relationPanel.Build(atlas, text);
+        _relationPanel.Build(atlas, text, ctx);
 
         GD.Print("[HudMaster] Build complete — ~34 panels total " +
                  "(1 PlayerStatus/slot15 + 10 core + 6 Wave-1 E + 6 Wave-2 E + 6 Wave-3 E + 6 Wave-4 E, + HelpOverlay member). " +
@@ -170,14 +172,17 @@ public sealed partial class HudMaster
         _statsPanel?.BindHub(hub);
         _targetFrame?.BindHub(hub);
         _partyWindow?.BindHub(hub);
+        _guildWindow?.BindHub(hub);
 
         GD.Print(
-            "[HudMaster] BindHub: ~34 panels connected (1 PlayerStatus/slot15 + 10 core + 6 Wave-1 E + 6 Wave-2 E + 6 Wave-3 E + 6 Wave-4 E). " +
-            "Party hub wired (stub). Wave-3/4 panels have no hub channel yet " +
-            "(TODO world-campaign: global notice sink, 5/53 pair-relation, S2C 4/74/4/81/5/73, relation roster push). " +
-            "spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel slot 35 (binary-won; 'slot 177' REFUTED §1.9.4). " +
-            "spec: Docs/RE/specs/ui_system.md §8.12 — PartyPanel hub stub (TODO world-campaign). " +
-            "spec: Docs/RE/specs/ui_system.md §8.27/§8.28/§8.29/§8.30/§8.31/§8.32 — Wave-4 TODO hubs.");
+            "[HudMaster] BindHub: ~34 panels connected. " +
+            "Guild roster wired (OnGuildRoster/OnGuildMemberPatch/OnGuildStateChanged → direct dispatch). " +
+            "Global notice sink wired (PopupCodeEvent → OnPopupCode → AnnouncePanel.ShowPopupCode). " +
+            "Deferred: pair-relation (5/53 PairStateUpdatedEvent needs core supplement), " +
+            "guild-diplomacy result (S2C 4/81 layout capture-pending), " +
+            "guild-war-info (S2C 5/73 field layout capture-pending), " +
+            "relation roster (FriendListSlotEvent/RelationPanelSnapshotEvent need IHudEventHub channels + core supplement). " +
+            "spec: Docs/RE/specs/ui_system.md §8.12/§8.15/§8.25/§8.27/§8.28/§8.30/§8.31/§8.32 CODE-CONFIRMED.");
     }
 
 

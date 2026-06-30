@@ -6,6 +6,18 @@
 
 ---
 
+## Re-verification banner (2026-06-30 — CYCLE 15 C15-S21, build f61f66a9)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | CONSUMER-CONFIRMED — `.fx7` header field layout re-anchored on build f61f66a9 (C15-S21). KEY PROMOTED FACTS: (1) Header floats at group-relative +0x04/+0x08/+0x0C are the **per-group translation vec3** (`translate_x/y/z`): the post-parse AABB finalize adds these three floats to every vertex source position to produce the working (rendered) position — resolving the three prior DUAL-SAMPLE unknowns `unknown_1 / unk_dist / unknown_2` in §1.10. (2) The word at +0x10 is NOT part of the translation (the vec3 ends at +0x10 exclusive) and is read-but-not-consumed on all static paths. (3) Group +0x00 re-confirmed as `texture_index` (1-based, clamp-to-1) from the build pass — consistent with §1.1a/§1.4b. (4) VF_32 stride-32 no-colour re-confirmed from the empty element constructor (loader-side proof). (5) §1.4d "two vertex copies" refined: for FX7, the working copy's vertex positions are pre-translated by the header vec3 at load time, not a plain memcpy. (6) §15.3 inferred `origin/extent/type/flags` table corrected to consumer-confirmed layout. Words at group-relative +0x10..+0x24 (six dwords) remain UNVERIFIED on all static paths; marked R-CAP (debugger-pending, non-blocking). |
+| `ida_reverified` | `2026-06-30` |
+| `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
+| `evidence`       | `[static-ida]` — `.fx7` decoder read-sequence, post-parse build pass, and AABB finalize all re-confirmed at build f61f66a9; empty VF_32 element constructor confirms no per-vertex colour. |
+| `conflicts`      | §15.3 group-header table was explicitly labeled INFERRED and is now superseded by consumer-confirmed evidence. §1.10 DUAL-SAMPLE markers at +0x04/+0x08/+0x0C resolved to CONSUMER-CONFIRMED. §1.10 field `group_subtype` at +0x00 renamed to `texture_index`. Known Unknowns item 6 updated. |
+
+---
+
 ## Re-verification banner (2026-06-27 — CYCLE 14 re-anchor, build f61f66a9)
 
 | Attribute        | Value |
@@ -283,11 +295,19 @@ carry per-channel vertical-extent bounds (minimum and maximum Y for each bucket)
 culling.
 
 **Two vertex copies per group.** The loader maintains **two vertex copies** for each group: an
-immutable **source copy** (the on-disk vertex data as read) and a **working copy** that is a
-**load-time duplicate of the source** (populated by `memcpy` at parse time, not re-read from
-disk). The working copy is the per-frame-mutable buffer, mutated at draw time (for water-ripple /
-scroll on the animated fx3/fx5 channels, and potentially other animated overlay effects); the
-source copy is the immutable reset baseline. Implementations must preserve both copies.
+immutable **source copy** (the on-disk vertex data as read) and a **working copy** initially
+populated by `memcpy` at parse time (not re-read from disk). The working copy is the
+per-frame-mutable buffer, mutated at draw time (for water-ripple / scroll on the animated fx3/fx5
+channels, and potentially other animated overlay effects); the source copy is the immutable reset
+baseline. Implementations must preserve both copies.
+
+**Refinement for VF_32 channels (FX6, FX7) — C15, f61f66a9:** For groups in these channels the
+working-copy vertex **positions are NOT a plain duplicate of the source positions**. After the
+initial `memcpy`, the post-parse AABB finalize overwrites each working-copy position with
+`source_position + translate_vec3`, where `translate_vec3` is the per-group header floats at
+group-relative +0x04/+0x08/+0x0C (CONSUMER-CONFIRMED, §1.10). The source copy retains the
+unmodified on-disk mesh-local positions unchanged. Implementations must apply this per-group
+translation offset when building the rendered vertex buffer for FX7 groups.
 
 **Texture index is 1-based into the per-channel register (clamp-to-1).** The group's `texture_index`
 (group `+0x00`) is a **1-based** index into that channel's own texture register (populated from the
@@ -317,7 +337,7 @@ Three on-disk vertex formats are used. The applicable format is determined by th
 
 Notes:
 - RGBA bytes are in order R, G, B, A. Opaque black = `00 00 00 FF`.
-- VF_32 (used by `.fx6` only) omits the per-vertex colour field.
+- VF_32 (used by `.fx6` and `.fx7`) omits the per-vertex colour field. The absence of colour is confirmed by the empty VF_32 element constructor (C15, f61f66a9).
 - UV coordinates may be negative or exceed `[0, 1]`; terrain meshes use tiled textures.
 
 ### 1.3 Index format (all FX layers)
@@ -552,18 +572,18 @@ The group header is a 48-byte block, placing `vertex_count` at group-relative +0
 
 | Offset | Size | Type | Field | Observed values | Confidence |
 |-------:|-----:|------|-------|-----------------|------------|
-| +0x00 | 4 | u32 | `group_subtype` | 1 | DUAL-SAMPLE |
-| +0x04 | 4 | u32 | _unknown_1_ | 2 | DUAL-SAMPLE |
-| +0x08 | 4 | f32 | `unk_dist` | large float (thousands) | DUAL-SAMPLE — a large f32 (candidate world-space coordinate), NOT the FX5 small-integer LOD distance |
-| +0x0C | 4 | f32 | _unknown_2_ | large float | DUAL-SAMPLE — candidate world-space coordinate |
-| +0x10 | 4 | f32 | _unknown_3_ | large float | DUAL-SAMPLE — candidate world-space coordinate |
-| +0x14 | 4 | f32 | `direction_a` | signed near-unit fractional | DUAL-SAMPLE — a horizontal-plane unit-direction component (paired with `direction_b`) |
-| +0x18 | 4 | u32/f32 | _unknown_5_ | 0 | DUAL-SAMPLE (zero) |
-| +0x1C | 4 | f32 | `direction_b` | signed near-unit fractional | DUAL-SAMPLE — second unit-direction component (`direction_a`² + `direction_b`² ≈ 1) |
-| +0x20 | 4 | u32 | _unknown_7_ | 1 | DUAL-SAMPLE |
-| +0x24 | 4 | u32 | _unknown_8_ | 0 | DUAL-SAMPLE |
-| +0x28 | 4 | u32 | `vertex_count` | large | CONFIRMED (zero-residual sample, 2026-06-24) |
-| +0x2C | 4 | u32 | `index_count` | large; divisible by 3 | CONFIRMED (zero-residual sample, 2026-06-24) |
+| +0x00 | 4 | u32 | `texture_index` | 1 (single-texture group) | CONSUMER-CONFIRMED (C15, f61f66a9) — 1-based index into this channel's texture register; build pass guards `< 1 || > count` and clamps to 1 on violation. Consistent with §1.1a/§1.4b. (Prior label `group_subtype` is REVISED.) |
+| +0x04 | 4 | f32 | `translate_x` | near-zero (observed as denormal ≈ 0.0) | CONSUMER-CONFIRMED (C15, f61f66a9) — first component of the per-group translation vec3. The post-parse AABB finalize adds `(translate_x, translate_y, translate_z)` to every source vertex position to produce the working (rendered) vertex position. (Prior label `unknown_1` / observed u32 value `2` is REVISED: that integer reading was a near-zero f32 denormal.) |
+| +0x08 | 4 | f32 | `translate_y` | large float (world-space units) | CONSUMER-CONFIRMED (C15, f61f66a9) — second translation component. Together with +0x04 and +0x0C forms the per-group world-space placement offset added to all source vertices at load. (Prior label `unk_dist` "candidate world-space coordinate" is CONFIRMED and renamed.) |
+| +0x0C | 4 | f32 | `translate_z` | large float (world-space units) | CONSUMER-CONFIRMED (C15, f61f66a9) — third translation component. The vec3 ends at +0x10 exclusive; +0x10 is NOT part of the translation. (Prior label `unknown_2` "candidate world-space coordinate" is CONFIRMED and renamed.) |
+| +0x10 | 4 | u32/f32 | _unconsumed_ | large float (sample obs) | UNVERIFIED — NOT part of the translation vec3. Read into the record but consumed by no static path (decoder, build pass, AABB finalize). R-CAP: breakpoint on a decoded group record to dump +0x10..+0x27. (Prior label `unknown_3` "candidate world-space coordinate" status REVISED — confirmed not translation.) |
+| +0x14 | 4 | f32 | _unconsumed_ | signed near-unit fractional | UNVERIFIED / sample-only — no static loader consumer on any examined path. R-CAP. |
+| +0x18 | 4 | u32/f32 | _unconsumed_ | 0 (sample obs) | UNVERIFIED — read-but-not-consumed. R-CAP. |
+| +0x1C | 4 | f32 | _unconsumed_ | signed near-unit fractional | UNVERIFIED / sample-only — no static loader consumer. R-CAP. |
+| +0x20 | 4 | u32 | _unconsumed_ | 1 (sample obs) | UNVERIFIED — read-but-not-consumed. R-CAP. |
+| +0x24 | 4 | u32 | _unconsumed_ | 0 (sample obs) | UNVERIFIED — read-but-not-consumed. R-CAP. |
+| +0x28 | 4 | u32 | `vertex_count` | large | CONSUMER-CONFIRMED (zero-residual sample 2026-06-24; re-confirmed C15 f61f66a9) |
+| +0x2C | 4 | u32 | `index_count` | large; divisible by 3 | CONSUMER-CONFIRMED (zero-residual sample 2026-06-24; re-confirmed C15 f61f66a9) |
 
 **VertexData (per group):** `vertex_count × 32` bytes (**VF_32** — position 12 B + normal 12 B +
 UV0 8 B; **no per-vertex colour field**). Same VF_32 used by FX6 (§1.2), not FX5's VF_36.
@@ -1170,9 +1190,17 @@ these without further evidence.
    framing as "global metadata prefix" and "per-group trailing block" is REFUTED — these words live
    inside each group's 36-byte header, not in separate file-level or inter-group blocks.
 
-6. **FX7 group-header large floats (`unk_dist` and the two following floats):** PLAUSIBLE from two
-   byte-identical samples; candidates are world-space bounding coordinates. The signed near-unit
-   floats at +0x14 and +0x1C form a horizontal-plane unit-direction vector.
+6. **FX7 group-header words +0x10..+0x24 — R-CAP, debugger-pending (C15, f61f66a9):** The per-group
+   translation vec3 at group-relative +0x04/+0x08/+0x0C is CONSUMER-CONFIRMED (C15, §1.10), resolving
+   the prior `unknown_1 / unk_dist / unknown_2` DUAL-SAMPLE unknowns. The word at +0x10 is confirmed
+   NOT part of that vec3 (the translation ends at +0x10 exclusive); it appears as a large float in
+   samples but is read-but-not-consumed on all static paths examined (decoder, build pass, AABB
+   finalize). Words at +0x14 and +0x1C appear as signed near-unit fractional floats in samples
+   (possible direction components) but are likewise unconsumed. Words at +0x18, +0x20, and +0x24 are
+   also unconsumed. None of these six dwords can be settled from the static load path alone.
+   Confirmation path: breakpoint on a decoded group record after the group-decoder returns, dump
+   bytes +0x10..+0x27 within the in-memory record, correlate to any spatial or animated behaviour
+   of the overlay.
 
 7. **FX4 per-group header leading 40 bytes:** Read but not consumed at load (candidates: transform /
    texture-id / flags). Single FX4 instance in the corpus → all per-field observations are
@@ -1258,7 +1286,9 @@ these without further evidence.
 ### 15.1 Overview
 
 `.fx7` is the **terrain-cell effect layer 7** (terrain slot 8), paralleling `.fx6` (slot 7).
-Both formats are structurally identical and differ only in their terrain slot assignment.
+Both formats use the same group-array model (§1.1a) and the VF_32 vertex format (stride 32,
+no per-vertex colour), but differ in **group-header width** (FX6: 36 B with `vertex_count` at
+group-relative +0x1C; FX7: 48 B with `vertex_count` at group-relative +0x28 — see §1.4a/§1.13).
 The format stores **groups of textured effect meshes** spatially indexed into a 16×16 cell
 tile grid at 64 world-unit resolution.
 
@@ -1277,21 +1307,20 @@ File:
 
 ### 15.3 Group Header (48 bytes, read directly from disk)
 
-| Offset | Size | Type | Field | Notes |
-|-------:|-----:|------|-------|-------|
-| +0x00 | 12 | f32[3] | `origin` | Group world-space origin XYZ |
-| +0x0C | 12 | f32[3] | `extent` | Group bounding extent XYZ |
-| +0x18 | 4 | u32 | `group_type` | Group category / material category |
-| +0x1C | 4 | u32 | `group_flags` | Render flags |
-| +0x20 | 4 | u32 | `texture_id` | Source texture slot index |
-| +0x24 | 4 | u32 | `_pad` | Reserved / alignment |
-| +0x28 | 4 | u32 | `vertex_count` | Number of VF_32 vertices |
-| +0x2C | 4 | u32 | `index_count` | Number of u16 indices |
+> **CORRECTED (C15, 2026-06-30, f61f66a9 — consumer-confirmed evidence supersedes prior INFERRED
+> reading).** The earlier `origin/extent/type/flags` layout was explicitly labeled INFERRED. C15
+> static analysis of the decoder, build pass, and AABB finalize establishes the correct layout
+> below. The authoritative per-field table is §1.10; this summary is kept for proximity to §§15.4–15.7.
 
-> **Note:** The first 40 bytes (`+0x00..+0x27`) are read as a block but only `vertex_count`
-> and `index_count` (at `+0x28`/`+0x2C`) are explicitly dereferenced by `Fx7_DecodeGroups`.
-> The origin/extent/type/flags layout above is inferred from the 48-byte total and the
-> known AABB re-computation step that follows.
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0x00 | 4 | u32 | `texture_index` | 1-based index into this channel's texture register; guarded `< 1 || > count`, clamped to 1 on violation. See §1.1a/§1.4b. | CONSUMER-CONFIRMED (build pass, C15) |
+| +0x04 | 4 | f32 | `translate_x` | Per-group translation vec3, first component. The post-parse AABB finalize adds the vec3 at +0x04/+0x08/+0x0C to every source vertex position to produce the working (rendered) vertex position. | CONSUMER-CONFIRMED (AABB finalize, C15) |
+| +0x08 | 4 | f32 | `translate_y` | Per-group translation vec3, second component. | CONSUMER-CONFIRMED (AABB finalize, C15) |
+| +0x0C | 4 | f32 | `translate_z` | Per-group translation vec3, third component. Ends at +0x10 exclusive — +0x10 is NOT part of the translation. | CONSUMER-CONFIRMED (AABB finalize, C15) |
+| +0x10..+0x24 | 24 | — | _unconsumed_ (6 × u32/f32) | Read into the record; consumed by no static path (decoder, build pass, AABB finalize). R-CAP / debugger-pending; do not assert semantics. | UNVERIFIED |
+| +0x28 | 4 | u32 | `vertex_count` | Drives the `vertex_count × 32` VF_32 vertex block read. | CONSUMER-CONFIRMED |
+| +0x2C | 4 | u32 | `index_count` | Drives the `index_count × 2` u16 index block read. | CONSUMER-CONFIRMED |
 
 After the header, vertex and index data follow immediately:
 ```
@@ -1313,8 +1342,12 @@ After the header, vertex and index data follow immediately:
 | +0x68 | 4 | u32 | `lod_budget` | Budget tier in units (set by `Geometry_RecomputeAABB_AndBudget`) |
 
 **Double-buffering:** Both `vtx_buf_a` and `vtx_buf_b` are allocated with the same
-size (`32 × vertex_count + 4`) and `vtx_buf_b` is initialized as a `memcpy` of
-`vtx_buf_a`. This supports GPU double-buffer upload.
+size (`32 × vertex_count + 4`) and `vtx_buf_b` is initially populated by `memcpy` of
+`vtx_buf_a`. After that copy, the post-parse AABB finalize overwrites each vertex position
+in `vtx_buf_b` with `source_position + translate_vec3` (the per-group header floats at
+group-relative +0x04/+0x08/+0x0C — CONSUMER-CONFIRMED, C15). The `vtx_buf_a` source copy
+retains the original on-disk mesh-local positions unchanged; `vtx_buf_b` holds the
+world-placed (translated) positions used for rendering.
 
 ### 15.5 Vertex Format — VF_32 (identical to `.bud` and `.fx6`)
 

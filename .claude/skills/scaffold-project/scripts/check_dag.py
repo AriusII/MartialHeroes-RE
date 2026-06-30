@@ -102,6 +102,14 @@ LAYER: dict[str, int] = {
     # Server/ (replica server; leaf CONSUMERS above the core -- reference down, referenced by none)
     "Server.Core": 7,
     "Server.Console": 7,
+    # tests/ (xUnit suites; leaf CONSUMERS above the core -- reference down to their SUT, referenced by none)
+    "Client.Domain.Stats.Tests": 6,
+    "Client.Domain.Simulation.Tests": 6,
+    "Client.Domain.Inventory.Tests": 6,
+    "Network.Protocol.Packets.World.Tests": 6,
+    # Explorer/ (asset explorer + 3D viewer; leaf CONSUMERS above the core)
+    "Explorer.Files": 6,
+    "Explorer.Viewer": 6,
 }
 
 # Intra-layer sub-order: a project may only reference a peer with a STRICTLY
@@ -158,6 +166,14 @@ SUBORDER: dict[str, int] = {
     # Server/
     "Server.Core": 0,
     "Server.Console": 1,
+    # tests/
+    "Client.Domain.Stats.Tests": 0,
+    "Client.Domain.Simulation.Tests": 0,
+    "Client.Domain.Inventory.Tests": 0,
+    "Network.Protocol.Packets.World.Tests": 0,
+    # Explorer/
+    "Explorer.Files": 0,
+    "Explorer.Viewer": 0,
 }
 
 # Layer 05 (Godot) is not scanned as a source (its csproj is owned elsewhere and

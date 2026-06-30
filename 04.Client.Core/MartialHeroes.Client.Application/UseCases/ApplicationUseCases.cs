@@ -11,6 +11,7 @@ using MartialHeroes.Client.Domain.Social.Social;
 using MartialHeroes.Network.Abstractions.Lobby;
 using MartialHeroes.Network.Abstractions.Protocol;
 using MartialHeroes.Network.Abstractions.Session;
+using MartialHeroes.Network.Protocol.Packets;
 using MartialHeroes.Network.Protocol.Packets.Login.Packets;
 using MartialHeroes.Network.Protocol.Packets.Social.Packets;
 using MartialHeroes.Shared.Kernel.Numerics;
@@ -29,6 +30,9 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     private const int PickupItemWireSize = 12;
     private const int QuestActionWireSize = 12;
     private const int PartyInviteWireSize = 8;
+    private const int ProductBuyWireSize = 1;
+    private const int ProductConfirmWireSize = 4;
+    private const byte GoldShopBuyConfirmSelector = 0;
     private const byte WhisperChannelCode = 9;
     private const int WhisperBodyByteCap = 119;
     private const int WhisperTargetNameBytes = 16;
@@ -91,6 +95,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     }
 
     public Func<string, bool>? BannedCharacterNamePredicate { get; init; }
+
+    public uint PendingPartyInviteActorId { get; set; }
 
     public ValueTask LoginAsync(
         string username, string password, string? pin = null, CancellationToken cancellationToken = default)
@@ -376,6 +382,201 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         cancellationToken.ThrowIfCancellationRequested();
 
         return SendAsync(2, 118, ReadOnlyMemory<byte>.Empty, cancellationToken);
+    }
+
+    public ValueTask SendPartyInviteAsync(uint targetActorId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (targetActorId == 0 || (_world.LocalActorKey is { } self && self.RawId == targetActorId))
+            return ValueTask.CompletedTask;
+
+        const byte inviteMode = 2;
+        return SendSocialSubmitAsync(2, 35, inviteMode, targetActorId, ct);
+    }
+
+    public ValueTask RespondToPartyInviteAsync(bool accept, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        const byte acceptMode = 0;
+        const byte declineMode = 1;
+        var mode = accept ? acceptMode : declineMode;
+        return SendSocialSubmitAsync(2, 35, mode, PendingPartyInviteActorId, ct);
+    }
+
+    public ValueTask LeavePartyAsync(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        const byte selfLeaveMode = 0;
+        var ownId = _world.LocalActorKey is { } self ? self.RawId : 0u;
+        return SendSocialSubmitAsync(2, 36, selfLeaveMode, ownId, ct);
+    }
+
+    public ValueTask KickPartyMemberAsync(uint memberId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        const byte kickMode = 1;
+        return SendSocialSubmitAsync(2, 36, kickMode, memberId, ct);
+    }
+
+    public ValueTask TransferPartyLeaderAsync(uint newLeaderId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        const byte delegateMode = 0;
+        return SendSocialSubmitAsync(2, 37, delegateMode, newLeaderId, ct);
+    }
+
+    public ValueTask RequestTradeAsync(uint targetActorId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (targetActorId == 0 || (_world.LocalActorKey is { } self && self.RawId == targetActorId))
+            return ValueTask.CompletedTask;
+
+        const byte requestMode = 2;
+        return SendSocialSubmitAsync(2, 23, requestMode, targetActorId, ct);
+    }
+
+    private ValueTask SendSocialSubmitAsync(
+        ushort major, ushort minor, byte mode, uint id, CancellationToken ct)
+    {
+        Span<byte> payload = stackalloc byte[TradeRequestWireSize];
+        payload.Clear();
+        payload[0x00] = mode;
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.Slice(0x04, sizeof(uint)), id);
+        return SendAsync(major, minor, payload, ct);
+    }
+
+    public ValueTask StorageOperationAsync(byte op, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        const int wireSize = 16;
+        const int opByteOffset = 4;
+
+        Span<byte> payload = stackalloc byte[wireSize];
+        payload[opByteOffset] = op;
+
+        return SendAsync(2, 142, payload, ct);
+    }
+
+    public ValueTask SubmitCubeGambleBetAsync(ReadOnlyMemory<byte> betSheet76, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        const int wireSize = 76;
+
+        Span<byte> payload = stackalloc byte[wireSize];
+        payload.Clear();
+
+        var src = betSheet76.Span;
+        var copyLength = Math.Min(src.Length, wireSize);
+        src[..copyLength].CopyTo(payload);
+
+        return SendAsync(2, 141, payload, ct);
+    }
+
+    public ValueTask BuyProductAsync(uint productId, ushort qty, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        Span<byte> payload = stackalloc byte[ProductBuyWireSize];
+        payload[0x00] = GoldShopBuyConfirmSelector;
+
+        return SendAsync(2, 151, payload, ct);
+    }
+
+    public ValueTask ConfirmProductPurchaseAsync(uint confirmId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        Span<byte> payload = stackalloc byte[ProductConfirmWireSize];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, confirmId);
+
+        return SendAsync(2, 153, payload, ct);
+    }
+
+    public ValueTask SendGuildActionAsync(byte mode, uint targetId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask SendMailAsync(string recipient, string body, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(recipient);
+        ArgumentNullException.ThrowIfNull(body);
+        ct.ThrowIfCancellationRequested();
+
+        const byte attachmentlessMode = 4;
+        const int recipientOffset = 0x01;
+        const int recipientCellBytes = 17;
+        const int itemHandlesOffset = 0x1C;
+        const int itemHandleCount = 5;
+        const uint emptyItemHandle = 0xFFFFFFFFu;
+        const int bodyOffset = 0x48;
+        const int bodyCellBytes = 84;
+
+        Span<byte> payload = stackalloc byte[CmsgCarrierPigeonSend.Size];
+        payload.Clear();
+        payload[0x00] = attachmentlessMode;
+        WriteFixedCp949(recipient, payload.Slice(recipientOffset, recipientCellBytes));
+        for (var i = 0; i < itemHandleCount; i++)
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                payload.Slice(itemHandlesOffset + i * sizeof(uint), sizeof(uint)), emptyItemHandle);
+        WriteFixedCp949(body, payload.Slice(bodyOffset, bodyCellBytes));
+
+        return SendAsync(2, 70, payload, ct);
+    }
+
+    public ValueTask ClaimDeliveryAsync(int cellIndex, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        Span<byte> payload = stackalloc byte[CmsgDeliveryClaim.Size];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, unchecked((uint)cellIndex));
+
+        return SendAsync(2, 71, payload, ct);
+    }
+
+    public ValueTask AddFriendAsync(string name, CancellationToken ct = default)
+    {
+        return SendFriendAddRemoveAsync(0, name, ct);
+    }
+
+    public ValueTask RemoveFriendAsync(string name, CancellationToken ct = default)
+    {
+        return SendFriendAddRemoveAsync(1, name, ct);
+    }
+
+    public ValueTask RefreshFriendListAsync(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        Span<byte> payload = stackalloc byte[CmsgFriendListRefresh.Size];
+        payload.Clear();
+
+        return SendAsync(2, 54, payload, ct);
+    }
+
+    private ValueTask SendFriendAddRemoveAsync(byte tag, string name, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ct.ThrowIfCancellationRequested();
+
+        const int nameOffset = 0x02;
+        const int nameCellBytes = 17;
+
+        Span<byte> payload = stackalloc byte[CmsgFriendAddRemove.Size];
+        payload.Clear();
+        payload[0x00] = tag;
+        WriteFixedCp949(name, payload.Slice(nameOffset, nameCellBytes));
+
+        return SendAsync(2, 49, payload, ct);
     }
 
     private static ServerListOutcome MapOutcome(LobbyServerListOutcome outcome)

@@ -116,9 +116,11 @@ public sealed partial class GamePacketHandler
             return;
         }
 
-        actor.SetCurrentHp(packet.CurrentHp);
-        actor.SetCurrentMp(packet.VitalC);
-        actor.SetCurrentStamina(packet.Stamina);
+        var vitals = CurrentVitals.FromWire(packet.CurrentHp, packet.CurrentMp, packet.CurrentStamina);
+
+        actor.SetCurrentHp(ClampHpQword(vitals.Hp));
+        actor.SetCurrentMp((uint)vitals.Mp);
+        actor.SetCurrentStamina((uint)vitals.Stamina);
 
         _eventBus.Publish(new ActorVitalsChangedEvent(
             key, actor.CurrentHp, actor.CurrentMp, actor.CurrentStamina));
@@ -160,6 +162,26 @@ public sealed partial class GamePacketHandler
 
         _eventBus.Publish(new ActorSpawnedEvent(
             key, name, level, actor.Position, actor.CurrentHp, actor.MaxHp, serverClass));
+    }
+
+    public void Handle(in SmsgActorStateEvent packet)
+    {
+        var key = new ActorKey(packet.TargetId, ToEntitySort(unchecked((byte)packet.TargetSort)));
+
+        _eventBus.Publish(new ActorStateChangedEvent(
+            key, ActorStateKind.Generic, 0u, 0u, packet.ActorId));
+    }
+
+    public void Handle(in SmsgActorVisualFlagsSet packet)
+    {
+        var key = new ActorKey(packet.ActorId, ToEntitySort(unchecked((byte)packet.ActorSort)));
+
+        _eventBus.Publish(new ActorVisualFlagsChangedEvent(key, packet.VisualFlags));
+    }
+
+    public void Handle(in SmsgStealthToggle packet)
+    {
+        _eventBus.Publish(new StealthToggleEvent(packet.ActorId, packet.StealthFlag != 0));
     }
 
     private static uint ClampHpQword(long hp)

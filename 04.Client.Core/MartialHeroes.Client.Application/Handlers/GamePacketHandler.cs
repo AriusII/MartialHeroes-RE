@@ -124,7 +124,7 @@ public sealed partial class GamePacketHandler(
 
                 break;
 
-            case Opcodes.SmsgCombatAttackUpdate:
+            case Opcodes.SmsgCubeGambleReelUpdate:
                 if (HandleCombatAttackUpdate(payload)) return;
 
                 break;
@@ -156,6 +156,16 @@ public sealed partial class GamePacketHandler(
 
             case Opcodes.SmsgPartyMemberJoined:
                 if (HandlePartyMemberJoined(payload)) return;
+
+                break;
+
+            case Opcodes.SmsgResponseSlot70:
+                if (HandleDeliveryRecord(payload)) return;
+
+                break;
+
+            case Opcodes.SmsgSrvLetterReceived:
+                if (HandleLetterReceived(payload)) return;
 
                 break;
         }

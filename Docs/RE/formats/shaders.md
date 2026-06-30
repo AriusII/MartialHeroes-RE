@@ -18,14 +18,15 @@
 > file may open with CP949 comment lines before the version declaration (confirmed in two cel `.psh`
 > samples).
 > CYCLE 14 re-anchor (f61f66a9): 2 facts re-confirmed SAME (Renderer_InitCelGlowShaders 5-shader assemble order; D3DXAssembleShader caller census), 1 corrected (post-chain enable gate polarity: see §C5.6b — gate condition is option index 12 == 1, not == 0; gate PASSES on f61f66a9; bloom+cel structurally ON; old 263bd994 comparison or debugger confirm required to distinguish spec-misread from build flip).
-> **ida_reverified:** 2026-06-27 (CYCLE 14, f61f66a9); prior: 2026-06-24 (build 263bd994)
+> CYCLE 15 consumer-confirm (f61f66a9, 2026-06-30): `dotoonshading.psh` confirmed NOT an orphan — it is the 2nd of five runtime-assembled cel/post shaders, the normal-state cel pixel shader; loader and name binding consumer-confirmed (assembled at two sites: full-init loader and device-reset hot-reload; handle at renderer `+0x2B894` released and recreated on device reset; bound via SetPixelShader on the non-stealth cel-bind branch). The only assembled-but-discarded output in the cel set is `dotoonshading.vsh` (§C5.6b-ANOMALY, re-confirmed on f61f66a9). Confidence upgraded to CONSUMER-CONFIRMED. Runtime enable-flag reachability is a separate `[R-CAP]` debugger-confirm (non-blocking — does not affect the statically-confirmed loader/binding facts).
+> **ida_reverified:** 2026-06-30 (CYCLE 15, f61f66a9); prior: 2026-06-27 (CYCLE 14, f61f66a9)
 > **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > **evidence:** [static-ida, vfs-sample]
 > **conflicts:** NONE structural for shader-file content. CYCLE 14 correction: §C5.6b post-chain enable-flag gate polarity corrected (see that section). Wave-11 correction: toon ramp renderer offset corrected from +0x2B9BC to +0x2B9DC (static-confirmed). Prior conflicts note: Three refinements vs the earlier text (not reversals): encoding statement loosened (code tokens ASCII, comments may carry CP949); `power2dx8.psh` / `power4dx8.psh` not statically string-referenced; power ladder extended from 1/2/4 to 1/2/4/8/16/32 (three further taps physically verified on disk). The exact `toonramp.bmp` band layout remains the only open content item (see Known Unknowns).
 > **wave-11 deep-dive (f61f66a9, 2026-06-28):** full shader-create API sequence resolved (exact D3DXAssembleShader arguments + PS-create idiom); VS-create ANOMALY discovered — the cel "vertex shader" handle is produced by calling `CreateVertexShader` with a D3DVERTEXELEMENT9 declaration array (not assembled `.vsh` bytecode), and the assembled `dotoonshading.vsh` token stream is released unused; glow/power PS handle (+0x2B6D4) and composite PS handle (+0x2B6D8) added to field map; all three RT texture/surface/RTS triples and glow divisors added; c4 light-direction source field offsets confirmed; composite PS-constant sources (+0x2BB48 / +0x2BB4C) and glow-path slot (+0x2BB54) added; per-pass D3DTSS/D3DSAMP/FVF cascades for bright-copy, glow-blur, composite, and present-blit passes fully decoded (see §C5.6c); §C5.6b gate-polarity open item subsumed by VS-create anomaly (see §C5.6b).
 >
-> **spec_status:** sample_verified (10 shader files cross-confirmed; all five runtime-assembled shaders read)
-> **date:** 2026-06-11 (re-verified 2026-06-21; CYCLE 11 addition 2026-06-23; re-verified 2026-06-24; CYCLE 14 correction 2026-06-27; Deep-3D 2026 fixed-function pipeline addition 2026-06-28; wave-11 deep-dive 2026-06-28)
+> **spec_status:** consumer_confirmed (10 shader files cross-confirmed; all five runtime-assembled shaders read; dotoonshading.psh loader and name binding consumer-confirmed on f61f66a9)
+> **date:** 2026-06-11 (re-verified 2026-06-21; CYCLE 11 addition 2026-06-23; re-verified 2026-06-24; CYCLE 14 correction 2026-06-27; Deep-3D 2026 fixed-function pipeline addition 2026-06-28; wave-11 deep-dive 2026-06-28; CYCLE 15 consumer-confirm 2026-06-30)
 
 ---
 
@@ -178,7 +179,7 @@ and the active tap is selected by the `DISPLAY_POWER` key in `display.lua` (ship
 |----------|-----------|-------------|------|---------------|
 | `dotoonshading.vsh`  | .vsh | vs.1.1 | Cel-shading vertex shader: world-view-projection transform, two-light Lambert diffuse, emits luminance-based UV on output texcoord 1 for toon LUT lookup. **Wave-11 note:** the runtime assembles this file but its bytecode is discarded — `CreateVertexShader` is called with a D3DVERTEXELEMENT9 declaration array instead (see §C5.6b-ANOMALY). Whether this shader ever executes on the live client is `[debugger-confirm]`. | VERIFIED (source content); runtime execution status [debugger-confirm] |
 | `power1dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample pass 1: base texture sample, scale by `c0` | VERIFIED (string-referenced) |
-| `dotoonshading.psh`  | .psh | ps.1.1 | Cel tone pixel shader — **normal** render state: `base × toonRamp`, ×2, brightness-modulated by per-state MULTI (`c0`) and ADD (`c1`); alpha passes through the lit value | VERIFIED (string-referenced) |
+| `dotoonshading.psh`  | .psh | ps.1.1 | Cel tone pixel shader — **normal** render state: `base × toonRamp`, ×2, brightness-modulated by per-state MULTI (`c0`) and ADD (`c1`); alpha passes through the lit value. The 2nd of five runtime-assembled shaders; assembled by both the full-init loader (device creation) and the device-reset cel-PS hot-reload; handle at renderer `+0x2B894` released and recreated on device reset. Bound via SetPixelShader on the non-stealth cel-bind branch. Not an orphan: loader, handle slot, and consumer all consumer-confirmed on f61f66a9. | CONSUMER-CONFIRMED |
 | `dotoonshading2.psh` | .psh | ps.1.1 | Cel tone pixel shader — **stealth / 은신 (invisible)** render state: identical arithmetic to the normal shader except alpha is taken from `c1.w` (the per-state ADD's w drives the stealth fade) | VERIFIED (string-referenced) |
 | `finaldx8.psh`       | .psh | ps.1.1 | Final composite / post: `saturate(scene×2×c0 + glow×c1)`, alpha forced opaque from a literal `(1,1,1,1)` constant | VERIFIED (string-referenced) |
 | `power2dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample (squared sample — one `mul r0,r0,r0` squares the sample) | VERIFIED (present on disk; not string-referenced in build 263bd994) |
@@ -322,7 +323,7 @@ pixel shaders without touching the vertex shader or the render targets).
 | Shader file | Role | Bound in | Confidence |
 |-------------|------|----------|------------|
 | `data/shader/dotoonshading.vsh` | Cel vertex shader — world-view-projection transform + two-light Lambert → emits the N·L luminance coordinate on a texcoord | The cel bind site, once per skinned-character draw | HIGH |
-| `data/shader/dotoonshading.psh` | Cel tone pixel shader — **normal** render state | The cel bind site (default branch) | HIGH |
+| `data/shader/dotoonshading.psh` | Cel tone pixel shader — **normal** render state. Assembled at two sites: full-init loader (device creation) and cel-PS hot-reload (device reset); handle at renderer `+0x2B894` released and recreated on reset | The cel bind site (non-stealth branch; SetPixelShader) | CONSUMER-CONFIRMED |
 | `data/shader/dotoonshading2.psh` | Cel tone pixel shader — **stealth / 은신 variant** | The cel bind site (stealth branch, selected by a boolean argument) | HIGH |
 | `data/shader/finaldx8.psh` | Final composite / blur pixel shader for the post chain | The bloom-blur post pass (see `specs/rendering.md` §6) | HIGH |
 | `data/shader/power1dx8.psh` | Glow downsample / blur pixel shader for the post chain | The offscreen/scene glow pass (see `specs/rendering.md` §6) | HIGH |
@@ -475,9 +476,7 @@ duplicate them.
    look is **coupled to the bloom/post feature being enabled**, and even skinned actors fall back to
    fixed-function shading when post is off. When the flag is on, both the per-frame cel VS constant
    upload and the per-draw cel bind (ramp + VS + normal/stealth PS) run.
-6. **Hot reload:** on a device reset, the partial reload re-assembles only the two cel pixel shaders
-   (and clears the stage-1 texture, vertex shader, and pixel shader) without touching the vertex
-   shader or the render targets.
+6. **Hot reload:** on a device reset, the partial reload first clears SetVertexShader(0), SetPixelShader(0), and SetTexture(stage 1, 0), then **releases the existing handles at renderer `+0x2B894` (`dotoonshading.psh`) and `+0x2B898` (`dotoonshading2.psh`)** and re-assembles exactly those two cel pixel shaders. The vertex shader handle, the composite and glow pixel-shader handles, and the three render targets are untouched. The Release-then-recreate of `+0x2B894` on device reset confirms it is a live, owned device object — not an orphaned or dead assembly.
 
 ### C5.6a Shipped display.lua values (CYCLE 11 addition)
 
@@ -576,11 +575,13 @@ Net composite arithmetic (SAMPLE-VERIFIED from `finaldx8.psh`): `out.rgb = satur
 > question (was it always == 1 or did the build flip it?) operationally moot: even if the gate
 > passes, the initialiser's VS-create step fails first.
 >
-> **[debugger-confirm] Tightened:** at the `CreateVertexShader` call inside `Renderer_InitCelGlowShaders`,
+> **[debugger-confirm] [R-CAP] Tightened:** at the `CreateVertexShader` call inside `Renderer_InitCelGlowShaders`,
 > read the return value in EAX (expected < 0). Then read renderer field `+0x2D67C` (expected 0) and
 > `+0x2B890` (cel VS handle, expected null/zero). If EAX ≥ 0 and the enable flag becomes non-zero,
 > the cel/post path is genuinely live and the D3DVERTEXELEMENT9 anomaly (§C5.6b-ANOMALY) must be
 > re-examined. Either way, the live EAX of that `CreateVertexShader` call is the single decisive read.
+> Non-blocking: the static loader and name binding of `dotoonshading.psh` are consumer-confirmed
+> independently of this runtime read (see §C5.6 step 6 and CYCLE 15 banner note).
 
 The per-frame fork that selects the offscreen RT path over the direct path reads an enable flag on
 the scene/post object (constructor default: 0 = off). The flag is stored to 2 at **at least two
@@ -1110,14 +1111,15 @@ field `+0x2D67C` (dword `[44687]`) is **non-zero**; otherwise it tail-calls
 
 ### Open questions (Deep-3D 2026)
 
-1. `[debugger-confirm]` Runtime return of `CreateVertexShader` (device vtable +0x16C) inside
+1. `[debugger-confirm]` `[R-CAP]` Runtime return of `CreateVertexShader` (device vtable +0x16C) inside
    `Renderer_InitCelGlowShaders` and the resulting value of renderer field `+0x2D67C` (post/cel
    enable flag). Wave-11 static analysis predicts the call returns `D3DERR_INVALIDCALL` (< 0)
    because the argument is a D3DVERTEXELEMENT9 declaration array, not a shader token stream —
    causing the initialiser to return 0, the enable flag to stay 0, and the whole world to draw
    fixed-function. Confirm by reading EAX after the call and reading `+0x2D67C` and `+0x2B890`
    (cel VS/decl handle) live. If EAX ≥ 0 and the flag becomes non-zero, the VS anomaly (§C5.6b-ANOMALY)
-   must be re-examined. This is the single decisive read for the cel/post path status.
+   must be re-examined. This is the single decisive read for the cel/post path status. Non-blocking:
+   the `dotoonshading.psh` loader and name binding are consumer-confirmed independently (CYCLE 15).
 2. `[debugger-confirm]` Live value of VS constant `c4` (light direction): source fields `+0x2BA04`/
    `+0x2BA08`/`+0x2BA0C` (x/y/z). Constructor default is (−1, 0, 0, 0); gameplay or config may
    overwrite the three scalar fields. The upload mechanism and source offsets are now static-confirmed;

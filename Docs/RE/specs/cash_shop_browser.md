@@ -1,10 +1,18 @@
 ---
-verification: static-hypothesis, unverified at f61f66a9
+verification: CONSUMER-CONFIRMED for §5 (shop buy-toggle protocol, CYCLE 15, 2026-06-30; f61f66a9);
+  §1–§4 (OLE/ActiveX hosting) remain static-hypothesis — re-verification pending
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
-status: unverified
-evidence: [static-ida]
-note: This spec predates the CYCLE 14 re-anchor campaign. All stated facts are static-hypothesis
-      only and have not been re-confirmed against the current IDB. Re-verification is pending.
+ida_reverified: 2026-06-30
+status: partial (§5 CONSUMER-CONFIRMED; §1–§4 static-hypothesis)
+evidence: [static-ida, consumer-correlation]
+note: |
+  §1–§4 predate the CYCLE 14 re-anchor campaign; static-hypothesis, OLE/ActiveX hosting
+  re-verification pending.
+  CYCLE 15 (f61f66a9, 2026-06-30) — promotion lane P-cashshop: added §5 documenting the C2S 2/151
+  buy-toggle selector mapping (selector 0 = gold/regular item shop, selector 200 = cash/Diamond goods
+  panel) and the two S2C replies (3/8 SmsgShopPageUpdate, 4/113 SmsgItemShopPurchaseResult).
+  CONSUMER-CONFIRMED via reply-consumer correlation. Server-side selector->reply binding is R-CAP
+  (capture-pending, non-blocking — see §5.3).
 ---
 
 # Cash Shop Browser (OLE Web Container)
@@ -125,3 +133,67 @@ Decrements the reference count:
 - **`GetTypeInfo`**: Returns `E_NOTIMPL` (`0x80004001`).
 - **`GetIDsOfNames`**: Sets the output argument to `-1` and returns `DISP_E_MEMBERNOTFOUND` (`0x80020006`).
 - **`Invoke`**: Event notification receiver. Returns `S_OK` (0) to acknowledge browser events.
+
+---
+
+## 5. Shop buy-toggle protocol — `CmsgProductBuy` (C2S 2/151) [CONSUMER-CONFIRMED, CYCLE 15]
+
+Two shop subsystems share the wire opcode **C2S major 2 / minor 151** (`CmsgProductBuy`),
+distinguished by a single-byte selector field. The body is 1 byte:
+
+| offset | size | type | field | notes |
+|------:|----:|------|-------|-------|
+| +0 | 1 | u8 | `select_flag` | Subsystem selector: `0` = gold/regular item shop; `200` (0xC8) = cash/Diamond goods panel. **CONFIRMED (two-selector split, CYCLE 15).** |
+
+The two selector values correspond to two independent shop subsystems that happen to share this
+opcode. They are not interchangeable paths to the same server handler.
+
+### 5.1 Selector `0` — gold/regular item shop: `SmsgShopPageUpdate` (S2C 3/8)
+
+Selector `0` is sent by the regular item-shop buy-confirm flow. The server replies with **S2C
+major 3 / minor 8** `SmsgShopPageUpdate`, which refreshes the active shop panel's item rows
+(rebuilding the shop display). *(CONSUMER-CONFIRMED: the reply consumer rebuilds the same shop
+panel rows that the selector-0 send path operates on — consumer-side panel correlation.)*
+
+### 5.2 Selector `200` (0xC8) — cash/Diamond goods panel: `SmsgItemShopPurchaseResult` (S2C 4/113)
+
+Selector `200` (hex 0xC8) is sent by the cash/Diamond goods panel buy path; the sender sets a
+panel-state flag before sending. The server replies with **S2C major 4 / minor 113**
+`SmsgItemShopPurchaseResult`, a **12-byte** body carrying a purchase outcome. *(CONSUMER-CONFIRMED:
+the reply consumer operates on the cash/Diamond domain matching the selector-200 sender context.)*
+
+`SmsgItemShopPurchaseResult` body layout (12 bytes):
+
+| payload offset | size | type | field | notes |
+|------:|----:|------|-------|-------|
+| +8 | 1 | u8 | `success_flag` | `1` = success (posts a purchase-success notice); any other value = failure. **CONFIRMED.** |
+| +9 | 1 | u8 | `failure_subtype` | Failure sub-code `0..4`, each mapping to a distinct localized error message. **CONFIRMED present; exact per-code meanings are RUNTIME-ONLY (R-CAP).** |
+| +0..+7, +10..+11 | 10 | — | (unconsumed) | Not read by any recovered consumer; meaning is capture-only. **UNVERIFIED.** |
+
+### 5.3 Opcode-reply matrix and refutation
+
+`CmsgProductBuy` (2/151) and `CmsgProductConfirm` (2/153) are distinct opcodes with disjoint
+reply sets:
+
+| C2S opcode | selector | S2C reply | notes |
+|---|---|---|---|
+| 2/151 `CmsgProductBuy` | `0` | 3/8 `SmsgShopPageUpdate` | gold/regular shop page refresh |
+| 2/151 `CmsgProductBuy` | `200` (0xC8) | 4/113 `SmsgItemShopPurchaseResult` | cash/Diamond purchase result |
+| 2/153 `CmsgProductConfirm` | — (no selector) | 4/79 `SmsgCraftingResult` (52 bytes) | production commit result — see `specs/crafting.md §4` |
+
+The hypothesis that `2/153` is answered by `3/8` or `4/113` is **REFUTED** (CYCLE 15): those are
+replies to `2/151`. `2/153` is answered solely by `4/79`.
+
+> **R-CAP (capture-pending, non-blocking):** The server-side rule "selector value X causes server
+> to send reply Y" is consumer-correlated but not request-stamped in the wire frame — the client
+> never embeds an expected-reply field. A live capture of one gold-shop buy (selector `0`) and one
+> cash-shop buy (selector `200`) would byte-confirm the server binding. Breakpoint plan: intercept
+> the S2C 3/8 and S2C 4/113 handler entry points after sending each selector variant; correlate
+> request-reply pairs in the capture stream.
+
+### 5.4 Sibling cash-shop opcodes (not analyzed in this lane)
+
+| opcode | name | notes |
+|---|---|---|
+| S2C 4/114 | `SmsgCashShopActionResult` | Sibling cash-shop action result — out of scope for this promotion lane |
+| S2C 4/115 | `SmsgItemShopBalanceUpdate` | Cash/item-shop balance update — out of scope for this promotion lane |

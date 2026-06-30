@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
@@ -13,6 +14,7 @@ public sealed partial class HudAnnouncePanel : Control
     private readonly Label[] _labels = new Label[LabelCount];
     private int _nextSlot;
     private double _scrollTimer;
+    private HudTextLibrary? _text;
 
 
     public void Build()
@@ -54,6 +56,18 @@ public sealed partial class HudAnnouncePanel : Control
                  "spec: Docs/RE/specs/ui_system.md §8.25.1 CODE-CONFIRMED.");
     }
 
+
+    public void SetTextLibrary(HudTextLibrary text)
+    {
+        _text = text;
+    }
+
+    public void ShowPopupCode(uint popupCode)
+    {
+        var msg = _text?.GetCaption((int)popupCode);
+        if (!string.IsNullOrEmpty(msg))
+            ShowAnnounce(msg);
+    }
 
     public void ShowAnnounce(string text)
     {

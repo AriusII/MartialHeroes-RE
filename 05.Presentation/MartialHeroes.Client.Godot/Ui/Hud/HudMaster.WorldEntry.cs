@@ -15,6 +15,56 @@ public sealed partial class HudMaster
         _partyWindow?.OnRosterSnapshot(evt);
     }
 
+    public void OnPartyMemberJoined(PartyMemberJoinedEvent evt)
+    {
+        _partyWindow?.OnPartyMemberJoined(evt);
+    }
+
+    public void OnPartyMemberRemoved(PartyMemberRemovedEvent evt)
+    {
+        _partyWindow?.OnPartyMemberRemoved(evt);
+    }
+
+    public void OnPartyMemberVitals(PartyMemberVitalsEvent evt)
+    {
+        _partyWindow?.OnPartyMemberVitals(evt);
+    }
+
+    public void OnPartyInviteState(PartyInviteStateEvent evt)
+    {
+        _partyWindow?.OnPartyInviteState(evt);
+    }
+
+    public void OnPartyAcceptResult(PartyAcceptResultEvent evt)
+    {
+        _partyWindow?.OnPartyAcceptResult(evt);
+    }
+
+    public void OnGuildRoster(GuildRosterEvent evt)
+    {
+        _guildWindow?.OnGuildRoster(evt);
+    }
+
+    public void OnGuildMemberPatch(GuildMemberPatchEvent evt)
+    {
+        _guildWindow?.OnGuildMemberPatch(evt);
+    }
+
+    public void OnGuildStateChanged(GuildStateChangedEvent evt)
+    {
+        _guildWindow?.OnGuildStateChanged(evt);
+    }
+
+    public void OnActionError(ActionErrorEvent evt)
+    {
+        _errorPanel?.ShowActionError(evt.Status, evt.Error);
+    }
+
+    public void OnPopupCode(PopupCodeEvent evt)
+    {
+        _announcePanel?.ShowPopupCode(evt.PopupCode);
+    }
+
     public void OnActorDied(ActorDiedEvent evt)
     {
         if (!evt.IsLocalPlayer)

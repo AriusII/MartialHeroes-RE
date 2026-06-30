@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -50,6 +51,7 @@ public sealed partial class HudRelationPanel : Control
     private static readonly float[] TabY = { 6f, 63f, 120f, 177f };
 
     private readonly Label[] _memberLabels = new Label[MaxVisibleMembers];
+    private ClientContext? _ctx;
     private int _activeTab;
     private int _currentPage;
     private double _lastTimedAction = -TimedActionCooldownSecs;
@@ -60,8 +62,9 @@ public sealed partial class HudRelationPanel : Control
     private Label? _pageIndicator;
 
 
-    public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
+    public void Build(HudAtlasLibrary atlas, HudTextLibrary text, ClientContext? ctx)
     {
+        _ctx = ctx;
         Name = "HudRelationPanel";
 
         Position = new Vector2(80f, 200f);
@@ -372,11 +375,8 @@ public sealed partial class HudRelationPanel : Control
 
             case 10:
                 var name = _nameTextbox?.Text.Trim() ?? "";
-                if (!string.IsNullOrEmpty(name))
-                    GD.Print($"[HudRelationPanel] Action 10 add/remove name='{name}': " +
-                             "TODO(world-campaign): chat-command 'friend %s %s' / 'cut %s'. " +
-                             "spec: Docs/RE/specs/ui_system.md §8.28.6 CODE-CONFIRMED.");
-
+                if (!string.IsNullOrEmpty(name) && _ctx is not null)
+                    _ = _ctx.UseCases.SendChatAsync(0, name);
                 break;
 
             case 11:
@@ -391,18 +391,9 @@ public sealed partial class HudRelationPanel : Control
                 break;
 
             case 14:
-                var now = Time.GetTicksMsec() / 1000.0;
-                if (now - _lastTimedAction < TimedActionCooldownSecs)
-                {
-                    GD.Print("[HudRelationPanel] Action 14 timed-request: cooldown active (3 min). " +
-                             "spec: Docs/RE/specs/ui_system.md §8.28.4.");
-                    break;
-                }
-
+                var now = global::Godot.Time.GetTicksMsec() / 1000.0;
+                if (now - _lastTimedAction < TimedActionCooldownSecs) break;
                 _lastTimedAction = now;
-                GD.Print("[HudRelationPanel] Action 14 timed-request: " +
-                         "TODO(world-campaign): CP949 chat-command (master/training request). " +
-                         "spec: Docs/RE/specs/ui_system.md §8.28.4/§8.28.6 CODE-CONFIRMED.");
                 break;
 
             case 15:

@@ -1,0 +1,73 @@
+# Clean-room field spec. Promoted from neutral analyst notes; rewritten, not copied.
+# Source: Docs/RE/specs/mail.md §3 (S2C 4/70 delivery-record apply path; field offsets and sizes
+#   CONFIRMED by static analysis of the slot-apply handler on builds 263bd994 and f61f66a9).
+# ida_reverified: 2026-06-20 (IDB 263bd994, CYCLE 7)
+# ida_reverified: 2026-06-27 (CYCLE 14 re-anchor, f61f66a9)
+# ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+# evidence: [static-ida]
+# capture_verified: false
+# note: offsets in the source spec (mail.md §3.1) are frame-relative (include the 8B wire header);
+#   this YAML uses payload-relative offsets (field position within the 132B body after the header).
+
+name: SmsgDeliveryRecord
+opcode: 0x40046           # major 4 (GameEvent), minor 70 -> (4 << 16) | 70
+direction: S2C
+size: 132                 # payload body size; total wire frame = 140B (8B header + 132B payload)
+spec: packets/4-70_delivery_record.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Server delivery-inbox record. Pushed in reply to C2S 2/71 CmsgDeliveryClaim (on panel open with
+  index 0, and again after each claim confirmation). A fixed 132-byte payload carrying the inbox
+  state for one delivery slot: a result code, a sub-action selector, a CP949 sender name (17-byte
+  cell), an attached money amount (i64), up to five 16-byte attached item records (80 bytes), and
+  a delivery entry key. The 8-slot delivery inbox matches incoming records by EntryKey. A ResultCode
+  of 0 raises a delivery-inbox notice and does not mutate any slot.
+
+# Wire order: payload-relative offsets (body starts at frame byte +8). Pack=1; widths sum to 132.
+# CONFIRMED: ResultCode(+0), unlisted gap(+1), SubAction(+2), SenderName(+3..+19), Money(+20..+27),
+#   unlisted gap(+28..+47), AttachedItems(+48..+127), EntryKey(+128..+131).
+# The two unlisted gap spans (Pad1 at +1, Pad20 at +28..+47) are derived from the confirmed field
+# boundaries; their content is not stated in the spec (capture/debugger-pending).
+fields:
+  - { name: ResultCode,    type: u8 }           # +0x00 result gate: 0=fail (notice only), 1=ok/apply
+  - { name: Pad1,          type: u8 }           # +0x01 unlisted 1-byte gap (boundary-derived)
+  - { name: SubAction,     type: u8 }           # +0x02 slot-mutator selector (see sub-action table)
+  - { name: SenderName,    type: "bytes[17]" }  # +0x03 CP949 sender name, NUL-terminated, 17-byte cell
+  - { name: Money,         type: i64 }          # +0x14 attached money (credited or debited per SubAction)
+  - { name: Pad20,         type: "bytes[20]" }  # +0x1C unlisted 20-byte gap (boundary-derived)
+  - { name: AttachedItems, type: "bytes[80]" }  # +0x30 5 attached-item records, 16B each; layout capture-pending
+  - { name: EntryKey,      type: i32 }          # +0x80 delivery entry identity; used to match the 8-slot inbox
+
+notes: |
+  SOURCE: Docs/RE/specs/mail.md §3 (S2C 4/70, apply-path static analysis on 263bd994 / f61f66a9).
+
+  SUB-ACTION CODES (SubAction at payload offset +2):
+    0  add/replace  : fill sender + money + items into the addressed inbox slot
+    1  credit money : apply Money field as a gain to the addressed slot
+    2  item update  : update item records in the addressed slot
+    3  panel refresh: re-render the inbox without a slot-content change
+    4  debit money  : apply Money field as a loss
+    5  item update (alternate)
+  (Dispatch shape confirmed; VALUE semantics are RUNTIME-ONLY / capture-pending.)
+
+  8-SLOT INBOX MODEL: the delivery panel holds 8 slots. Each incoming record is matched by
+  EntryKey (+128) against an existing slot or fills a new one. ResultCode 0 raises a notice
+  (no slot mutation). Slot capacity and EntryKey-keying confirmed by static analysis.
+
+  ATTACHED ITEM RECORDS: AttachedItems (+48, 80 bytes = 5 x 16B). The 16-byte per-item layout
+  (item id, count, metadata) is not asserted here — capture/debugger-pending.
+
+  WIRE SIZE: opcodes.md records 4/70 as 140B = total frame (8B header + 132B payload).
+  The payload size (this spec's `size:`) is 132 bytes.
+
+  RESIDUALS (capture/debugger-pending):
+    - Pad1 (+1) and Pad20 (+28..+47): content unlisted in source spec.
+    - Per-item 16-byte record internal layout inside AttachedItems.
+    - All on-wire VALUE meanings (claimIndex in C2S 2/71, SubAction codes, item record content).
+
+  RELATIONSHIP:
+    - Inbound reply to C2S 2/71 CmsgDeliveryClaim (packets/2-71_delivery_claim.yaml).
+    - Mail-arrival notification: S2C 1/20 SmsgSrvLetterReceived (packets/1-20_srv_letter_received.yaml).
+    - Carrier-pigeon send: C2S 2/70 CmsgCarrierPigeonSend (packets/2-70_carrier_pigeon_send.yaml).

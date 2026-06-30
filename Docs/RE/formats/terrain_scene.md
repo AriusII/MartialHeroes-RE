@@ -15,6 +15,18 @@
 
 ---
 
+## Re-verification banner (2026-06-30 — CYCLE 15 P-terrainscene, draw-path corroboration)
+
+| Attribute        | Value |
+|------------------|-------|
+| `ida_reverified` | `2026-06-30` |
+| `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
+| `verification`   | `CONSUMER-CONFIRMED` — CYCLE 15 (C15-S20): `.bud` per-vertex bytes 12-31 confirmed from the actual draw path. All static-object draw sites set FVF 0x112 immediately before the draw (confirmed at four independent building-draw helpers). The concrete draw call is `DrawIndexedPrimitiveUP` with primitive type D3DPT_TRIANGLELIST, index format D3DFMT_INDEX16 (u16 indices), and vertex stride 32. This corroborates the existing CONFIRMED vertex-layout claim from binary draw-site provenance rather than from sample magnitudes alone. 0 layout fields changed; 0 corrected. |
+| `evidence`       | `[static-ida]` — draw-path analysis at f61f66a9: FVF 0x112 set at all four building-draw helpers; `DrawIndexedPrimitiveUP` with stride 32, D3DFMT_INDEX16, D3DPT_TRIANGLELIST. AABB post-load routine advances by 32 bytes per vertex and reads only the leading 12 position bytes, corroborating the stride and the position span. |
+| `conflicts`      | None. All prior verification findings remain valid. No layout fields changed. |
+
+---
+
 ## Re-verification banner (2026-06-27 — CYCLE 14 re-anchor, confirmatory)
 
 | Attribute        | Value |
@@ -90,6 +102,8 @@
 | `type_byte` value range | PARTIAL / OBSERVED (value 0 only) | **CONFIRMED-variable** (values {0, 1, 2}; consumer does not branch) | Two-witness review (loader read-sequence + black-box sampling) shows the byte takes values 0, 1 and 2 across the asset set. It is read and retained, but no read-site branches on it; the static-vs-sway behaviour is driven by a *separate* per-texture classification, not by this byte. Value is now confirmed-variable; its semantic role remains open. |
 | `vertex_count` cap behaviour | warn (unspecified action) | **loader-resolved: warn-and-continue on full count** | The cap guard is log-only and runs *after* the full-count allocation and read; the loader never throws, clamps, or truncates at the cap. A faithful parser must read all `vertex_count` vertices regardless of the cap (see §3.2.1, §9, §10). |
 | `light*.bin` files and building lightmaps | unaddressed | **CONFIRMED: light*.bin are NOT per-building lightmaps** | These files are per-map sky/directional light keyframe tables applied globally to the whole scene. No per-cell or per-building lightmap texture exists in the legacy asset set. |
+| Per-vertex bytes `+0x0C..+0x17` (normal) and `+0x18..+0x1F` (UV) — confidence tier | CONFIRMED (reinforced) | **CONSUMER-CONFIRMED** | CYCLE 15 (C15-S20): FVF 0x112 confirmed at all four building-draw helpers (not just inferred from one pass); concrete draw call is `DrawIndexedPrimitiveUP` with stride 32 and D3DFMT_INDEX16 (u16). Draw-site provenance now settles the layout independently of sample magnitudes. |
+| No per-vertex colour; no second UV (D3DFVF_DIFFUSE / D3DFVF_TEX2 absent) — confidence tier | CONFIRMED absent | **CONSUMER-CONFIRMED absent** | Same C15-S20 draw-path analysis: FVF 0x112 confirmed at all four draw sites; no DIFFUSE (0x040), SPECULAR (0x080), or TEX2 (0x200) bit is set anywhere in the building draw path. |
 
 ---
 
@@ -261,10 +275,14 @@ are `f32` little-endian.
 
 **Evidence for the vertex layout — three independent lines:**
 
-- **D3D FVF = 0x112:** The static-building draw pass configures the D3D device with FVF value
-  0x112. Breaking this down: D3DFVF_XYZ (0x002) + D3DFVF_NORMAL (0x010) + D3DFVF_TEX1 (0x100)
-  = 0x112. The D3D driver stride for this FVF is exactly 32 bytes, matching the file stride.
-  Critically: D3DFVF_DIFFUSE (0x040) is NOT set — no per-vertex color. D3DFVF_SPECULAR (0x080)
+- **D3D FVF = 0x112:** All static-object draw sites set FVF 0x112 immediately before the draw
+  (confirmed at four independent building-draw helpers). Breaking this down:
+  D3DFVF_XYZ (0x002) + D3DFVF_NORMAL (0x010) + D3DFVF_TEX1 (0x100) = 0x112. The D3D driver
+  stride for this FVF is exactly 32 bytes, matching the on-disk vertex stride and the
+  vertex-stride runtime constant (= 32). The concrete draw call is `DrawIndexedPrimitiveUP`
+  with primitive type D3DPT_TRIANGLELIST, index format D3DFMT_INDEX16 (u16 indices), and
+  vertex stride 32 — all consistent with the FVF decode and the file layout.
+  Critically: D3DFVF_DIFFUSE (0x040) is NOT set — no per-vertex colour. D3DFVF_SPECULAR (0x080)
   is NOT set. D3DFVF_TEX2 (0x200) is NOT set — no second UV set, no lightmap UV channel.
 - **Normal unit-check:** All 9,049 vertices across a 17-object real sample have normal magnitude
   1.0 ± 1e-3. The per-vertex `(normal_x, normal_y, normal_z)` triplet is unambiguously a unit

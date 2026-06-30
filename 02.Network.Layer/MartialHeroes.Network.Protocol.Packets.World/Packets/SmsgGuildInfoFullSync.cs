@@ -14,19 +14,19 @@ public readonly struct SmsgGuildInfoFullSync
 
     public readonly HeaderPad0Buffer HeaderPad0;
 
-    public readonly byte Subtype;
+    public readonly byte Gate;
 
-    public readonly byte ReservedA;
+    public readonly byte Pad9;
 
-    public readonly GuildTitleBuffer GuildTitle;
+    public readonly GuildNameBuffer GuildName;
 
     public readonly short GuildId;
 
-    public readonly byte RankByte;
+    public readonly byte GuildRankByte;
 
-    public readonly byte ReservedB;
+    public readonly byte Pad31;
 
-    public readonly uint CountField;
+    public readonly uint CountOrLevel;
 
     public readonly uint PointsLow;
 
@@ -34,25 +34,25 @@ public readonly struct SmsgGuildInfoFullSync
 
     public readonly ulong GuildFunds;
 
-    public readonly byte FlagByte;
+    public readonly byte NoticeFlagByte;
 
-    public readonly ReservedCBuffer ReservedC;
+    public readonly Pad53Buffer Pad53;
 
     public readonly MemberIdsBuffer MemberIds;
 
-    public readonly OnlineFlagsABuffer OnlineFlagsA;
+    public readonly MemberRanksBuffer MemberRanks;
 
     public readonly MemberNamesBuffer MemberNames;
 
-    public readonly OnlineFlagsBBuffer OnlineFlagsB;
+    public readonly MemberOnlineBuffer MemberOnline;
 
-    public readonly ReservedDBuffer ReservedD;
+    public readonly Pad1210Buffer Pad1210;
 
-    public readonly PointsContribBuffer PointsContrib;
+    public readonly MemberPointsBuffer MemberPoints;
 
-    public readonly DwordFBuffer DwordF;
+    public readonly MemberContribBuffer MemberContrib;
 
-    public readonly DwordGBuffer DwordG;
+    public readonly MemberLoginTimeBuffer MemberLoginTime;
 
     [InlineArray(8)]
     public struct HeaderPad0Buffer
@@ -61,13 +61,13 @@ public readonly struct SmsgGuildInfoFullSync
     }
 
     [InlineArray(18)]
-    public struct GuildTitleBuffer
+    public struct GuildNameBuffer
     {
         private byte _element0;
     }
 
     [InlineArray(7)]
-    public struct ReservedCBuffer
+    public struct Pad53Buffer
     {
         private byte _element0;
     }
@@ -79,7 +79,7 @@ public readonly struct SmsgGuildInfoFullSync
     }
 
     [InlineArray(50)]
-    public struct OnlineFlagsABuffer
+    public struct MemberRanksBuffer
     {
         private byte _element0;
     }
@@ -91,31 +91,31 @@ public readonly struct SmsgGuildInfoFullSync
     }
 
     [InlineArray(50)]
-    public struct OnlineFlagsBBuffer
+    public struct MemberOnlineBuffer
     {
         private byte _element0;
     }
 
     [InlineArray(2)]
-    public struct ReservedDBuffer
+    public struct Pad1210Buffer
     {
         private byte _element0;
     }
 
     [InlineArray(200)]
-    public struct PointsContribBuffer
+    public struct MemberPointsBuffer
     {
         private byte _element0;
     }
 
     [InlineArray(200)]
-    public struct DwordFBuffer
+    public struct MemberContribBuffer
     {
         private byte _element0;
     }
 
     [InlineArray(200)]
-    public struct DwordGBuffer
+    public struct MemberLoginTimeBuffer
     {
         private byte _element0;
     }

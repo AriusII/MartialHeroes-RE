@@ -192,6 +192,26 @@ public sealed partial class GameLoop
                 _hudMaster?.OnRosterSnapshot(roster);
                 break;
 
+            case PartyMemberJoinedEvent partyJoined:
+                _hudMaster?.OnPartyMemberJoined(partyJoined);
+                break;
+
+            case PartyMemberRemovedEvent partyRemoved:
+                _hudMaster?.OnPartyMemberRemoved(partyRemoved);
+                break;
+
+            case PartyMemberVitalsEvent partyVitals:
+                _hudMaster?.OnPartyMemberVitals(partyVitals);
+                break;
+
+            case PartyInviteStateEvent partyInvite:
+                _hudMaster?.OnPartyInviteState(partyInvite);
+                break;
+
+            case PartyAcceptResultEvent partyAccept:
+                _hudMaster?.OnPartyAcceptResult(partyAccept);
+                break;
+
             case SceneEntitySnapshotEvent sceneEnt:
                 GD.Print($"[GameLoop] SceneEntitySnapshotEvent: actorSlots={sceneEnt.ActorSlots.Length} " +
                          $"categories={sceneEnt.Categories.Length}. " +
@@ -375,6 +395,26 @@ public sealed partial class GameLoop
             case ActorSkillActionEvent skillAction:
                 _actorRegistry.PlayActorAttack(skillAction.AttackerKey);
                 HandleSkillCastAction(skillAction);
+                break;
+
+            case GuildRosterEvent guildRoster:
+                _hudMaster?.OnGuildRoster(guildRoster);
+                break;
+
+            case GuildMemberPatchEvent guildPatch:
+                _hudMaster?.OnGuildMemberPatch(guildPatch);
+                break;
+
+            case GuildStateChangedEvent guildState:
+                _hudMaster?.OnGuildStateChanged(guildState);
+                break;
+
+            case ActionErrorEvent actionError:
+                _hudMaster?.OnActionError(actionError);
+                break;
+
+            case PopupCodeEvent popup:
+                _hudMaster?.OnPopupCode(popup);
                 break;
 
             case EquipResultEvent:

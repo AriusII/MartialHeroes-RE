@@ -28,9 +28,11 @@
 > 4/150, 5/52, 5/31.
 > **ida_reverified:** 2026-06-16 (SHA 263bd994, CYCLE 7); spec-audit 2026-06-24; CYCLE 14 re-anchor: 2026-06-27
 > (reversed +1368/+1370 timed-charge framing; pinned boost flag offset +1516; added AoE actor offsets +1828/+1832; noted executor-direct vs UI-wrapper string sets).
+> CYCLE 15 promotion: 2026-06-30 (§5.3 per-target record layout CONSUMER-CONFIRMED; correction applied).
 > **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > **evidence:** [static-ida]
 > **CYCLE 14 re-anchor (f61f66a9, 2026-06-27):** 1 fact re-confirmed SAME (skill opcode→handler routings and combat-stat block consumers: cast gate reads HpCost +1368 / StaminaCost +1370, AoE resolver reads TargetShapeMode +1308 and AoeRadius +1316, 2/52 builder confirmed; inbound dispatcher routes the skill handler set).
+> **CYCLE 15 promotion (f61f66a9, 2026-06-30):** §5.3 per-target record layout CONSUMER-CONFIRMED: 36-byte stride; composite actor key (TargetSubKey u8 @ record+0x00, TargetKey u32 @ record+0x04); HitMagnitude i64 (low u32 @ +0x14, high u32 @ +0x18), summed across records via 64-bit add/add-with-carry, negated before display, output via MessageDB 2212 with the target record count. Fields +0x08/+0x0C/+0x10/+0x1C..+0x23 opaque (bulk-forwarded, never field-read by this handler). Correction applied: per-target remaining HP and max HP are NOT in the 5/52 per-target record — they arrive via 5/53 SmsgActorVitalsAndPairState. R-CAP residuals R-20 and R-44 documented in §5.3 (debugger-pending, non-blocking).
 > **conflicts:** none — Campaign-10 Lane-F2 re-verification reproduced every framing constant
 > (1504 / +1500 / N×8 / 1508 / +0 SkillId / +4 GlobalCategory / 240 / 8-byte stride / i16 points /
 > slot<240) from the loader and handler code. Refinements only (the hotbar "two parallel arrays" are
@@ -104,8 +106,10 @@ decode accordingly.
    boolean)**: when it is set AND the base hit count is ≥ 2, the count doubles and the area
    quadruples; the combined count is then clamped to **40**. The *origin* of that flag (a world buff?
    a GM / event toggle that sets it?) is still unknown — only the consuming flag location is pinned.
-6. **Damage is server-authoritative.** The client never computes skill damage. It only renders the
-   per-target damage / remaining-HP / max-HP values the server sends. Any damage-formula recovery
+6. **Damage is server-authoritative.** The client never computes skill damage. It renders the
+   per-record signed damage magnitude the server sends via 5/52 (accumulated, negated, and displayed
+   as a total; see §5.3). Per-target remaining HP and max HP arrive via the companion push 5/53
+   (`SmsgActorVitalsAndPairState`), not from the 5/52 per-target record. Any damage-formula recovery
    must come from server-side data, not this client.
 
 ---
@@ -448,17 +452,62 @@ When the caster is the **local player** and the action is a *real* cast (not a c
 
 ### 5.3 Per-target effect application
 
-The client iterates the per-target hit records (≤ 40). Each record carries the **visible damage**,
-**remaining HP after the hit**, and **max HP** for that target (field layout owned by
-`packets/5-52_actor_skill_action.yaml`). The client **only displays** these values and updates the
-target's HP bar:
+The client iterates the per-target hit records (≤ 40). Each record is **36 bytes** (stride 0x24).
+The actor for each record is identified by a **composite key** within the record; the hit quantity is
+a **signed 64-bit** value split across two consecutive dword fields. Per-target remaining HP and max
+HP are **not** in this record — they arrive via the companion push `SmsgActorVitalsAndPairState`
+(5/53). The full on-wire packet geometry (header + record array) is owned by
+`packets/5-52_actor_skill_action.yaml`; the per-target record consumer-confirmed layout is:
 
-- **Damage is server-authoritative.** The client does **not** compute damage. It renders the hit
-  numbers and applies the server-sent remaining-HP value. (Open question 6.)
-- **REVIVE** (category 14): for each record resolving to the local player, open the
-  revive/resurrection UI panel.
-- **Damage feedback:** when the combat-log toggle is on, the client sums the visible-damage values
-  across records and formats a "total damage" chat line (string id 2212).
+| Record offset | Width | Field | Consumer use | Conf |
+|---|---|---|---|---|
+| +0x00 | u8 | `TargetSubKey` — actor composite sub-key | Passed as the sub-key argument to the cached actor-lookup-by-composite-key routine to resolve the per-target actor handle. | CONSUMER-CONFIRMED |
+| +0x04 | u32 | `TargetKey` — actor composite key | Passed as the key argument to the same actor-lookup routine; together with `TargetSubKey` this is the per-record actor-id field. | CONSUMER-CONFIRMED |
+| +0x08 | 4 B | OPAQUE | Not field-read by this handler; only bulk-forwarded. | CONFIRMED-unread |
+| +0x0C | 4 B | OPAQUE | Not field-read; bulk-forwarded (and additionally re-copied into the AoE fan-out clone packet in the 0xCC branch). | CONFIRMED-unread |
+| +0x10 | 4 B | OPAQUE | Not field-read; not part of the damage sum. Propagated wholesale in bulk; also re-copied into the AoE fan-out clone in the 0xCC branch alongside +0x0C. | CONFIRMED-unread |
+| +0x14 | u32 | `HitMagnitude` low dword | Added into the low half of a running 64-bit accumulator (one 32-bit add per record). | CONSUMER-CONFIRMED |
+| +0x18 | u32 | `HitMagnitude` high dword | Added into the high half of the same accumulator via carry-propagation (one add-with-carry per record). Together with +0x14, one signed i64. | CONSUMER-CONFIRMED |
+| +0x1C..+0x23 | 8 B | OPAQUE record tail | Not read by the handler; present within the 36-byte stride. | CONFIRMED-unread |
+
+The client behavior driven by these records:
+
+- **Damage is server-authoritative.** The client does **not** compute damage. It accumulates and
+  displays the server-sent `HitMagnitude` values. (Open question 6.)
+- **REVIVE** (category 14): for each record, the composite actor key (`TargetSubKey` + `TargetKey`)
+  is resolved via the actor-lookup routine; if the resolved actor is the local player, the
+  revive/resurrection UI panel is opened.
+- **Total-damage notice:** the client accumulates the per-record `HitMagnitude` i64 values across all
+  records into a 64-bit running total (add + add-with-carry per iteration), then **negates** the
+  total. When all three conditions hold — (a) the caster is the local player, (b) the combat-log /
+  damage-message display option is ON, and (c) the negated total is nonzero — the negated 64-bit is
+  formatted with thousands grouping and spliced, together with the target record **count**, into
+  MessageDB string id **2212**, then broadcast to the chat/notice log. Wire values are signed
+  (negative for damage); the negation yields the positive on-screen figure. `CONSUMER-CONFIRMED`
+  for the accumulator mechanics, gate conditions, and string id.
+
+> **R-CAP residuals (debugger-pending, non-blocking — tag R-20 / R-44):**
+>
+> - **R-20** (debugger-pending): whether the i64 at `HitMagnitude` (record +0x14/+0x18) is literal
+>   HP-damage points or another signed magnitude (e.g. a scaled figure). The consumer only sums,
+>   negates, and prints — the handler does not interpret the unit. Breakpoint plan: halt the 5/52
+>   handler at the per-record damage-field read in the 64-bit accumulation loop; read the low and high
+>   dwords at record+0x14 and +0x18 to capture the raw signed 64-bit wire value; compare the negated
+>   total to the on-screen damage number after the cast resolves. Use a single-target skill for the
+>   clean single-hit case. The combat-log display option must be ON and the caster must be the local
+>   player. Expected relationship: display figure = −(wire i64). Verify the multi-hit sum case with a
+>   multi-target skill: printed count should equal the record count and the printed figure should equal
+>   −(Σ per-record i64).
+>
+> - **R-44** (debugger-pending): what the composite actor key encodes for a known target — specifically
+>   what the `TargetSubKey` byte distinguishes and the id-space of `TargetKey`. The encoding is not
+>   determinable from the consumer reads alone. Breakpoint plan: on the same halt point as R-20, read
+>   the u8 at record+0x00 and the u32 at record+0x04; correlate with the target mob's visible spawn id
+>   and the {sort, actor-id} pair from any 5/53 push received for the same target in the same frame.
+>
+> - **Opaque fields (+0x08, +0x0C, +0x10, +0x1C..+0x23):** meaning is unresolved from the consumer
+>   reads; the 0xCC fan-out path forwards the opaque dwords into a clone packet (animation/FX use is
+>   likely). Requires packet capture or server-side RE to settle.
 
 ### 5.4 AoE / summon fan-out (action code 0xCC)
 
@@ -649,6 +698,7 @@ client's transport opcodes (`(major << 16) | minor`).
 |---|---|---|---|
 | 2:52 | `CmsgUseSkill` | C2S | Skill-activate request; built at the end of the cast pipeline (§2). |
 | 5:52 | `SmsgActorSkillAction` | S2C | Skill/effect broadcast; drives resource consumption, motion sub-ops, AoE fan-out, hit display (§5). |
+| 5:53 | `SmsgActorVitalsAndPairState` | S2C | Per-target remaining HP and max HP after a skill hit; the 5/52 per-target record does not carry HP values — they arrive here (§5.3). |
 | 5:31 | `SmsgBuffSlotUpdate` | S2C | Writes the 12-byte status slots (§6.1). |
 | 5:136 | `SmsgActorTimedStateUpdate` | S2C | Timed transform/stance state (§6.4). |
 | 4:109 | `SmsgLocalActorSkillStateFlag` | S2C | Local skill-state flag (§6.4). |

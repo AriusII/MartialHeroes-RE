@@ -13,8 +13,9 @@
 >   the live HP/MP/yaw/move-target writes (driven by the runtime-table-dispatched 5/53 vitals and
 >   5/13 movement handlers, whose dispatch table is null at static time), and the role of the
 >   `partial`/`draft` auxiliary fields.
-> - **ida_reverified:** 2026-06-24 (actor-world audit, SHA 263bd994); CYCLE 14 re-anchor: 2026-06-27
->   **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963  **evidence:** [static-ida]
+> - **ida_reverified:** 2026-06-24 (actor-world audit, SHA 263bd994); CYCLE 14 re-anchor: 2026-06-27; CYCLE 15 promotion: 2026-06-30
+>   **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963  **confidence:** CONSUMER-CONFIRMED  **evidence:** [static-ida]
+> - **CYCLE 15 (f61f66a9, 2026-06-30):** Promoted S7/S9/S11. Resolved VALUE-pending markers: `visual_flags` bitmask (SD+0x304 / Actor+0x378) from 5/124 SmsgActorVisualFlagsSet + 5/1 trailer (bit 0x04 = VF_PairedCompanion, meaning now confirmed); pair-relation FSM (SD+0x38 = `relation_state` 0/1/2; SD+0x39 = `relation_state_2`) + partner id (Actor+0x3C8) from 5/53 SmsgActorVitalsAndPairState; `title_index` (+0x6E4, 0=no title) + `rank_class_state` (+0x694) sourced from 5/1 prefix; 4/4 `TrailerVisual` → companion-propagated `anim_visual_byte` → Actor+0x734; 4/4 `CombatTimerFlag` → arms Actor+0x588 = 60 (PC-only, companion-propagated). Added: 5/127 SmsgStealthToggle — `hidden_stealth_flag` (+0x72C) is a boolean ON/OFF (not multi-bit); gates remote-viewer visibility; local-player exempt from visual transition. 5/5 SmsgActorStateEvent `inner_event_code` dispatch table: 1001/1011/1020/1021/1023/1041 fully consumer-confirmed. `anim_var_a` (+0x734) upgraded to confirmed. R-CAP residuals: relation state-1 vs state-2 distinction; MessageDB 10025–10032 label text; full +0x378 bitmask beyond bit 0x04.
 > - **CYCLE 14 re-anchor (f61f66a9, 2026-06-27):** 4 facts re-confirmed SAME (actor object size 0x748, embedded SpawnDescriptor 0x370@+0x74, sort/model_class_id resolution from internal_class+appearance_variant, NPC interaction sub-object at +0x700, actor container model with id-only + composite-key lookups and local-player/buff-target globals). Canonical getter labels ActorManager_GetSingleton and GameState_GetSingleton are absent from the f61f66a9 IDB — no spec fact depends on these labels; re-labelling deferred to ida-toolsmith.
 > - **CYCLE 7 (2026-06-20):** added the 30-slot buff-slot array at Actor +0x208 (520), the
 >   buff-related actor state fields it drives (+1013, +1420 enrichment, +1764, +1828, +1832, +1836,
@@ -55,7 +56,7 @@ specified — those are layout facts, not code locations.
 | Overall struct size | **confirmed** — total object size 0x748 bytes (1864 dec); the shared spawn factory allocates a 0x748-byte object then runs the Actor constructor. Single heap object per in-world entity, natural 4-byte alignment (not packed). |
 | Embedded `SpawnDescriptor` | **confirmed** — 0x370 bytes (880 dec), copied verbatim from the wire on spawn by a fixed-size 0x370 byte-copy, inlined at Actor +0x74. |
 | Coordinate type | **confirmed** — world positions are IEEE-754 32-bit `float`; world Y is always 0 (the spawn handler stores X, forces Y = 0.0, stores Z). |
-| Identity / vitals-mirror / position offsets | **confirmed** — exercised by multiple handlers (spawn, respawn, spawn-extended). Live *wire* writes from the 5/53 vitals and 5/13 movement handlers are runtime-table-dispatched (not statically reachable) → their value semantics are **capture/debugger-pending**. |
+| Identity / vitals-mirror / position offsets | **confirmed** — exercised by multiple handlers (spawn, respawn, spawn-extended). 5/53 SmsgActorVitalsAndPairState field semantics now **consumer-confirmed** (CYCLE 15): relation_state/relation_state_2 at SD+0x38/+0x39, partner_actor_id at +0x3C8, HP/MP/stamina mirrors. Live writes from the 5/13 movement handler remain runtime-table-dispatched → value semantics **capture/debugger-pending**. |
 | `level` byte boundary | **static-hypothesis** — the char-select *display* path reads a clean u16 at SD +0x3A; the *wire* boundary vs. the SD +0x38/+0x39 state bytes is **capture-pending**. See open question 1. |
 | Equipment-id table (Actor +0xCC = SD +0x58) | **confirmed** — 20 entries × 16 bytes; each entry's leading dword is a worn-item actor id, walked 20× with a 16-byte stride in both the live spawn and the preview lineup. |
 | Equipment / buff / stat block (SD +0xD4, ~600 B) | **partial** — opaque blob; only a handful of interior points located (one new byte at SD +0x304 mapped this pass). Treat as reserved. |
@@ -144,9 +145,8 @@ slots, render flags) are summarized later but omitted here.
 | `equip_ref_table`| +0xCC  | slot[20] | confirmed | 20 entries × 16 bytes; each entry's leading dword is a worn-item actor id. = SD +0x58. See the SpawnDescriptor table. |
 | `cell_index`     | +0x3EC | int32  | confirmed  | Cached spatial grid-cell handle, resolved from the live world X/Z. NOT a coordinate. |
 | `buff_slots`     | +0x208 | slot[30] | confirmed | 30 buff slots × 12 bytes; the in-world status (buff/debuff) table. See the buff-slot table below and **`specs/buffs.md`** (the authority for the model). |
-| `current_hp`     | +0xB0  | uint32 | confirmed  | Current hit points. (Mirror of `SpawnDescriptor.current_hp`.) |
-| `current_mp`     | +0xB4  | uint32 | confirmed  | Current mana / ki points. |
-| `current_stamina`| +0xB8  | uint32 | confirmed  | Current stamina. |
+| `current_hp`     | +0xB0  | int64  | confirmed  | Current hit points — a single signed 64-bit integer at +0xB0..+0xB7 (CYCLE 15: one i64 field, NOT two packed u32). (Mirror of `SpawnDescriptor.current_hp`.) |
+| `current_mp`     | +0xB8  | int32  | confirmed  | Current mana / ki points. (CYCLE 15: MP is at +0xB8; the prior +0xB4 reading was the HP high dword. No inline `current_stamina` — stamina is a player-global mirror only.) |
 | `world_x`        | +0xC0  | f32    | confirmed  | Live world X (seeded from spawn origin). |
 | `world_y`        | —      | f32    | confirmed  | Always 0 from the server (not stored as a distinct wire field). |
 | `world_z`        | +0xC4  | f32    | confirmed  | Live world Z. |
@@ -256,7 +256,7 @@ See the dedicated SpawnDescriptor table below.
 | +0x514 | 16   | bytes  | (gap)                 | partial    | Pre-mixer scratch (four dwords zeroed). |
 | +0x524 | 48   | bytes  | `mixer_head`          | confirmed  | Animation-mixer list/queue head. Opaque to the domain model. |
 | +0x554 | 56   | bytes  | (mixer state)         | partial    | Animation-mixer state fields. `lifecycle_state` sits at byte +56 of this region (= +0x58C). |
-| +0x588 | 4    | int32  | `anim_cycle_timer`    | partial    | Timer (set to 60 by the vitals handler for the pair-state path). Distinct role unverified. |
+| +0x588 | 4    | int32  | `anim_cycle_timer`    | confirmed  | Combat/animation cycle timer. Set to 60 when the `combat_timer_flag` byte is non-zero — sourced from both the 5/1 SmsgActorSpawnExtended trailer and the 4/4 `CombatTimerFlag` field. PC-only gate; companion-propagated. |
 | +0x58C | 4    | int32  | `lifecycle_state`     | confirmed  | Lifecycle / motion state enum (0/1/2/3/4/8/11/12/13/15/17 — see table above). Heavily used as a gate in skill and movement handlers. |
 | +0x590 | 4    | int32  | `dirty_flag`          | confirmed  | Set to 1 in constructor; non-zero means the actor still needs refresh and is not yet accepting network updates. Checked as a precondition in the skill handler. |
 | +0x594 | 16   | bytes  | (gap)                 | partial    | Interior dwords zeroed in constructor. |
@@ -288,7 +288,7 @@ domain model should treat them as engine-side and decode the wire `name` field i
 | +0x638 | 32   | std::string | `str_slot2`  | confirmed  | String slot. |
 | +0x658 | 32   | std::string | `str_slot3`  | confirmed  | String slot; assigned a name in one snapshot path. |
 | +0x678 | 32   | std::string | `name`       | confirmed  | Actor display name (CP949 / EUC-KR decoded). The decoded copy of the wire name. |
-| +0x694 | 4    | int32       | `rank_class_state` | confirmed | Display-state gate written on spawn (PC branch) and on snapshot update; compared against small constants to choose a display state. |
+| +0x694 | 4    | int32       | `rank_class_state` | confirmed | Rank / class display-state byte, zero-extended to a dword. Sourced from the 5/1 SmsgActorSpawnExtended prefix byte 8. Written on spawn (PC branch); compared against small constants to choose a display state. |
 | +0x698 | 4    | bytes       | (gap)        | partial    | Zeroed / cleared in constructor and on one snapshot branch. |
 | +0x69C | 32   | std::string | `str_slot5`  | confirmed  | String slot. |
 | +0x6BC | 4    | bytes       | (pad)        | partial    | Padding. |
@@ -303,7 +303,7 @@ domain model should treat them as engine-side and decode the wire `name` field i
 
 | Offset | Size | Type   | Field              | Confidence | Meaning |
 |--------|------|--------|--------------------|------------|---------|
-| +0x6E4 | 4    | uint32 | `title_slot`       | confirmed  | Title / rank index (written from a snapshot byte, stored as a dword), passed to the title-display update. |
+| +0x6E4 | 4    | uint32 | `title_slot`       | confirmed  | Title / rank index. Sourced from the 5/1 SmsgActorSpawnExtended prefix byte 9 (`title_index`), stored as a dword. **0 = no title; non-zero attaches a title display** via the title helper. Shares the +0x6E4 region used as `disguise_outfit_id` on the buff path (context overlay, not a conflict). |
 | +0x6E8 | 4    | int32  | `target_id`        | confirmed  | Current target actor id. Init 0. |
 | +0x6EC | 1    | uint8  | `alive`            | confirmed  | Alive flag. Init 1. |
 | +0x6ED | 3    | —      | (pad)              | —          | Alignment. |
@@ -319,7 +319,7 @@ domain model should treat them as engine-side and decode the wire `name` field i
 | +0x708 | 4    | int32  | `lock_state`       | confirmed  | Lock / interaction state. A zero value is a precondition for movement being allowed. |
 | +0x70C | 32   | bytes  | (gap)              | partial    | Interior: an AoE-member-count dword at +0x728 used by a split-clone loop. |
 | +0x72C | 12   | bytes  | (gap)              | partial    | Several interior bytes zeroed in constructor. |
-| +0x734 | 1    | uint8  | `anim_var_a`       | partial    | Animation-variant byte written from snapshot updates and propagated to the companion. Semantics unverified. |
+| +0x734 | 1    | uint8  | `anim_var_a`       | confirmed  | Animation/visual variant byte. Sourced from the 5/1 SmsgActorSpawnExtended trailer (`anim_visual_byte`) and the 4/4 record's `TrailerVisual` field. **Companion-propagated** — also written to the paired sub-actor. |
 | +0x735 | 3    | —      | (pad)              | low        | Alignment. |
 | +0x738 | 4    | int32  | `world_state_server` | partial  | Server-supplied world / zone state value (written by the game-tick config handler). |
 | +0x73C | 4    | int32  | (gap)              | low        | Unknown. |
@@ -377,7 +377,7 @@ motion-state values are RUNTIME-ONLY (see `buffs.md §3.3`).
 | +0x6E4 (1764) | 1 | u8 | `disguise_outfit_id` | confirmed | Outfit/disguise id read by the buff_id 44 (disguise/polymorph) path to restore appearance on expiry. **Overlap:** the live-state table lists `title_slot` (uint32) at +0x6E4; this disguise byte is the low byte of that 4-byte region on the buff path — carried as a context-dependent overlay, not a hard conflict. |
 | +0x724 (1828) | 4 | int32 | `summon_state` | confirmed | Set on buff_id 57 expiry (mirror-clone summon state). |
 | +0x728 (1832) | 4 | int32 | `clone_count` | confirmed | Number of mirror clones for buff_id 57, derived from the slot's `param`. (This is the AoE-member-count dword the AoE/split-clone loop reads — see the live-state table's +0x70C region note.) |
-| +0x72C (1836) | 1 | u8 | `hidden_stealth_flag` | confirmed | Set by the buff_id 45 (stealth) path; also gates the id-47 per-tick visual. |
+| +0x72C (1836) | 1 | u8 | `hidden_stealth_flag` | confirmed | **Stealth visibility flag — boolean ON/OFF, not a multi-bit mask.** Two write paths: (a) local: the buff_id-45 (stealth) path sets/clears it; (b) network: opcode 5/127 SmsgStealthToggle stores 1 (any nonzero wire byte = stealth ON) or 0 (zero = stealth OFF). Gates: the id-47 per-tick visual; and remote-viewer visibility — ON releases all of the actor's visual nodes (actor vanishes), OFF rebuilds the skin and re-uploads the deformed mesh (actor reappears). **Local-player exempt** from the visual release/rebuild (flag is still stored, but the visual transition is skipped when the target equals the local player). See the "5/127 SmsgStealthToggle" section. |
 | +0x72D (1837) | 1 | u8 | `flag_id47` | confirmed | Set while a buff_id 47 (DoT/periodic-aura) slot is active. |
 | +0x72E (1838) | 1 | u8 | `flag_id64` | confirmed | Set while a buff_id 64 slot is active AND its `param < 100` (param-gated threshold flag). |
 
@@ -398,8 +398,8 @@ buff-bar mirror. See `specs/buffs.md` and the death/respawn behaviour in `world_
 | +0x4E8 (1256) | 4 | uint32 | `prev_hp` | confirmed | Previous-HP mirror — zeroed on death for both the dying actor and the local player. Also written from spawn-descriptor fields on the 5/1 spawn-extended (player) branch. |
 | +0x4EC (1260) | 4 | uint32 | `prev_mp` | confirmed | Previous-MP mirror — zeroed on death (same paths as `prev_hp`). |
 
-> HP/MP vitals are the 8-byte (qword) block at **Actor +0xB0** (`current_hp` / `current_mp`, see the
-> quick-reference and SpawnDescriptor tables) — server-set; the death handler does not compute any
+> Current HP is a signed 64-bit integer at **Actor +0xB0** (8 bytes, +0xB0..+0xB7) and current MP is a
+> 32-bit integer at **Actor +0xB8** (see the quick-reference and SpawnDescriptor tables) — server-set; the death handler does not compute any
 > penalty (XP / durability / drop magnitudes are RUNTIME-ONLY / server-authoritative).
 
 ## Embedded SpawnDescriptor (the 5/3 CharSpawn payload and 3/1 list records)
@@ -414,7 +414,7 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
 |-----------|---------|------|----------|-------------------|------------|---------|
 | +0x00     | +0x74   | 17   | bytes[17]| `name`            | confirmed  | Actor name, NUL-terminated, **CP949 / EUC-KR** encoded (up to 16 bytes + NUL). |
 | +0x11     | +0x85   | 3    | —        | (pad)             | —          | Alignment after name. |
-| +0x14     | +0x88   | 2    | uint16   | `inner_event_code`| high       | Internal event / class code; compared against a fixed constant when resetting the default motion. |
+| +0x14     | +0x88   | 2    | uint16   | `inner_event_code`| confirmed  | Internal event / class code (u16, server-stamped at spawn). Two consumers: (a) compared against a fixed constant when resetting the default motion; (b) the 5/5 SmsgActorStateEvent handler reads this field from the **source/event actor** and dispatches six visual-state codes — **1001** (world-positioned FX + context sound), **1011** (disguise/polymorph apply, pre-empted by on-hit item ids), **1020** (rename — copies 17B CP949 name into Actor +0x74), **1021** (motion/appearance change — writes low 16 bits to Actor +0xA2 and resets/re-applies motion, pre-empted by on-hit ids), **1023** (world FX + fixed sound 863000001), **1041** (sets in-combat flag Actor +0x3A0 = 1). See the "5/5 SmsgActorStateEvent" section. |
 | +0x16     | +0x8A   | 12   | bytes    | (gap)             | low        | Mostly unverified region up to the discriminator below. |
 | +0x22     | +0x96   | 1    | uint8    | `name_clone_discriminator` | high | Display-name discriminator for the player-clone path (distinguishes same-named clones). Also feeds the slot-14 visible-gear catalog key as its high decimal digit. |
 | +0x23     | +0x97   | 1    | bytes    | (gap)             | low        | Alignment up to SD +0x24. |
@@ -423,12 +423,11 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
 | +0x2D     | +0xA1   | 7    | bytes    | (gap)             | low        | Remainder up to SD +0x34. |
 | +0x34     | +0xA8   | 2    | uint16   | `internal_class`  | confirmed  | Internal class word. **For PCs it is the class id `{1,2,3,4}`** (1 Musa, 2 Salsu, 3 Dosa, 4 Monk) and is the **primary skeleton/appearance driver** -- the `class` argument of the model-class formula. For mobs the same field keys the model-template lookup. (Earlier drafts called this `model_id`.) |
 | +0x36     | +0xAA   | 2    | uint16   | `anim_class_word` | partial    | Read in the PC spawn branch as a name-assignment gate; may encode class or animation variant. |
-| +0x38     | +0xAC   | 1    | uint8    | `state_byte`      | confirmed  | Level/state byte, written by the 5/53 vitals handler from a packet byte. |
-| +0x39     | +0xAD   | 1    | uint8    | `secondary_level_byte` | confirmed | Second level/state byte, written by the 5/53 vitals handler from the next packet byte. |
+| +0x38     | +0xAC   | 1    | uint8    | `state_byte`      | confirmed  | Level/state byte. **On the 5/53 SmsgActorVitalsAndPairState path this byte carries the pair-relation state enum** (0 = no relation, 1 = relation active, 2 = second relation state). On the full SpawnDescriptor wire path (5/3, 3/1 list) the level context applies; see open question 1. |
+| +0x39     | +0xAD   | 1    | uint8    | `secondary_level_byte` | confirmed | Second state byte. On the 5/53 path this carries `relation_state_2` (secondary pair-state byte); mirrored to a client global for the local player. On the full descriptor path the level context applies (see open question 1). |
 | +0x3A     | +0xAE   | 2    | uint16   | `level`           | **draft**  | Character level. **May straddle the two state bytes above** — see open question 1. Do not hard-code as a clean u16 without a capture. |
-| +0x3C     | +0xB0   | 4    | uint32   | `current_hp`      | confirmed  | Current hit points. Written by the 5/53 vitals handler; sometimes written as a qword pair with `current_mp`. |
-| +0x40     | +0xB4   | 4    | uint32   | `current_mp`      | confirmed  | Current mana / ki points. |
-| +0x44     | +0xB8   | 4    | uint32   | `current_stamina` | confirmed  | Current stamina (capped by the vitals path). |
+| +0x3C     | +0xB0   | 8    | int64    | `current_hp`      | confirmed  | Current hit points — a single signed 64-bit integer (+0xB0..+0xB7). Written by the 5/53 vitals handler and seeded by 5/3 spawn (CYCLE 15: one i64, NOT a qword pair of hp+mp). |
+| +0x44     | +0xB8   | 4    | int32    | `current_mp`      | confirmed  | Current mana / ki points. CYCLE 15: MP is at +0xB8 / SD +0x44; the prior +0xB4 reading was the HP high dword, and the slot formerly labelled `current_stamina` here is actually MP. Stamina has no inline actor field (player-global mirror only). |
 | +0x48     | +0xBC   | 4    | uint32   | `scenario_state`  | partial    | Four bytes immediately before the world coordinates. Meaning unverified; present in the wire data. See open question 5. |
 | +0x4C     | +0xC0   | 4    | f32      | `world_x`         | confirmed  | World X (float). Extracted into the live position on spawn. |
 | +0x50     | +0xC4   | 4    | f32      | `world_z`         | confirmed  | World Z (float). World Y forced to 0 on spawn. |
@@ -446,9 +445,9 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
 | +0x1AA    | +0x21E  | 1    | uint8    | `buff_kind`       | confirmed  | Aura / buff type discriminator: 1 = HP aura, 2 = MP aura. Interior of the buff block. |
 | +0x1F0    | +0x264  | 2    | uint16   | `skill_state_word`| partial    | Skill state word used for state gating in the skill handler. Interior of the buff block. |
 | +0x2EE    | +0x362  | 1    | uint8    | `motion_state_byte` | confirmed | Read by the PC spawn branch (case 1) and the special sort-17 path as a motion selector; a `0xFF` sentinel triggers the mob move-speed / animation-tag fast-path. Interior of the buff block. (Confirmed from the consuming side this pass.) |
-| +0x304    | +0x378  | 1    | uint8    | `buff_block_byte_304` | confirmed (offset) / capture-pending (meaning) | Written PC-side from a wire byte on the 5/1 spawn-extended path. A newly-mapped point inside the otherwise-opaque buff block; its protocol meaning needs a capture. |
+| +0x304    | +0x378  | 1    | uint8    | `visual_flags`    | confirmed  | **Actor visual-flags bitmask** (CYCLE 15 — meaning now confirmed). Written by opcode 5/124 SmsgActorVisualFlagsSet (stand-alone update) and by the 5/1 SmsgActorSpawnExtended PC trailer. The local-player copy is also mirrored to a client global. Writing triggers a full actor visual refresh. **Bit 0x04 (VF_PairedCompanion)** = in the visual-refresh routine the actor's paired sort-15 companion sub-entity is found, its visual scale halved, and its motion reset/re-applied. Remaining bits (0x01/0x02/0x08/0x10/0x20/0x40/0x80) have no confirmed reader at this static pass — R-CAP item 15. See the "5/124 SmsgActorVisualFlagsSet" section. |
 | +0x32C    | +0x3A0  | 4    | uint32   | `in_combat_flag`  | high       | Combat state flag. |
-| +0x330    | +0x3A4  | 64   | bytes    | `sd_tail`         | partial    | Tail of the descriptor. A partner / pair-actor id is stored at SD +0x354 (Actor +0x3C8) for mob pair-state tracking. |
+| +0x330    | +0x3A4  | 64   | bytes    | `sd_tail`         | partial    | Tail of the descriptor. A partner / pair-actor id is stored at SD +0x354 (Actor +0x3C8); on the 5/53 SmsgActorVitalsAndPairState path this is the **pair partner actor id** (looked up as sort-1 PC), written when the relation is formed and cleared to 0 when broken. |
 | +0x35C    | +0x3D0  | 4    | int32    | `world_state`     | partial    | Read by the local-player-status handler to gate a disconnect notification. Semantics unverified. |
 | +0x36F    | +0x3E3  | 1    | byte     | (descriptor end)  | confirmed  | Last byte of the SpawnDescriptor. |
 
@@ -457,8 +456,9 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
 - **CP949 names.** The `name` field at SD +0x00 is **CP949 / EUC-KR**, NUL-terminated, max 16
   bytes plus terminator. Decode with CP949, not UTF-8/ASCII (earlier drafts said UTF-8 — that is
   corrected here).
-- **Vitals (`current_hp` / `current_mp` / `current_stamina`)** at SD +0x3C / +0x40 / +0x44 are
-  the live values the 5/53 vitals push updates in place on the Actor; the 5/3 spawn seeds them.
+- **Vitals (`current_hp` i64 / `current_mp` i32)** at SD +0x3C (Actor +0xB0, 8 bytes) and SD +0x44
+  (Actor +0xB8) are the live values the 5/53 vitals push updates in place on the Actor; the 5/3 spawn
+  seeds them. Stamina is a player-global mirror, not an inline actor field (CYCLE 15).
 - **World coordinates are the floats at SD +0x4C / +0x50** (not the four bytes at SD +0x48,
   whose role is unverified). World Y is always 0.
 - **`level` is not yet a clean field** — see open question 1. Until a capture confirms the byte
@@ -498,12 +498,12 @@ interior is the SpawnDescriptor documented above and in `structs/spawn_descripto
 |-----------|------|------|-------|-------|
 | +0x000 | 4 | u32 | ActorId | actor id; the id half of the (id, sort) actor-manager key. Stored to the Actor identity id field. |
 | +0x004 | 1 | u8 | KindByte | a kind/variant byte; value 5 gates a visual-only refresh of an existing actor (weapon/joint refresh) rather than a full spawn. VALUE-pending. |
-| +0x005 | 1 | u8 | RelationVisual | a relation / visual byte; copied to the Actor relation/visual field. VALUE-pending. |
+| +0x005 | 1 | u8 | RelationVisual | a relation / visual byte; copied to the Actor relation/visual field. VALUE-pending (per-record hint; note: the live pair-relation FSM is driven by opcode 5/53 SmsgActorVitalsAndPairState, not by this per-record byte). |
 | +0x006 | 2 | — | pad | two padding bytes (not consumed). |
 | +0x008 | 880 | — | SpawnDescriptor | the 880-byte descriptor core; copied wholesale into the Actor at Actor +0x74. World X/Z land at record +0x54 / +0x58. |
-| +0x378 | 1 | u8 | TrailerVisual | a visual byte; copied to an Actor visual field (with companion propagation). VALUE-pending. |
+| +0x378 | 1 | u8 | TrailerVisual | **Companion-propagated animation/visual variant byte** (CYCLE 15 confirmed). Stored to Actor +0x734 (`anim_var_a`); also written to the paired sub-actor. Matches the 5/1 trailer `anim_visual_byte`. |
 | +0x379 | 1 | — | pad | not consumed. |
-| +0x37A | 1 | u8 | CombatTimerFlag | when non-zero, arms the Actor combat timer to a fixed duration. VALUE-pending. |
+| +0x37A | 1 | u8 | CombatTimerFlag | **When non-zero and the actor is a PC, arms the actor combat/animation timer** (CYCLE 15 confirmed) — sets Actor +0x588 (`anim_cycle_timer`) to 60. Companion-propagated. Matches the 5/1 trailer `combat_timer_flag`. |
 | +0x37B | 1 | — | pad | final read byte, not consumed. |
 
 Σ = 8 + 880 + 4 = 892 (0x37C), the exact tag-1/2/3 read length.
@@ -521,6 +521,192 @@ The 4/4 record is the **shortest** member of the spawn-carrier family — its 4-
 a visual byte and a combat-timer flag, with **no** 17-byte CP949 name region (the 5/3 carrier's
 trailer has one). On the 4/4 path, an actor's secondary name/area-name update arrives instead via the
 separate 36-byte tag-6 record.
+
+---
+
+## Network handlers that drive actor visual and state fields (CYCLE 15)
+
+These handlers are the write paths for actor fields documented above. Each sub-section gives the
+wire payload layout (consumer-confirmed per field) and the actor offset written. Firewall clean:
+all offsets are relative to the actor object start; no binary addresses, no decompiler identifiers.
+
+### 5/1 SmsgActorSpawnExtended — prefix and trailer (912 bytes total)
+
+Fixed-size total: **912 bytes** = 12-byte prefix + 880-byte SpawnDescriptor + 20-byte trailer.
+The 880-byte SpawnDescriptor core is documented in the "Embedded SpawnDescriptor" section above.
+
+**Prefix (packet +0 .. +11, 12 bytes):**
+
+| Pkt offset | Size | Type | Field | Actor offset | Confidence | Meaning |
+|---|---|---|---|---|---|---|
+| +0 | 1 | u8 | `sort` (selector) | +0x60 | confirmed | Spawn kind / actor sort. Switch: 1 = PC-self, 2 = generic spawn, 3 = NPC. Stored to the actor sort byte. |
+| +1 | 3 | — | (pad) | — | — | High bytes of the dword read; unused. |
+| +4 | 4 | u32 | `actor_id` | +0x5C | confirmed | Actor id (also the id half of the composite key). |
+| +8 | 1 | u8 | `rank_class_state` | +0x694 | confirmed | Rank / class display-state byte, zero-extended to a dword at Actor +0x694. Compared against small constants to choose a display state. |
+| +9 | 1 | u8 | `title_index` | +0x6E4 | confirmed | Title / rank index stored as a dword at Actor +0x6E4 (`title_slot`). **0 = no title; non-zero attaches a title display** via the title helper. |
+| +10 | 1 | u8 | `spawn_extra` | +0x740 | confirmed | Trailing spawn byte stored at Actor +0x740 (`spawn_extra`). Constructor default 0xFF. |
+| +11 | 1 | — | (pad) | — | — | Alignment. |
+
+**Trailer (packet +892 .. +911, 20 bytes; immediately after the 880-byte SpawnDescriptor):**
+
+| Pkt offset | Trailer+ | Size | Type | Field | Actor offset | Confidence | Meaning |
+|---|---|---|---|---|---|---|---|
+| 892 | +0 | 1 | u8 | `anim_visual_byte` | +0x734 | confirmed | Animation/visual variant byte (`anim_var_a`). **Companion-propagated** — also written to the paired sub-actor. Matches 4/4 `TrailerVisual`. |
+| 893 | +1 | 1 | u8 | `combat_timer_flag` | (→ +0x588) | confirmed | When non-zero and the actor is a PC, arms the combat/animation timer — sets Actor +0x588 (`anim_cycle_timer`) to 60. Companion-propagated. Matches 4/4 `CombatTimerFlag`. |
+| 894 | +2 | 1 | u8 | `visual_flags` | +0x378 | confirmed | Visual-flags bitmask byte (same field as opcode 5/124). Written **PC-only** on spawn. Bit 0x04 = VF_PairedCompanion. See the 5/124 section. |
+| 895 | +3 | 17 | char[17] | `display_name` | +0x678 | confirmed | 17-byte CP949 / EUC-KR text (16 bytes + NUL), assigned to the actor display-name slot at +0x678 (`name`). |
+
+> The 5/1 trailer (20 bytes, includes the name field) differs from the 4/4 trailer (4 bytes, no
+> name). Both carry an animation/visual byte and a combat-timer flag in the same roles, but the byte
+> order and the presence of the name are distinct — document each carrier from its own handler.
+
+---
+
+### 5/5 SmsgActorStateEvent — visual-state dispatch (32 bytes)
+
+Fixed-size read: **32 bytes**. References **two distinct actors**: a **source/event actor** (looked
+up by `source_id`) and a **target actor** (looked up by composite key `target_sort`/`target_id`).
+The dispatch key is the **source actor's** `inner_event_code` at Actor +0x88 (SD +0x14, u16,
+server-stamped at spawn). If the source actor is not found in the actor map the handler returns
+immediately with no visual applied.
+
+**Payload:**
+
+| Pkt offset | Size | Type | Field | Confidence | Meaning |
+|---|---|---|---|---|---|
+| +0x00 | 4 | u32 | `target_sort` | confirmed | Sort half of the target composite key (byte sort widened to dword). |
+| +0x04 | 4 | u32 | `target_id` | confirmed | Id half of the target composite key (matches Actor +0x5C). |
+| +0x08 | 4 | u32 | `source_id` | confirmed | Event/source actor id; resolved by id-only lookup. Its `inner_event_code` at Actor +0x88 is the dispatch key; its Actor +0x208 region carries an effect/visual id used by codes 1001/1011/1021/1023. |
+| +0x0C | 20 | char[20] | `name_buf` | confirmed | 20-byte buffer; 17 bytes (16 + NUL, CP949) consumed only by code 1020 (rename). |
+
+**Visual-state code dispatch (on the source actor's `inner_event_code` at Actor +0x88):**
+
+| Code | Pre-condition | Visual / effect applied to the target | Suppressed by on-hit ids? |
+|---|---|---|---|
+| 1001 | src Actor+0x208 ≠ 0 | Spawn a world-positioned FX (effect id = src Actor+0x208) at target `last_packet_pos`/`last_packet_rot`; play an actor event sound (channel 5) chosen from the source actor's engine-id field at Actor+0x34 (see context-sound table). Skill/aura activation burst. | No |
+| 1011 | src Actor+0x208 ≠ 0 | **Disguise / polymorph apply**: play sound 800000009; run the disguise routines consuming target `disguise_outfit_id` (+0x6E4) with src Actor+0x208 as the disguise/effect id. Re-skins the target actor. | Yes — pre-empted when src `on_hit_item_id` (+0x134) or `on_hit_mp_item_id` (+0x144) ≠ 0 |
+| 1020 | (none) | **Rename**: copy 17 bytes (CP949) from packet `name_buf` into target `name` at Actor +0x74. Updates the actor's displayed name. | Yes |
+| 1021 | (none) | **Motion/appearance change**: write the low 16 bits of src Actor+0x208 into target Actor+0xA2 (SD +0x2E, appearance-region interior); reset and re-apply the target's motion animation (sound tag 800000009). | Yes |
+| 1023 | src Actor+0x208 ≠ 0 | Same world-positioned FX as code 1001 (effect id = src Actor+0x208, at target pos/rot), but with **fixed sound id 863000001**. A distinct activation state. | No |
+| 1041 | (none) | **Set in-combat flag**: write 1 to target `in_combat_flag` at Actor +0x3A0 (SD +0x32C). Marks the target as in combat. | No |
+
+**Context-sound table for code 1001** (chosen from the source actor's engine-id field at Actor+0x34):
+
+| Source engine-id range | Sound id played |
+|---|---|
+| 213062504 .. 213062507 | 862700001 |
+| 213062508 | 862800001 |
+| 213062509 | 862800002 |
+| 213062575 | 862900001 |
+| 213062576 | 862900002 |
+| 213062577 | 862900003 |
+| (any other) | 0 (no sound) |
+
+**Dispatch precedence:** codes 1011 / 1020 / 1021 sit inside an else-chain gated on the source
+actor's on-hit item ids — if `on_hit_item_id` (+0x134) is non-zero the group is pre-empted by an
+on-hit-item FX (effect 350000021); if `on_hit_mp_item_id` (+0x144) is non-zero it is pre-empted by
+an on-hit-MP FX (effect 350000022). Codes 1001, 1023, and 1041 are evaluated in separate,
+unconditional blocks after that group and are **not** suppressed by the on-hit ids.
+
+> **Actor +0xA2 (SD +0x2E):** written by code 1021 as a 16-bit motion/appearance change target — a
+> previously unmapped interior point of the appearance region. Follow-up pass recommended to confirm
+> its standalone semantic (see open question 3).
+>
+> **src Actor+0x208 as effect id:** a context-dependent reuse of the SD +0x194 aura region at
+> runtime. Consistent with the existing buff-slot/aura overlay note for this region.
+
+---
+
+### 5/53 SmsgActorVitalsAndPairState — vitals + pair-relation FSM (32 bytes)
+
+Fixed-size payload: **32 bytes**. Selects the target actor by composite key `(sort, actor_id)`, mirrors
+HP/MP/stamina, and drives a pair-relation state machine (formed / broken) with a chat-log broadcast.
+The `sort` value **8 is remapped to 1** before the actor lookup. The pair-relation branch runs only
+when `sort == 2` (the paired/secondary entity sort) and `partner_actor_id` is non-zero.
+
+**Payload:**
+
+| Pkt offset | Size | Type | Field | Actor offset | Confidence | Meaning |
+|---|---|---|---|---|---|---|
+| +0 | 1 | u8 | `sort` | (key) | confirmed | Actor sort for the composite key. Value 8 remapped to 1 before lookup. |
+| +1 | 3 | — | (pad) | — | — | High bytes of the dword read; unused. |
+| +4 | 4 | u32 | `actor_id` | +0x5C | confirmed | Actor id (id half of the composite key). |
+| +8 | 2 | — | (gap) | — | low | Two bytes inside the 32-byte block; not consumed by any field. |
+| +10 | 1 | u8 | `relation_state` | +0xAC (SD+0x38) | confirmed | **Pair-relation state byte.** Written to SD+0x38 (`state_byte`). Enum: **0 = no relation, 1 = relation active, 2 = second relation state**. See transition table. |
+| +11 | 1 | u8 | `relation_state_2` | +0xAD (SD+0x39) | confirmed | Secondary state byte written to SD+0x39 (`secondary_level_byte`). Mirrored to a client global for the local player. Full role not individually settled — R-CAP item 13. |
+| +12 | 4 | u32 | `partner_actor_id` | +0x3C8 (SD+0x354) | confirmed | **Pair partner actor id** (looked up as sort-1 PC). Stored when a relation is formed; cleared to 0 when broken. |
+| +16 | 8 | i64 | `current_hp` | +0xB0 | confirmed | Current HP — a single signed 64-bit integer written to Actor +0xB0..+0xB7 (capped against the computed max for the local player). CYCLE 15: one i64, NOT two packed u32. |
+| +24 | 4 | i32 | `current_mp` | +0xB8 | confirmed | Current MP/ki, written to Actor +0xB8. CYCLE 15: the field formerly read at packet +20 / Actor +0xB4 was the HP high dword; MP is here. |
+| +28 | 4 | i32 | `current_stamina` | (local global only) | partial | Stamina — written to a client global only when the target is the local player; there is no inline actor stamina slot. Not stored on remote actors. |
+
+**Pair-relation transition logic (consumer-confirmed):**
+
+Let `old` = `relation_state` currently on the actor (SD+0x38), `new` = `relation_state` from the
+packet. Transition runs only when `sort == 2` and `partner_actor_id` is non-zero.
+
+| Condition | Transition | Effect |
+|---|---|---|
+| `old == 0` and `new == 1` | Relation **FORMED** | Store `partner_actor_id` at Actor+0x3C8; broadcast a chat-log + on-screen notice (text sourced from MessageDB ids 10025–10028 — R-CAP item 14); trigger a paired visual setup. |
+| `old in {1,2}` and `new == 0` | Relation **BROKEN** | Clear Actor+0x3C8 to 0; broadcast a break notice (MessageDB 10029–10032). |
+| `old == 2` and `new == 0` and partner id == local-player id | Relation **BROKEN (local)** | Additionally tears down the paired visual on the local player's side. |
+
+> **Relation label text** (couple / sworn-pair / master-disciple / companion) is held in MessageDB
+> ids 10025–10032 (CP949 asset table), not in the binary — resolve from that loaded asset (R-CAP 14).
+>
+> **State-1 vs. state-2 distinction** not settled by consumer-side analysis alone — R-CAP item 13.
+
+---
+
+### 5/124 SmsgActorVisualFlagsSet — visual-flags update (12 bytes)
+
+Fixed-size payload: **12 bytes**. Sets the `visual_flags` bitmask byte at Actor +0x378 (SD +0x304)
+and forces a full actor visual refresh + weapon-node visibility re-apply.
+
+**Payload:**
+
+| Pkt offset | Size | Type | Field | Actor offset | Confidence | Meaning |
+|---|---|---|---|---|---|---|
+| +0 | 4 | u32 | `sort` | (key) | confirmed | Actor sort for the composite key. |
+| +4 | 4 | u32 | `actor_id` | +0x5C | confirmed | Actor id (id half of the composite key). |
+| +8 | 1 | u8 | `visual_flags` | +0x378 | confirmed | Visual-flags bitmask byte written to Actor +0x378 (`visual_flags`). Local-player copy also mirrored to a client global. |
+| +9 | 3 | — | (pad) | — | — | Remainder of the 12-byte read; not consumed. |
+
+**`visual_flags` bitmask (+0x378, SD+0x304):**
+
+| Bit mask | Name | Effect (consumer-confirmed) |
+|---|---|---|
+| 0x04 (bit 2) | VF_PairedCompanion | In the actor visual-refresh routine: the actor's paired sort-15 companion sub-entity is found, its visual scale halved, and its motion reset/re-applied. |
+| 0x01 / 0x02 / 0x08 / 0x10 / 0x20 / 0x40 / 0x80 | (not enumerated) | No confirmed reader at this static pass — R-CAP item 15 (xref work or live capture needed). |
+
+---
+
+### 5/127 SmsgStealthToggle — stealth visibility toggle (12 bytes)
+
+Fixed-size payload: **12 bytes**. Toggles the `hidden_stealth_flag` at Actor +0x72C. **The
+stealth flag is a boolean ON/OFF — not a multi-bit mask:** the handler performs a nonzero test only
+(no bit extraction). Any nonzero wire byte = stealth ON; zero = stealth OFF.
+
+**Payload:**
+
+| Pkt offset | Size | Type | Field | Actor offset | Confidence | Meaning |
+|---|---|---|---|---|---|---|
+| +0x00 | 4 | u32 | `sort` | (key) | confirmed | Actor sort/category for the composite key. |
+| +0x04 | 4 | u32 | `actor_id` | +0x5C | confirmed | Actor id (id half of the composite key). |
+| +0x08 | 1 | u8 | `stealth_flag` | +0x72C | confirmed | Stealth state. **Nonzero = stealth ON; zero = stealth OFF.** Stored as 0/1 boolean — only zero vs. nonzero is distinguished; no bitfield. |
+| +0x09 | 3 | — | (pad) | — | — | Inside the 12-byte read window; not consumed. |
+
+**Behavior (consumer-confirmed):**
+
+- Stealth **ON** (wire byte ≠ 0): Actor +0x72C := 1; the client releases all of the target actor's
+  visual nodes — the actor disappears for remote viewers.
+- Stealth **OFF** (wire byte == 0): Actor +0x72C := 0; the client rebuilds the actor's skin and
+  re-uploads the deformed mesh — the actor reappears.
+- **Local-player exemption:** if the target actor id equals the local-player global's id, the flag is
+  still stored at +0x72C but the visual release/rebuild is **skipped** — a stealthed local player
+  keeps seeing their own model; only remote observers' clients hide it.
+
+This is the server-driven counterpart to the local buff_id-45 stealth path; both write the same
+`hidden_stealth_flag` at Actor +0x72C through the same boolean semantics.
 
 ---
 
@@ -590,14 +776,14 @@ find "me" each frame, and do not model this as a struct field. (Working name in 
 
 ## Open questions
 
-1. **`level` byte boundary (static-hypothesis; wire capture-pending).** `state_byte` (SD +0x38) and
-   `secondary_level_byte` (SD +0x39) are written by the runtime-table-dispatched 5/53 vitals handler
-   (not statically reachable). A `level` u16 is labelled at SD +0x3A. **New IDB evidence:** the
-   char-select **display** path reads a **clean u16 at SD +0x3A** and renders it as the level
-   number. That is one (display) read site — it shifts `level @ SD +0x3A` from "draft" toward a
-   likely clean u16, but it does **not** prove the *wire* encoding, because the 5/53 writes at
-   SD +0x38/+0x39 are runtime-dispatched. **Resolve the wire boundary with a real 5/53 vitals
-   capture for a character of known level before hard-coding a 16-bit `level` field.**
+1. **`level` byte boundary (static-hypothesis; wire capture-pending).** A `level` u16 is labelled at
+   SD +0x3A. **CYCLE 15 corroboration (consumer-confirmed):** on the 5/53 SmsgActorVitalsAndPairState
+   path the bytes at SD+0x38 and SD+0x39 carry **pair-relation state** (enum 0/1/2 and secondary state
+   byte), not the character level. Combined with the char-select display path reading a clean u16 at
+   SD +0x3A, the evidence now strongly favours `level` being a clean u16 at SD +0x3A (with SD+0x38/+0x39
+   serving as state/relation bytes on opcode-specific paths). A live capture of a real 5/53 packet for a
+   character of known level is still needed to confirm the wire boundary before hard-coding a 16-bit
+   `level` field.
 2. **`equip_ref_table` interior (SD +0x58 .. +0x197).** 20 entries × 16 bytes. The leading 4-byte
    dword per entry is **confirmed** as the visible-gear **part gid**; the renderer attaches
    **overlay slots {3,4,6,2,11,14}** from this table (each gid -> `data/char/skin/g{gid}.skn`).
@@ -619,8 +805,10 @@ find "me" each frame, and do not model this as a struct field. (Working name in 
 7. **AoE region (+0x70C, 32 bytes).** An AoE-member-count dword at +0x728 is confirmed; the rest
    of the region (likely a small array of AoE target references or an AoE state machine) is not
    individually mapped.
-8. **`anim_var_a` (+0x734), `world_state_server` (+0x738), `spawn_extra` (+0x740).** All written
-   from the network but their precise protocol roles need capture correlation.
+8. **`world_state_server` (+0x738), `spawn_extra` (+0x740).** Written from the network; their precise
+   protocol roles need capture correlation. (`anim_var_a` at +0x734 is now **confirmed** — CYCLE 15:
+   sourced from the 5/1 trailer `anim_visual_byte` and the 4/4 `TrailerVisual` field,
+   companion-propagated; no longer open.)
 9. **`max_hp` / `max_mp` are confirmed NOT stored.** Computed on demand (local player only) from
    stats + equipment + auras. Remote actors carry only `current_hp` / `current_mp` from the wire.
 10. **Capture coverage.** Field *offsets and sizes* are recovered from static layout evidence and
@@ -628,8 +816,9 @@ find "me" each frame, and do not model this as a struct field. (Working name in 
     identity, the sort/spawn-kind switch, the equip-id table, the cell index, and the lifecycle enum
     are exercised by multiple handlers and are confirmed; everything marked `partial` / `draft`, and
     every *wire VALUE meaning*, should be re-checked against a real CharSpawn / 5-53 capture before
-    an engineer hard-codes it. The 5/53 vitals and 5/13 movement handlers are runtime-table-dispatched
-    (their dispatch table is null at static time), so their live writes are debugger/capture-only.
+    an engineer hard-codes it. **CYCLE 15 update:** 5/53 SmsgActorVitalsAndPairState field semantics
+    are now consumer-confirmed (pair-relation FSM + vitals); the 5/13 movement handler remains
+    runtime-table-dispatched and its live writes are still debugger/capture-only.
 11. **+0x488/+0x48C context-dependent reuse (soft).** The live path stores `last_state_ms` (int32) at
     +0x488; the char-preview path writes +0x488 and +0x48C as a 70.0f float pair (an AoE / cell
     working value). Both readings are valid in their own path — recorded as a context-dependent
@@ -652,3 +841,18 @@ find "me" each frame, and do not model this as a struct field. (Working name in 
     the battle-controller singleton (the locked battle target), one on the actor (the UI/current target).
     No actor `world_pos` (+0x444) reading is affected; there is no longer any "+444" battle-target
     candidate on the actor in any table.
+13. **R-CAP: Pair-relation state-1 vs. state-2 distinction** (debugger-pending, non-blocking). On the
+    5/53 path `relation_state` values 1 and 2 are both valid pre-break states; whether they encode two
+    relationship kinds (e.g. couple / sworn-pair) or two phases (proposed vs. established) is not
+    settled by consumer-side analysis alone. Breakpoint plan: observe the `relation_state` store in
+    the 5/53 handler across known pair-event transitions (relation formed, type changed, relation
+    broken) to read the wire values for each state.
+14. **R-CAP: Relation label text in MessageDB 10025–10032** (asset-lookup pending, non-blocking). The
+    human-readable wording for "relation formed" and "relation broken" broadcast messages is held in
+    MessageDB ids 10025–10032 (CP949 message asset table), not hardcoded in the binary. Resolve the
+    label (couple / sworn-pair / master-disciple / companion) from that loaded asset table.
+15. **R-CAP: Full `visual_flags` bitmask at Actor+0x378** (xref/capture-pending, non-blocking). Only
+    bit 0x04 (VF_PairedCompanion) has a confirmed reader at this static pass. Remaining bits
+    (0x01 / 0x02 / 0x08 / 0x10 / 0x20 / 0x40 / 0x80) need further xref analysis of the actor
+    visual-refresh routine or a live capture of the byte across known visual states (weapon
+    drawn/sheathed, stealth, mount, etc.).

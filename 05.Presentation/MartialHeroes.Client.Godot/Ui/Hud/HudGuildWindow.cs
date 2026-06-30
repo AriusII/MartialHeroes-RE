@@ -1,4 +1,7 @@
 using Godot;
+using MartialHeroes.Client.Application.Contracts.Events;
+using MartialHeroes.Client.Application.Contracts.Hud;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -38,20 +41,28 @@ public sealed partial class HudGuildWindow : Control
 
     private const double ResyncThrottleSecs = 30.0;
 
+    private const byte OpRefresh = 41;
+    private const byte OpResync = 42;
+
     private readonly Label[] _col1Labels = new Label[VisibleRows];
     private readonly Label[] _col2Labels = new Label[VisibleRows];
     private readonly Label[] _col3Labels = new Label[VisibleRows];
     private readonly Label[] _col4Labels = new Label[VisibleRows];
     private readonly Button[] _rowActBtns = new Button[VisibleRows];
+    private readonly uint[] _memberActorIds = new uint[MemberCap];
+
     private int _currentPage;
     private double _lastResyncTime = -ResyncThrottleSecs;
-
-
+    private int _selectedMember = -1;
     private bool _open;
+    private ClientContext? _ctx;
+    private IHudEventHub? _hub;
 
 
-    public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
+    public void Build(HudAtlasLibrary atlas, HudTextLibrary text, ClientContext ctx)
     {
+        _ctx = ctx;
+
         Name = "HudGuildWindow";
 
         AnchorLeft = 1f;
@@ -146,8 +157,8 @@ public sealed partial class HudGuildWindow : Control
 
         GD.Print("[HudGuildWindow] Built — GuildAPanel (50-member cap, 10 visible rows, 23px stride, y=164+23r). " +
                  "Columns: name x=11 / class x=80 / level x=203 / status x=252. " +
-                 "Inbound: TODO(capture): guild member-record value fields (S2C 4/65 1812B). " +
-                 "Outbound: TODO(world-campaign): C2S 2/30 CmsgGuildOp (8B). " +
+                 "Inbound: TODO(channel-supplement): GuildRosterEvent + GuildMemberPatchEvent + GuildStateChangedEvent need IHudEventHub channels. " +
+                 "Outbound: SendGuildActionAsync (C2S 2/30). " +
                  "No dedicated hotkey (CODE-CONFIRMED — context-driven open). " +
                  "spec: Docs/RE/specs/ui_system.md §8.15 CODE-CONFIRMED.");
     }
@@ -239,52 +250,109 @@ public sealed partial class HudGuildWindow : Control
     }
 
 
+    public void BindHub(IHudEventHub hub)
+    {
+        _hub = hub;
+    }
+
+    public override void _Process(double delta)
+    {
+    }
+
+    public void OnGuildRoster(GuildRosterEvent evt)
+    {
+        if (evt.Gate != 1) return;
+
+        for (var i = 0; i < evt.Members.Length && i < MemberCap; i++)
+            _memberActorIds[i] = evt.Members[i].ActorId;
+
+        RefreshVisibleRows(evt);
+    }
+
+    public void OnGuildMemberPatch(GuildMemberPatchEvent evt)
+    {
+        RefreshVisibleRowsFromCache();
+    }
+
+    public void OnGuildStateChanged(GuildStateChangedEvent evt)
+    {
+        GD.Print($"[HudGuildWindow] GuildStateChangedEvent: applyGate={evt.ApplyGate} action={evt.Action} result={evt.Result}.");
+    }
+
+
+    private void RefreshVisibleRows(GuildRosterEvent roster)
+    {
+        var pageStart = _currentPage * VisibleRows;
+        for (var r = 0; r < VisibleRows; r++)
+        {
+            var idx = pageStart + r;
+            if (idx < roster.Members.Length)
+            {
+                var m = roster.Members[idx];
+                _col1Labels[r].Text = m.Name;
+                _col2Labels[r].Text = m.Rank.ToString();
+                _col3Labels[r].Text = m.Points.ToString();
+                _col4Labels[r].Text = m.Online != 0 ? "온" : "오";
+            }
+            else
+            {
+                _col1Labels[r].Text = "";
+                _col2Labels[r].Text = "";
+                _col3Labels[r].Text = "";
+                _col4Labels[r].Text = "";
+            }
+        }
+    }
+
+    private void RefreshVisibleRowsFromCache()
+    {
+        var pageStart = _currentPage * VisibleRows;
+        for (var r = 0; r < VisibleRows; r++)
+        {
+            var idx = pageStart + r;
+            if (_memberActorIds[idx] == 0u)
+            {
+                _col1Labels[r].Text = "";
+                _col2Labels[r].Text = "";
+                _col3Labels[r].Text = "";
+                _col4Labels[r].Text = "";
+            }
+        }
+    }
+
     private void ChangePage(int direction)
     {
         var maxPage = (MemberCap - 1) / VisibleRows;
         _currentPage = Math.Clamp(_currentPage + direction, 0, maxPage);
-        GD.Print(
-            $"[HudGuildWindow] Page → {_currentPage} (showing members {_currentPage * VisibleRows}..{_currentPage * VisibleRows + VisibleRows - 1}). " +
-            "spec: Docs/RE/specs/ui_system.md §8.15.");
+        RefreshVisibleRowsFromCache();
     }
 
     private void OnRowAction(int rowIndex)
     {
-        var globalMember = _currentPage * VisibleRows + rowIndex;
-        GD.Print($"[HudGuildWindow] row action for member index {globalMember} (action {4613 + rowIndex}). " +
-                 "TODO(world-campaign): C2S 2/30 CmsgGuildOp. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.15.");
+        _selectedMember = _currentPage * VisibleRows + rowIndex;
     }
 
     private void OnGuildAction(int actionId)
     {
-        if (actionId == 4508)
-            GD.Print("[HudGuildWindow] action 4508 = guild-cap toggle (writes CHAR_GUILDCAP_ENABLE). " +
-                     "spec: Docs/RE/specs/ui_system.md §8.15.");
-        else
-            GD.Print($"[HudGuildWindow] guild action {actionId} → TODO(world-campaign): C2S 2/30 CmsgGuildOp. " +
-                     "spec: Docs/RE/specs/ui_system.md §8.15.");
+        var mode = (byte)(actionId - 4501);
+        var targetId = _selectedMember >= 0 ? _memberActorIds[_selectedMember] : 0u;
+        if (_ctx is not null)
+            _ = _ctx.UseCases.SendGuildActionAsync(mode, targetId);
     }
 
     private void OnRefresh()
     {
-        GD.Print("[HudGuildWindow] action 41 = refresh. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.15.");
+        if (_ctx is not null)
+            _ = _ctx.UseCases.SendGuildActionAsync(OpRefresh, 0u);
     }
 
     private void OnResync()
     {
-        var now = Time.GetTicksMsec() / 1000.0;
-        if (now - _lastResyncTime < ResyncThrottleSecs)
-        {
-            GD.Print("[HudGuildWindow] Resync throttled (30s cooldown). " +
-                     "spec: Docs/RE/specs/ui_system.md §8.15.");
-            return;
-        }
-
+        var now = global::Godot.Time.GetTicksMsec() / 1000.0;
+        if (now - _lastResyncTime < ResyncThrottleSecs) return;
         _lastResyncTime = now;
-        GD.Print("[HudGuildWindow] action 42 = resync (30s throttle) → TODO(world-campaign): C2S 2/30. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.15.");
+        if (_ctx is not null)
+            _ = _ctx.UseCases.SendGuildActionAsync(OpResync, 0u);
     }
 
 

@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
@@ -9,6 +10,7 @@ public sealed partial class HudErrorPanel : Control
     private const int DefaultTimeoutMs = 5000;
     private HudAnnouncePanel? _announceDelegate;
     private Label? _countdownLabel;
+    private HudTextLibrary? _text;
 
     private int _lastDisplayedSec = -1;
 
@@ -91,6 +93,72 @@ public sealed partial class HudErrorPanel : Control
     public void SetAnnounceDelegate(HudAnnouncePanel? announcePanel)
     {
         _announceDelegate = announcePanel;
+    }
+
+    public void SetTextLibrary(HudTextLibrary text)
+    {
+        _text = text;
+    }
+
+    public void ShowActionError(byte status, byte error)
+    {
+        if (status == 1)
+        {
+            if (error == 100)
+            {
+                var applyMsg = _text?.GetCaption(51026) ?? string.Empty;
+                if (!string.IsNullOrEmpty(applyMsg))
+                    ShowError(applyMsg);
+            }
+            return;
+        }
+
+        var stringId = ResolveActionErrorStringId(error);
+        if (stringId == 0) return;
+
+        var msg = _text?.GetCaption(stringId) ?? string.Empty;
+        if (string.IsNullOrEmpty(msg)) return;
+
+        if (error == 0x11)
+        {
+            var secondary = _text?.GetCaption(51019) ?? string.Empty;
+            if (!string.IsNullOrEmpty(secondary))
+                _announceDelegate?.ShowAnnounce(secondary);
+        }
+
+        ShowError(msg);
+    }
+
+    private static int ResolveActionErrorStringId(byte error)
+    {
+        if (error == 0xFF) return 21078;
+        return error switch
+        {
+            0x01 => 21074,
+            0x02 => 21075,
+            0x03 => 21076,
+            0x04 => 21077,
+            0x05 => 2163,
+            0x06 => 21097,
+            0x07 => 2164,
+            0x08 => 2165,
+            0x09 => 2166,
+            0x0A => 2167,
+            0x0B => 2168,
+            0x0C => 2169,
+            0x0D => 2170,
+            0x0E => 2171,
+            0x0F => 51016,
+            0x10 => 51017,
+            0x11 => 51018,
+            0x12 => 51020,
+            0x13 => 51023,
+            0x14 => 51019,
+            0x15 => 51025,
+            0x17 => 51029,
+            0x18 => 51033,
+            _ => 0
+        };
     }
 
 

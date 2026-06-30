@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -14,12 +15,13 @@ public sealed partial class HudTenderWindow : Control
     private const int MsgDetailOverCap = 66007;
     private int _detailRequestCount;
 
-
+    private ClientContext? _ctx;
     private bool _open;
 
 
-    public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
+    public void Build(HudAtlasLibrary atlas, HudTextLibrary text, ClientContext ctx)
     {
+        _ctx = ctx;
         Name = "HudTenderWindow";
 
         AnchorLeft = 0.5f;
@@ -130,9 +132,8 @@ public sealed partial class HudTenderWindow : Control
 
     private void OnConfirm()
     {
-        GD.Print("[HudTenderWindow] Confirm purchase → TODO(world-campaign): C2S 2/118 CmsgTenderConfirm. " +
-                 $"Not-enough-gold path: msg.xdb {MsgNotEnoughGold}. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.21.1 CODE-CONFIRMED.");
+        if (_ctx is not null)
+            _ = _ctx.UseCases.ConfirmTenderAsync();
     }
 
     private void OnRequestDetail()

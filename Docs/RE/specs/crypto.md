@@ -16,7 +16,8 @@
   the reply builder were each re-confronted to the binary by control flow + operands). **Open
   question #1 is RESOLVED statically** (see Section 5): the byte-cipher routine has **exactly one
   cross-reference — the outbound send gate** — so it is structurally unreachable on the receive path;
-  inbound is **LZ4-decompress only, then route**, with no inverse cipher. **CYCLE 14 re-anchor (f61f66a9): 9 facts re-confirmed SAME, 0 wire facts changed (anchor re-pinned only; see §9.4).**
+  inbound is **LZ4-decompress only, then route**, with no inverse cipher. **CYCLE 14 re-anchor (f61f66a9): 9 facts re-confirmed SAME, 0 wire facts changed (anchor re-pinned only; see §9.4).** **CYCLE 15 P-crypto (2026-06-30): SEED-128 consumers CONSUMER-CONFIRMED (§7.2/§10.2/§10.3 corrected); RC4 definitively absent (§10.5 resolved); FLINT modexp RSA-path entry corrected to `Bignum_ModExp`/`mexpkm` (§11.2 promoted to consumer-confirmed). 0 wire facts changed.**
+- **ida_reverified: 2026-06-30** (CYCLE 15 P-crypto: SEED-128 consumers consumer-confirmed at f61f66a9 — two local file-decoder call sites settled (§7.2/§10.2/§10.3 corrected); RC4 definitively absent (§10.5 resolved); FLINT modexp RSA-path entry corrected to `Bignum_ModExp`/`mexpkm`; §11.2 promoted from static-hypothesis to consumer-confirmed. Prior: 2026-06-27)
 - **ida_reverified: 2026-06-27** (CYCLE 14 re-anchor: all byte-cipher, LZ4, send-chain, keyless-stateless, direction-asymmetry, header-bypass, and login-packet-builder facts re-confirmed SAME on build f61f66a9; ida_anchor re-pinned from 263bd994; no wire-fact change. Prior: 2026-06-24)
 - **ida_reverified: 2026-06-24** (spec-audit re-confirmation: all byte-cipher, LZ4, handshake, and lifecycle facts re-confirmed; cipher control-flow obfuscation noted; SEED-128 non-wire cipher documented §7.2; staged-M width confirmed as static literal; `structs/secure_context.md` DRIFT-1/DRIFT-2 corrected. Prior: 2026-06-21)
 - **ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963**
@@ -31,6 +32,7 @@
 - **conflicts: none.** No constant or structure recovered this campaign contradicts the spec; the
   earlier Campaign-7 re-confirmation and the Section 6b debugger-verified facts are all consistent.
 - **Consolidated 2026-06-29:** §11 (FLINT/LINT object layout, digit-buffer internals, sliding-window Montgomery modexp, error taxonomy, exception hierarchy) folded from `bignum_flint.md` scrub; all §11 facts are static-hypothesis at f61f66a9; no wire facts changed.
+- **CYCLE 15 P-crypto (2026-06-30):** §7.2/§10.2/§10.3 corrected — SEED-128 consumers confirmed as local on-disk file decoders (not the network gate or the RSA credential chain); §10.5 resolved — RC4 definitively absent, actual cluster is SSLeay SHA-1 + Blowfish-family block cipher with embedded literal-string keys; §11.2 promoted from static-hypothesis to consumer-confirmed (`Bignum_ModExp`/`mexpkm` is the RSA-path modexp wrapper; `Flint_ModExp2` has zero cross-references and is unused); §11.3 extended with error code 8192 (0x2000) for precompute-table allocation failure in `mexpkm`.
 
 > Provenance note: `capture_verified` (end-to-end Wireshark round-trip) is still **false** — every
 > claim here is static-IDA confirmed, not yet exercised against a captured stream. "verification:
@@ -684,11 +686,16 @@ cipher — entirely separate from the keyless wire cipher of Section 3.1. It con
   routines that chain blocks with an initialization vector.
 
 This cipher is **definitively NON-WIRE** — it has no connection to the socket send/receive pipeline
-and must not be confused with `Net_Cipher_OutboundXorRol3Round` (Section 3.1). Its call sites are
-in non-wire subsystem regions; the exact subsystem (configuration-blob decryption, anti-tamper
-content check, or a billing side channel) is not fully pinned as of this writing — it is a known
-open item for a follow-up RE pass. The S-box table bytes are **not transcribed** here (out of
-clean-room scope); the cipher is characterized by algorithm family and role only.
+and must not be confused with `Net_Cipher_OutboundXorRol3Round` (Section 3.1). Its two confirmed
+call sites are both **local on-disk file decoders** with zero socket involvement
+(CONSUMER-CONFIRMED at f61f66a9; see §10.2 / §10.3): (A) the **server/channel-list data file**
+loader — the lobby-connect path opens a fixed data file, SEED-CBC-decodes the buffer in place, and
+validates a 768-bytes-per-server-record layout; and (B) the **crash-reporter symbol-index** loader —
+opens `symindex_dx9`, hex-ASCII-decodes each line, SEED-decodes the result, and feeds the BugTrap
+symbol index. The SEED cipher is re-keyed locally from object-held seed/IV material (never from the
+wire) before each file decode; no key material comes from the network path. The S-box table bytes
+are **not transcribed** here (out of clean-room scope); the cipher is characterized by algorithm
+family and role only.
 
 **Do not implement this cipher in `Network.Crypto`.** Document it if its exact call-site subsystem
 becomes relevant to another domain (e.g., `Assets` or `Client.Infrastructure` config loading).
@@ -918,7 +925,7 @@ required.
 
 ## 10. SEED-128 Consumers — Cycle 15 Addendum
 
-**`ida_reverified: 2026-06-27` (CYCLE 15 — SEED-128 and RSA/CryptoAPI call-graph mapped)**
+**`ida_reverified: 2026-06-30` (CYCLE 15 — SEED-128 consumers CONSUMER-CONFIRMED; RC4 definitively absent; FLINT modexp entry corrected)**
 
 ### 10.1 SEED-128 Core: `SeedCipher_EncryptBlock`
 
@@ -931,36 +938,23 @@ is endian-swapped per the SEED standard via `_rotl(x, 24) & 0xFF00FF00 | _rotl(x
 SeedCipher_EncryptBlock(subkey_array: u32[32], block_inout: u32[4]) → u32
 ```
 
-### 10.2 Consumer 1 — Outbound Network Cipher Gate
+### 10.2 Consumer A — Server/Channel-List Data File
 
-`Net_EncryptOutboundPacket` is the outbound encrypt gate called by `Net_SendPacket`. Header-only packets (`wire_size == 8`) bypass all transforms. Payloads are
-forwarded to `Net_Cipher_OutboundXorRol3Round` — **not** to `SeedCipher_EncryptBlock` directly.
+**Call chain:** `Login_LobbyConnect` → `ServerList_LoadFromListDat` → `EventCommand__LoadFromFile` → `EventCommand__DecodeBuffer` → codec dispatcher (SEED codec types 3/4) → `SeedCipher_EncryptBlock`.
 
-The actual in-game wire cipher is the **keyless stateless XOR-ROL-3-round** documented in
-Section 3. SEED-128 is NOT used for live gameplay traffic.
+`ServerList_LoadFromListDat` opens a fixed on-disk data file (the server/channel list), loads the entire file into a heap buffer, then runs the SEED-CBC decoder (codec dispatcher, SEED types 3/4) over the buffer in place. The finalize/length-verify step then validates that the decoded size equals `768 × record_count + 4` (768 bytes per server record). Although this path is triggered during lobby connect, it decrypts an **on-disk data file** — not any received network buffer. Zero socket involvement. The SEED cipher is re-keyed locally from object-held seed/IV material (never from the wire) before each file decode.
 
-### 10.3 Consumer 2 — Login RSA Credential Encryption
+> **Correction note (C15-S16):** the prior text of this subsection incorrectly identified the outbound encrypt gate as a SEED consumer. The outbound gate (`Net_EncryptOutboundPacket`) routes to `Net_Cipher_OutboundXorRol3Round` — the keyless XOR-ROL-3-round documented in §3 — and does **not** call `SeedCipher_EncryptBlock`. SEED is never reached from the network send/receive path.
 
-`SeedCipher_EncryptBlock` is a dependency of the **credential-encryption chain** triggered at
-login/world-enter via `Secure_BuildSecureAuthReply`. The full RSA auth flow:
+### 10.3 Consumer B — Crash-Reporter Symbol-Index
 
-| Step | Function | Action |
-|------|----------|--------|
-| 1 | `Secure_BuildSecureAuthReply` | Entry; calls `SecureCtx_UnprotectPageRW` |
-| 2 | `Secure_EncryptCredentialReply` | PKCS#1 v1.5 type-2 pad + RSA modexp |
-| 3 | `Rsa_PadAndModExp` | `c = m^e mod n` — big-integer arithmetic |
-| 4 | `Bignum_ToBytes_BigEndian` | Serialize ciphertext as big-endian digits |
-| 5 | `PacketBuf_WhitenPayloadDwords` | XOR whiten: key `0x29`, selector `0x40`, 41 DWORDs |
-| 6 | `SecureCtx_LockPageNoAccess` | Restores PAGE_NOACCESS |
+**Call chains:** `CrashReporter_InitBugTrap` → hex-ASCII-decode helper → buffer-decode wrapper → codec dispatcher (SEED codec types 3/4) → `SeedCipher_EncryptBlock`; and `CrashReporter_LoadSymbolIndex` → same tail.
 
-**Credential page protection:** The credential memory page is guarded with
-`VirtualProtect(PAGE_NOACCESS)` between uses. Only `SecureCtx_UnprotectPageRW` briefly opens
-it; `SecureCtx_LockPageNoAccess` closes it again immediately. This defeats naive memory-dump
-attacks timed outside the protected window.
+The crash-reporter initialiser opens the file `symindex_dx9`, reads text lines, and for each line passes a hex-ASCII string to a decode helper. The helper converts hex-ASCII character pairs into raw bytes (output length = `input_len / 2`), then runs the SEED buffer-decode wrapper (codec dispatcher + finalize/length-verify step), and returns the decoded result. The decoded strings feed the BugTrap crash-reporter symbol index; one decoded value is parsed as an integer. Subsystem: crash reporting / diagnostics, initialized at startup.
 
-**Post-RSA whitening:** The first 41 DWORDs of the packet payload are XOR-whitened with
-per-dword key `0x29` using selector `0x40`. This is a secondary obfuscation layer on top of
-the RSA ciphertext before it is placed on the wire.
+This is local file I/O (`fopen "symindex_dx9"`) with zero socket involvement. The SEED cipher is re-keyed locally from object-held seed/IV material before each decode.
+
+> **Correction note (C15-S16):** the prior text of this subsection incorrectly identified the login RSA credential chain as a SEED consumer. `Secure_BuildSecureAuthReply` → `Rsa_PadAndModExp` → `Bignum_ModExp` is the RSA credential path; it uses the FLINT/LINT bignum modexp substrate (§11) and does **not** call `SeedCipher_EncryptBlock`. For the RSA auth flow, page-guard details, and reply build, see §6.3 / §6a.
 
 ### 10.4 Windows CryptoAPI Cluster — Server Signature Verification
 
@@ -985,24 +979,44 @@ This cluster is **out of scope for `Network.Crypto`** (as noted in Section 1's e
 summary). It is documented here for completeness and cross-referencing with the anti-cheat
 and auth-session RE notes.
 
-### 10.5 RC4 — Not Confirmed
+### 10.5 RC4 — Definitively Absent
 
-The binary-wide scan for an RC4 S-box init loop (`cmp eax, 0x100` pattern within `.text`)
-produced no confirmed match. All `0x100` comparisons were attributed to UI, locale, or
-Lua subsystems. The world-enter file-hasher hypothesized in prior cycles is more likely the
-CryptoAPI SHA-1 path (`CryptHashData` cluster above) than a raw RC4 implementation.
+**RC4 is not present in this binary.** No RC4 key-scheduling algorithm (the canonical 256-entry
+identity fill `S[i]=i` followed by the modular swap loop) and no RC4 keystream generator exist
+anywhere in the binary. Binary-wide probes at f61f66a9 found zero strings containing `rc4` or
+`md5`, zero functions matching the RC4 KSA or PRGA pattern, and no 256-entry identity-init/swap
+function in the top crypto candidates. SSLeay 0.9.0b is partially linked (SHA-1 only); its RC4
+component is unreferenced and absent from the image. **Status: CONSUMER-CONFIRMED NEGATIVE
+(f61f66a9, 2026-06-30).**
 
-**Status: RC4 not present in the client binary as a standalone implementation.**
+**Correction of the "file-hasher keyed by a digest" hypothesis.** The construct that earlier
+cycles loosely described as "an RC4 / file-hasher keyed by a digest at world-enter" is, on ground
+truth, the `Crypt_*` anti-cheat / self-integrity cluster: bundled **SSLeay SHA-1** (content
+hashing, 160-bit digest) plus a **pi-constant-seeded Blowfish-family Feistel block cipher**
+(18-entry P-array seeded from the Blowfish digits-of-pi initialization constants; four 256-entry
+dword S-boxes; a data-dependent-rotation round function that diverges from textbook Blowfish —
+treat as a Blowfish-family variant, not canonical Blowfish). The cipher key is an **embedded
+ASCII-literal string constant** in the binary — NOT a SHA-1 digest. SHA-1 is used to hash the
+content being verified; the block cipher is keyed separately from a hardcoded literal string. The
+key strings and S-box table bytes are characterized by role and length only (DO-NOT-PROMOTE bytes
+— out of interoperability scope). All callers are anti-cheat / PE self-integrity consumers.
+
+This cluster maps onto §7.1 (anti-cheat + config) but uses bundled SSLeay SHA-1 + the
+Blowfish-family cipher alongside the Windows CryptoAPI wrappers documented in §10.4. Nothing in
+this cluster is in scope for `Network.Crypto`; nothing new requires implementation.
 
 ---
 
 ## 11. RSA Substrate: FLINT/LINT Bignum Library Internals
 
 > **Provenance (§11 only):** these subsections describe internal mechanics of the binary's
-> multi-precision integer library. They are **static-hypothesis at f61f66a9** — recovered by
-> static analysis on the current anchor but not yet confirmed via a live debugger session.
-> They have **no wire effect**; their purpose is to document the substrate that implements the
-> RSA modexp of §6.3 and the bignum import/export of §6.2, so that a faithful clean-room
+> multi-precision integer library. **§11.1 and §11.3** remain **static-hypothesis at f61f66a9**
+> (recovered by static analysis; not yet confirmed via a live debugger session). **§11.2** has
+> been promoted to **consumer-confirmed at f61f66a9** (C15-S19, 2026-06-30): the RSA-path call
+> chain was traced from the consumer (`Rsa_PadAndModExp` calling `Bignum_ModExp`) through the
+> modexp core, confirming the algorithm steps and correcting the named RSA-path entry.
+> All §11 facts have **no wire effect**; their purpose is to document the substrate that implements
+> the RSA modexp of §6.3 and the bignum import/export of §6.2, so that a faithful clean-room
 > implementation can verify round-trip correctness against the original library behavior.
 > The wire protocol (§§1–9) and the call-graph mapping (§10) are unaffected by these details.
 
@@ -1045,8 +1059,18 @@ error code 2048 (`LINT_Emod`; see §11.3).
 ### 11.2 Sliding-Window Montgomery Modular Exponentiation
 
 The `c = m^e mod n` operation of §6.3 is implemented internally as **sliding-window
-exponentiation with Montgomery reduction**. The observable algorithm steps
-(static-hypothesis, f61f66a9):
+exponentiation with Montgomery reduction** (CONSUMER-CONFIRMED at f61f66a9, C15-S19 2026-06-30).
+
+**RSA-path call chain (confirmed).** The login credential encryption reaches the modexp through:
+`Rsa_PadAndModExp` → `Bignum_ModExp` (the argument-validating LINT wrapper; its error-handler
+diagnostic string is literally `"mexpkm"`, confirming it is FLINT's `mexpkm_l`) → modexp core
+(the `mexpkm_l` body). `Bignum_ModExp` is the wrapper the RSA credential path **actually uses**.
+`Flint_ModExp2` exists in the binary but has **zero cross-references** and is an unused sibling
+LINT wrapper. Several other unused modexp variants are also present — all zero-cross-reference
+library leftovers, none on the wire path. Argument order at the call site:
+`Bignum_ModExp(result, base, exp, mod)`, computing `result = m^e mod n`.
+
+The observable algorithm steps (consumer-confirmed, f61f66a9):
 
 **Arithmetic primitive guard pattern.** All four basic arithmetic primitives (`Flint_Mul`,
 `Flint_DivRem`, `Flint_ModMul`, `Flint_ModSqr`) share the same guard pattern before
@@ -1079,7 +1103,7 @@ wire effect; they govern how the RSA modular exponentiation raises exceptions.
 7. **Montgomery post-conversion:** multiplies the accumulated result by 1 (the Montgomery unit)
    to convert out of Montgomery representation.
 8. **Cleanup:** zeroes and frees the precomputation table and temporary buffers before returning.
-   On success the caller (`Flint_ModExp2`) clears the result object's error status.
+   On success the caller (`Bignum_ModExp`) clears the result object's error status.
 
 ### 11.3 Error Taxonomy and Exception Class Hierarchy
 
@@ -1102,11 +1126,12 @@ index, and source line number.
 | 1024 (0x400) | Invalid Base | `LINT_Init` | Base value invalid. |
 | 2048 (0x800) | Modulus is Even | `LINT_Emod` | Montgomery requires an odd modulus. |
 | 4096 (0x1000) | Null Pointer | `LINT_Nullptr` | Argument is a null pointer. |
+| 8192 (0x2000) | Precompute Alloc Failure | — | Allocation failure for the odd-power precompute table in the `mexpkm` Montgomery modexp core. Core return code −4 mapped to this value by `Bignum_ModExp`. No wire effect. |
 | *other* | Unexpected Error | `LINT_Mystic` | Unexpected error. |
 
-Codes 512 and 128 are already referenced in §9.2 and §6; this table is the complete
-enumeration. Codes 2048 (`LINT_Emod`) and 512 (`LINT_Init`) are raised by the modexp path
-documented in §11.2.
+Codes 512 and 128 are already referenced in §9.2 and §6. Codes 2048 (`LINT_Emod`) and 512
+(`LINT_Init`) are raised by the modexp path documented in §11.2. Code 8192 (0x2000) is
+specific to the `mexpkm` core's precompute-table allocation failure and has no wire effect.
 
 **Exception class hierarchy (static-hypothesis, f61f66a9).** The library defines a custom
 exception hierarchy rooted at `LINT_Base`. All subclasses occupy **16 bytes** in memory:

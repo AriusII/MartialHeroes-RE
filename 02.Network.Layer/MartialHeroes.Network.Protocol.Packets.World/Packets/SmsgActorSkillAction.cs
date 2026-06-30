@@ -65,4 +65,40 @@ public readonly struct SmsgActorSkillAction
     {
         private byte _element0;
     }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public readonly struct TargetRecord
+    {
+        public const int Stride = 36;
+
+        public readonly byte TargetSubKey;
+
+        public readonly RecordPad0Buffer RecordPad0;
+
+        public readonly uint TargetKey;
+
+        public readonly RecordOpaque0Buffer RecordOpaque0;
+
+        public readonly long HitMagnitude;
+
+        public readonly RecordOpaqueTailBuffer RecordOpaqueTail;
+
+        [InlineArray(3)]
+        public struct RecordPad0Buffer
+        {
+            private byte _element0;
+        }
+
+        [InlineArray(12)]
+        public struct RecordOpaque0Buffer
+        {
+            private byte _element0;
+        }
+
+        [InlineArray(8)]
+        public struct RecordOpaqueTailBuffer
+        {
+            private byte _element0;
+        }
+    }
 }

@@ -1,5 +1,6 @@
 using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Domain.Actors.Actors;
+using MartialHeroes.Network.Protocol.Packets;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 
 namespace MartialHeroes.Client.Application.Handlers;
@@ -29,9 +30,40 @@ public sealed partial class GamePacketHandler
             packet.Success == ResultOk, packet.FailCode, packet.Gold, packet.Points));
     }
 
+    public void Handle(in SmsgBillingBalanceUpdate packet)
+    {
+        _eventBus.Publish(new BillingBalanceUpdatedEvent(packet.BillingPoints));
+    }
+
+    public void Handle(in SmsgShopPageUpdate packet)
+    {
+        _eventBus.Publish(new ShopPageRefreshedEvent(packet.Money));
+    }
+
+    public void Handle(in SmsgActionErrorResult packet)
+    {
+        _eventBus.Publish(new ActionErrorEvent(packet.Status, packet.Error));
+    }
+
+    public void Handle(in SmsgCraftingResult packet)
+    {
+        _eventBus.Publish(new CraftingResultEvent(
+            packet.SuccessFlag == ResultOk,
+            packet.ErrorCode,
+            packet.ResultSubtype,
+            packet.ResultValueA,
+            packet.ResultValueB,
+            packet.ResultValueC,
+            packet.ProducedSlot,
+            packet.ProducedItem0,
+            packet.ProducedItem1,
+            packet.ProducedItem2,
+            packet.ProducedItem3));
+    }
+
     public void Handle(in SmsgEquipChangeResult packet)
     {
-        var success = packet.Result == ResultOk;
+        var success = packet.Result != 0;
         if (success) RecomputeCombatStats();
 
         _eventBus.Publish(new EquipChangeResultEvent(success, packet.SlotKind, packet.SlotIndex));

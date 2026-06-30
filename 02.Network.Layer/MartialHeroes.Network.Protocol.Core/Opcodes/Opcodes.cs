@@ -374,9 +374,9 @@ public static class Opcodes
 
     public const uint SmsgAreaSkillEffectPanel = 0x40061;
 
-    public const uint SmsgCombatResultMessage = 0x40063;
+    public const uint SmsgCubeGambleResult = 0x40063;
 
-    public const uint SmsgCombatAttackUpdate = 0x40064;
+    public const uint SmsgCubeGambleReelUpdate = 0x40064;
 
     public const uint SmsgGlobalScalarPairUpdate = 0x40065;
 

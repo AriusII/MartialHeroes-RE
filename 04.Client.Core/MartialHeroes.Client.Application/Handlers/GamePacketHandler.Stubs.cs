@@ -1,3 +1,4 @@
+using MartialHeroes.Network.Protocol.Packets;
 using MartialHeroes.Network.Protocol.Packets.Login.Packets;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 
@@ -62,10 +63,6 @@ public sealed partial class GamePacketHandler
     {
     }
 
-    public void Handle(in SmsgGuildStateChangeResult packet)
-    {
-    }
-
     public void Handle(in SmsgResponseSlot71 packet)
     {
     }
@@ -79,10 +76,6 @@ public sealed partial class GamePacketHandler
     }
 
     public void Handle(in SmsgPvpDeathResult packet)
-    {
-    }
-
-    public void Handle(in SmsgActionErrorResult packet)
     {
     }
 
@@ -201,10 +194,6 @@ public sealed partial class GamePacketHandler
     {
     }
 
-    public void Handle(in SmsgStealthToggle packet)
-    {
-    }
-
     public void Handle(in SmsgPvpRankScoreUpdate packet)
     {
     }
@@ -222,7 +211,7 @@ public sealed partial class GamePacketHandler
 
     public void Handle(in SmsgCubeGambleReelUpdate packet)
     {
-        HandleCombatAttackUpdate(ActivePayload);
+        HandleCubeGambleReelUpdate(ActivePayload);
     }
 
     public void Handle(in SmsgCharacterListHeader packet)
@@ -234,4 +223,10 @@ public sealed partial class GamePacketHandler
     {
         HandleSceneEntityUpdate(ActivePayload);
     }
+
+    public void Handle(in SmsgCubeGambleResult packet)
+    {
+        HandleCubeGambleResult(ActivePayload);
+    }
+
 }

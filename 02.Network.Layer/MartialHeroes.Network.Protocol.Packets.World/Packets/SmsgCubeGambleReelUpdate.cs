@@ -8,7 +8,7 @@ namespace MartialHeroes.Network.Protocol.Packets.World.Packets;
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public readonly struct SmsgCubeGambleReelUpdate
 {
-    public const uint OpcodeId = Opcodes.SmsgCombatAttackUpdate;
+    public const uint OpcodeId = Opcodes.SmsgCubeGambleReelUpdate;
 
     public const int WireSize = 188;
 
@@ -16,15 +16,23 @@ public readonly struct SmsgCubeGambleReelUpdate
 
     public readonly byte Phase;
 
-    public readonly ReservedABuffer ReservedA;
+    public readonly byte SpinSubKind;
 
-    public readonly byte SubKind;
+    public readonly byte ReelDigitPack;
 
-    public readonly ReservedBBuffer ReservedB;
+    private readonly byte _pad0B;
 
-    public readonly uint Value;
+    public readonly uint ThrowValue;
 
-    public readonly OpaqueTailBuffer OpaqueTail;
+    public readonly ulong SettledMoney;
+
+    public readonly ReelHistoryBuffer ReelHistoryPack;
+
+    public readonly ReelIndexBuffer ReelIndexPack;
+
+    private readonly PadAlignBuffer _pad22;
+
+    public readonly BoardStateBuffer BoardState;
 
     [InlineArray(8)]
     public struct HeadOpaqueBuffer
@@ -32,20 +40,26 @@ public readonly struct SmsgCubeGambleReelUpdate
         private byte _element0;
     }
 
-    [InlineArray(1)]
-    public struct ReservedABuffer
+    [InlineArray(5)]
+    public struct ReelHistoryBuffer
     {
         private byte _element0;
     }
 
-    [InlineArray(1)]
-    public struct ReservedBBuffer
+    [InlineArray(5)]
+    public struct ReelIndexBuffer
     {
         private byte _element0;
     }
 
-    [InlineArray(172)]
-    public struct OpaqueTailBuffer
+    [InlineArray(2)]
+    public struct PadAlignBuffer
+    {
+        private byte _element0;
+    }
+
+    [InlineArray(152)]
+    public struct BoardStateBuffer
     {
         private byte _element0;
     }

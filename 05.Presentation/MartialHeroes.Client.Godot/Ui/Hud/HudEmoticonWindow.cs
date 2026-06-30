@@ -265,7 +265,7 @@ public sealed partial class HudEmoticonWindow : Control
 
     private void OnMacroPressed(int slotIndex)
     {
-        var nowMs = (long)Time.GetTicksMsec();
+        var nowMs = (long)global::Godot.Time.GetTicksMsec();
         if (nowMs - _lastMacroSentMs < MacroRateLimitMs)
         {
             GD.Print($"[HudEmoticonWindow] Macro rate-limited (5000 ms). slot={slotIndex}. " +

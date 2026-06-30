@@ -1,8 +1,9 @@
 ---
 status: routing-confirmed
-verification: routing/sizes [confirmed] (control-flow proven, anchor 263bd994); packet field VALUE semantics [capture/debugger-pending]; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); CYCLE 14 re-anchor (f61f66a9, 2026-06-27): 2 facts re-confirmed SAME (major-3 subtraction-chain ladder, SmsgGmChatMessage 3/50000 behavior)
+verification: routing/sizes [confirmed] (control-flow proven, anchor 263bd994); packet field VALUE semantics [capture/debugger-pending] EXCEPT: CYCLE 15 (f61f66a9, 2026-06-30): 3/100 SmsgCharActionResult in-world tooltip string-ids (1201-1208) and select-mode notice ids (1604/1107) CONSUMER-CONFIRMED; 3/7 SmsgCharManageResult Result polarity + Subtype selector + ReadyTime role CONSUMER-CONFIRMED; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); CYCLE 14 re-anchor (f61f66a9, 2026-06-27): 2 facts re-confirmed SAME (major-3 subtraction-chain ladder, SmsgGmChatMessage 3/50000 behavior)
 ida_reverified: 2026-06-24   # network-dispatch audit (263bd994): §1 Response install counts corrected — binary proves 102 raw stores / 100 occupied slots / 99 distinct handlers / 2 NULL (minors 0, 27); prior CYCLE 12 2026-06-22: 3/100 SmsgCharActionResult full dual-mode code table re-read; prior CYCLE 8 2026-06-21: major-4/5 154-slot dispatch tables (98 Response / 65 Push installed — now superseded by 102/100/99 figures) + 3/7 (8B) / 3/23 (28B) read sizes re-confirmed; prior CYCLE 7 2026-06-20
 ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): major-3 subtraction-chain ladder (all 11 wired minors incl. 3/50000) and SmsgGmChatMessage handler both re-confirmed SAME on build f61f66a9. SmsgGmChatMessage carries IDB dedup suffix _0 in this build (rename pending, ida-toolsmith); behavior and routing unchanged
+ida_reverified: 2026-06-30   # CYCLE 15 P-handlers (f61f66a9): 3/100 in-world tooltip ids (1201-1208) and select-mode notice ids (1604/1107) read directly from the initialized .data table → CONSUMER-CONFIRMED; 3/7 SmsgCharManageResult Result polarity (1=success/0=fail) + Subtype semantics (0=back-pose/1=front-pose/2=delete) + ReadyTime role (deletion-cooldown unix timestamp) → CONSUMER-CONFIRMED; §12 3/7 expanded with confirmed field table; §23.1 string-id bullet upgraded, message-DB asset note added; §23.2 3/6 name corrected to SmsgRenameCharResult (was SmsgCharManageResult); rename=3/7 hypothesis REFUTED; literal CP949 strings for ids {1105,1106,1107,1113,1201-1208,1604} are external message-DB VFS asset, not binary-embedded
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 sample_verified: false
@@ -214,7 +215,7 @@ matching `opcodes.md` and `packets/*.yaml`.
 
   The full bucket is `{0xC8,0xC9,0xCC,0xCD,0xCE,0xCF,0xD0,0xD1,0xD2,0xD4}` (ten live cases; `0xD3`
   is explicitly *not* a member — it falls to the default no-message arm). **This identical bucket
-  and the same id mapping are DUPLICATED — not relocated — in 3/6 `SmsgCharManageResult`; see §23.2.**
+  and the same id mapping are DUPLICATED — not relocated — in 3/6 `SmsgRenameCharResult`; see §23.2.**
 
 ### 3/4 — `SmsgSceneEntityUpdate`
 - **Routing `[confirmed]`: this is minor 4** (corrected — the first recon pass mislabelled it
@@ -905,12 +906,38 @@ note.** (3/4 `SmsgSceneEntityUpdate` is specced in §2, not here.)
 ### 3/7 — `SmsgCharManageResult`
 - **Routing `[confirmed]`: this is minor 7** (corrected — the first recon pass put
   `SmsgCharManageResult` at 3/4; the 8-byte handler is at minor 7).
-- **Fixed read: 8 bytes `[confirmed]`.** A subtype byte at `+2` distinguishes outcomes
-  (`0 / 1 / 2`); the delete-confirm subtype decrements the account's character count and
-  formats a same-day cooldown, then shows a select-screen message (id 5000 family) and updates
-  the slot state. Size `[confirmed]`; field VALUE meanings `[capture/debugger-pending]`.
-  Carries a `Result` byte at `+0`, the `Subtype` byte at `+2`, and a `ReadyTime` region at
-  `+4` (offsets `[confirmed]`; semantics pending).
+- **Fixed read: 8 bytes `[confirmed]`.** Offsets `[confirmed]`; field VALUE meanings
+  **CONSUMER-CONFIRMED** (CYCLE 15, anchor f61f66a9). Field layout:
+
+  | off | size | field | confirmed meaning |
+  |---|---|---|---|
+  | +0 | u8 | Result | **1 = success** (dispatch on Subtype); **0 = failure** (evaluate ReadyTime) |
+  | +1 | u8 | (pad) | read into buffer; not consumed |
+  | +2 | u8 | Subtype | success-action selector (see table below) |
+  | +3 | u8 | (pad) | not consumed |
+  | +4 | u32 | ReadyTime | unix timestamp; consumed ONLY on the deletion-cooldown failure branch |
+
+  **Subtype selector (on Result == 1):**
+
+  | Subtype | action |
+  |---|---|
+  | 0 | orient the select-screen character-slot preview to its **back pose** |
+  | 1 | orient the active slot preview to its **front pose** |
+  | 2 | **DELETE** — decrement the account character count (if > 0) AND clear the slot |
+
+  **Failure path (Result == 0):** when `Subtype == 0` AND `ReadyTime > now`, the handler
+  computes hours and minutes remaining until the deletion timestamp and shows a
+  deletion-countdown notice on the select screen (5000 ms duration), formatted from a
+  binary-embedded CP949 template. All other Result/Subtype combinations fall through to a
+  scene reset with no visible notice.
+
+  On any exit path the handler clears a busy latch and triggers a select-scene reset.
+
+  **3/7 is the character DELETE channel; rename (`SmsgRenameCharResult`) is 3/6.** The
+  Subtype-2 path (decrement account char count + slot clear) confirms this. Subtypes 0/1 are
+  slot-preview orientation only (no data mutation). The deletion-countdown notice uses a
+  binary-embedded CP949 format template (hours/minutes remaining until permanent delete) —
+  distinct from the message-DB-backed string ids used by 3/100 and 3/13.
 
 ### 3/23 — `SmsgCharStatusBytesByName`
 - **Routing `[confirmed]`: this is minor 23** (the first recon pass left it as a "generic wired
@@ -1606,8 +1633,9 @@ struct. Layout: `+0` container/target id `u32`; **`+4` op `u8` = (widget-action-
 - **Actor-key field order (sort@+0 vs id@+0)** — uniformly inferred as `(sort@+0, id@+4)` for the
   Push actor handlers from the lookup argument order, but not cross-checked against wire bytes.
 - **Gate/case constants vs full code maps** — the listed compares enumerate the case codes; the
-  exact code→message/effect mapping was fully read only for 5/5 and 4/4. The big switches (3/100,
-  5/10) are MED/LOW.
+  exact code→message/effect mapping was fully read only for 5/5 and 4/4. **3/100's
+  code→message-id mapping is now CONSUMER-CONFIRMED (§23.1, CYCLE 15, anchor f61f66a9)**; the
+  human semantic meaning of each code value and the 5/10 mapping remain MED/LOW.
 - **String-id classes** — immediates in 1000..99999 are heuristically "string-id-class"; some are
   read sizes, not ids (e.g. 1092/1096 by 4/71, 1552/1556 by 4/56) and are excluded.
 - **4/56 / 4/71 are large structured panels, not thin slots** — flagged for reclassification in
@@ -1951,12 +1979,16 @@ The sizes match §13/§14/§16 exactly (binary == doc); these are their consumer
 ### 23.1 — 3/100 `SmsgCharActionResult` code set & dual-mode behaviour — CANONICAL `[confirmed]` (control-flow)
 
 > **THIS SECTION IS THE CANONICAL 3/100 CODE TABLE** (re-reconciled 2026-06-22, anchor
-> `263bd994`, double counter-checked). Every other doc that touches 3/100 — `client_runtime.md`
+> `263bd994`, double counter-checked; CYCLE 15 string-id values CONSUMER-CONFIRMED 2026-06-30,
+> anchor f61f66a9). Every other doc that touches 3/100 — `client_runtime.md`
 > §7.5.2 (engine-state-transition view), `net_contracts.md` §A.4, and
 > `packets/3-100_char_action_result.yaml` — must **cross-reference this table**, not re-list a
 > subset. The structural facts (engine-state value, sub-state, error-detail operand, side effect,
-> string-id, timer-arming, the full code set) are `[confirmed]` control-flow; the **human meaning**
-> of each code value stays `[capture/debugger-pending]`.
+> timer-arming, the full code set) are `[confirmed]` control-flow; the **code→message-id mapping**
+> (string-ids 1201-1208, 1604, 1107) is **CONSUMER-CONFIRMED** (CYCLE 15, anchor f61f66a9, read
+> from the initialized data table — see the in-world and select-mode tables below); the **human
+> semantic meaning** of each code value (what the underlying player action represents) stays
+> `[capture/debugger-pending]`.
 
 3/100 reads a single 4-byte action/result code (§12) at payload offset 0 and runs a large switch
 with **two top-level modes**, keyed on whether the local player exists yet:
@@ -1995,9 +2027,11 @@ immediate).
   that drops 22/23 into a "hard error → 7/8" out-of-range bucket diverges from the binary.
 - **Reload family (select-mode):** **{202,203,232}** additionally set engine state = 2 (Load) — the
   create/rename/billing-accepted reload path.
-- **Common-tail notice (select-mode):** the generic notice shown after the publish path uses
-  string-id **1604** for code `23`, and string-id **1107** for the other non-zero set (both compiled
-  constants, not wire-read).
+- **Common-tail notice (select-mode, CONSUMER-CONFIRMED, CYCLE 15):** the generic notice shown
+  after the publish path uses string-id **1604** for code `23`, and string-id **1107** for the
+  other non-zero set (both compiled constants, not wire-read; confirmed by direct read of the
+  initialized data table, anchor f61f66a9). The literal CP949 text for each string-id is loaded
+  at runtime from the external message-DB VFS asset and is NOT embedded in the binary.
 - **Select-mode timer:** the deferred retry/timeout timer (duration 10000) is armed for any non-zero
   code that is **not 23** and **not** in **{202,203,232}**, and stores the code into the pending slot
   the connection-state machine watches.
@@ -2026,8 +2060,10 @@ to the common tail (the 1604 notice and the 23-timer-exclusion are **select-mode
 - **In-world GameState:** every non-zero code writes **state 7 / sub-state 8** (detail = code); code 0
   writes **state 6 / sub-state 8**. (Note the asymmetry: in-world error sub-state is **8**, not the
   select-mode recoverable **5**.)
-- **In-world tooltip string-ids (`STRUCTURE-HIGH`; the id *values* are `[capture/debugger-pending]`).**
-  Each id is a compiled constant (code-selected, not wire-read).
+- **In-world tooltip string-ids (CONSUMER-CONFIRMED, CYCLE 15, anchor f61f66a9).** Each id is
+  a compiled constant (code-selected, not wire-read), confirmed by direct read of the initialized
+  data table. The literal CP949 text for each id (string-ids 1201-1208 and 1107) is loaded at
+  runtime from the external message-DB VFS asset and is NOT embedded in the binary.
 - **In-world timer:** the deferred timer (duration 5000) is armed **unconditionally** for all in-world
   codes — there is **no** 23 / {202,203,232} exclusion in this mode (those exclusions are select-mode-only).
 
@@ -2043,8 +2079,10 @@ to the common tail (the 1604 notice and the 23-timer-exclusion are **select-mode
   `[confirmed]` (full decompile); every human meaning `[capture/debugger-pending]`.
 
 ### 23.2 — major-3 char-management fail-code class (3/6, 3/13) `[confirmed]` (control-flow)
-The **3/6 `SmsgCharManageResult`** (the rename/manage verdict — subtypes `0 = fail` /
-`1 = success rename`, etc.) and **3/13 `SmsgCharStatusUpdate`** (19-byte body, branches on body `+1`
+The **3/6 `SmsgRenameCharResult`** (the rename-result channel — `Result == 0` enters the
+error-code switch below; `Result == 1` is the success path. *Cross-ref: the success path's
+CREATE-like behavior — incrementing the account character count and writing a new slot record
+— belongs in `net_contracts.md` §A.4.*) and **3/13 `SmsgCharStatusUpdate`** (19-byte body, branches on body `+1`
 when body `+0 == 0`) handlers each surface a char-management verdict through **one and the same
 error-code bucket**: `{0xC8,0xC9,0xCC,0xCD,0xCE,0xCF,0xD0,0xD1,0xD2,0xD4}`, with the identical
 error-code → message-id mapping (`0xC8/0xC9 → 1106`; `0xCC,0xCD,0xCF,0xD0,0xD1,0xD2 → 1107`;

@@ -33,6 +33,8 @@
 > (§8, §11). The §6f durability/+184 control-flow path was re-confirmed this pass (unchanged).
 >
 > **CYCLE 14 re-anchor (f61f66a9, 2026-06-27):** 1 fact re-confirmed SAME (item-wire handler routings/body sizes 4/12 16B, 4/22 36B, 4/50 32B, 4/19 56B, 4/149 header+record-run; upgrade constants level cap 28, process steps 6, recipe stride 44, success cue 862100101, fail cue 862100102).
+>
+> **CYCLE 15 consumer-switch promotion (f61f66a9, 2026-06-30):** CONSUMER-CONFIRMED. The consumer branch shape for the three equip-ack handlers (4/12 `SmsgEquipItemResult`, 4/16 `SmsgEquipChangeResult`, 4/22 `SmsgItemSlotStateAck`) is now fully recovered. Correction applied: §7b previously hedged `result == 2` as "other"; that hedge is **refuted** — 4/12 and 4/22 are two-armed (`0` → notice, `1` → apply, `≥ 2` → no-op; the non-zero block contains only an inner `== 1` test with no else arm). 4/16 (§7d, new) tests `result` for **truthiness only** (`!= 0`), so any non-zero value applies and drives a full 20-slot EquipTable re-sync — **materially different** from 4/12/4/22. No C2S send is keyed on the result value in any of the three handlers (R-43/R-45 debugger-pending). R-CAP residuals: whether the server emits `result ≥ 2` (R-43); result-driven C2S frame (R-43/R-45); 4/16 `+0x0A` gate and `+0x0B` slot sub-byte deeper semantics.
 
 Neutral, offset-model of the item-related structures the legacy client used. Promoted from
 dirty-room notes; rewritten, no decompiler identifiers, no binary addresses. Design input for the
@@ -354,7 +356,7 @@ equip/unequip result plus stat/enchant fields.
 | Offset | Size | Type    | Field          | Conf       | Meaning |
 |--------|------|---------|----------------|------------|---------|
 | +0x00  | 8    | char[8] | `header`       | LIKELY     | Guard / identity prefix bytes. |
-| +0x08  | 1    | uint8   | `result`       | CONFIRMED (offset) | Read by the handler at +0x08: `0` = dismiss/error notice; `1` = apply (feeds the slot-apply path). The +0x08 read is control-flow confirmed; the code set stays capture-pending. |
+| +0x08  | 1    | uint8   | `result`       | CONFIRMED (consumer-switch) | `0` → dismiss/error notice (UI singleton, no state change); `1` → apply (feeds the slot-state apply path); **`≥ 2` → no-op** (the non-zero block contains only an inner `== 1` test with no else arm; values `≥ 2` fall through and the handler returns). CONSUMER-CONFIRMED at f61f66a9. |
 | +0x09  | 1    | uint8   | `pad_9`        | UNVERIFIED | Padding. |
 | +0x0A  | 1    | uint8   | `from_slot`    | LIKELY     | Source slot index. |
 | +0x0B  | 1    | uint8   | `to_slot`      | LIKELY     | Destination slot index. |
@@ -381,7 +383,7 @@ size is control-flow confirmed at 16 / 0x10). The apply path treats the underlyi
 | +0x00  | 1    | uint8  | `guard`      | LIKELY     | Validity guard; must be non-zero. |
 | +0x01  | 3    | —      | (pad)        | UNVERIFIED | Alignment. |
 | +0x04  | 4    | uint32 | `actor_sort` | LIKELY     | Actor identity / sort check. |
-| +0x08  | 1    | uint8  | `result`     | CONFIRMED (offset) | Read by the handler at +0x08: `0` = error → error UI; `1` = ok → apply; `2` = other. The +0x08 read is control-flow confirmed; the exact code set stays capture-pending. |
+| +0x08  | 1    | uint8  | `result`     | CONFIRMED (consumer-switch) | `0` → error notice (UI singleton, no state change); `1` → apply (equip-result apply path; then reads `to_slot` at +0x0C and tests `== 15` for the visual gear rebuild); **`≥ 2` → no-op** (the non-zero block contains only an inner `== 1` test with no else arm — the `2 = other` hedge in prior revisions is **refuted**). CONSUMER-CONFIRMED at f61f66a9. |
 | +0x09  | 1    | uint8  | (unused)     | UNVERIFIED | |
 | +0x0A  | 1    | uint8  | `from_slot`  | LIKELY     | Source slot index. |
 | +0x0B  | 1    | uint8  | `from_sub`   | UNVERIFIED | From-sub-slot or related index. |
@@ -395,6 +397,23 @@ size is control-flow confirmed at 16 / 0x10). The apply path treats the underlyi
 > equip-swap) and reads a dword pair near +0x1C/+0x20 as a dirty/expiry check (both `0` = not
 > expired). Those deeper apply byte positions are **static-hypothesis** (carried, not re-pinned) and
 > should be pinned against a capture; only the +0x0C `to_slot` read is confirmed here.
+
+### 7d. EquipChangeResult — 20-byte equip-change result (opcode 4/16)
+
+Read as a **fixed 20-byte (0x14) body** by the equip-change-result handler — the handler's read size is **control-flow confirmed** at 0x14. The per-opcode arm semantics are canonical here; deeper field-use detail and the full apply behaviour are in `Docs/RE/specs/inventory_trade.md §4.4`, which cross-references this table.
+
+| Offset | Size | Type   | Field          | Conf       | Meaning |
+|--------|------|--------|----------------|------------|---------|
+| +0x00  | 8    | char[8]| `header`       | LIKELY     | Guard / identity prefix bytes. |
+| +0x08  | 1    | uint8  | `result`       | CONFIRMED (consumer-switch) | Tested for **truthiness only** (`!= 0`) — **no `== 1` comparison**. `0` → error notice (UI singleton, no state change); **any non-zero value** → apply the equip-change result and run the full 20-slot EquipTable re-sync from the actor mirror. CONSUMER-CONFIRMED at f61f66a9. Key difference from 4/12 and 4/22: a server `result` of `2` or higher **applies** here, whereas on 4/12 and 4/22 it would be a no-op. |
+| +0x09  | 1    | uint8  | `pad_9`        | UNVERIFIED | Not individually decoded. |
+| +0x0A  | 1    | uint8  | `refresh_gate` | CONFIRMED (offset) | Visual-refresh gate, read inside the apply branch. The slot-15 weapon-drawn / appearance rebuild path runs **only when this byte is `0`**. Deeper semantics of non-zero values are R-CAP (debugger-pending). |
+| +0x0B  | 1    | uint8  | `slot`         | CONFIRMED (offset) | Read inside the apply branch when `+0x0A == 0`: tested `== 15` to drive the **full visual gear rebuild** (same appearance-slot trigger as 4/12 `to_slot` at +0x0C — see §3a). Deeper sub-byte semantics are R-CAP (debugger-pending). |
+| +0x0C  | 8    | —      | (gap)          | UNVERIFIED | Unmapped bytes to end of body. |
+
+> **Apply path (4/16, non-zero `result`):** equip-change apply runs; then if `+0x0A == 0`, reads `+0x0B` and tests `== 15` for the appearance / weapon-drawn visual rebuild; then **bulk re-syncs the full 20 × 16-byte EquipTable** from the local-player actor item block, runs a 20-entry actor-id validity scan, and finishes with the motion re-apply / visual-rebuild path. The full EquipTable bulk re-sync is unique to 4/16; the 4/12 and 4/22 handlers do not perform it.
+
+> **No C2S send on result (confirmed static, R-CAP for runtime).** None of the three equip-ack handlers (4/12, 4/16, 4/22) issue any client-to-server send keyed on the result value. They are pure S2C consumers. Whether a result-driven C2S frame is emitted via another code path at runtime is debugger-pending (R-43/R-45 — see §12).
 
 ### 7c. Item-panel slot-update packet (opcode 4/149) — header + record run
 
@@ -596,6 +615,9 @@ the engineer understands the client's pending-upgrade state machine.
   offset; the running counter lives in a separate slot-indexed array (§6f).
 - **EquipSlotBody +0x0C..+0x20** and **EquipItemResult fields beyond the 16-byte header** — inferred
   only; boundaries UNVERIFIED.
+- **Equip-ack result ≥ 2 server behavior (R-43, R-CAP, debugger-pending)** — The consumer switch for 4/12 and 4/22 silently ignores `result ≥ 2` (no-op); 4/16 applies any non-zero value. Whether the server ever emits `result ≥ 2` and its meaning is server-authored and unobservable statically. Breakpoint plan: pause each of the three handlers just after the body read, across many equip/unequip/swap operations, and log the `+0x08` byte; if only `{0, 1}` appear, the two-arm model is the whole truth.
+- **Equip-ack result-driven C2S send (R-43/R-45, R-CAP, debugger-pending)** — No static C2S send is keyed on the result value in any of the three handlers (4/12, 4/16, 4/22). Whether a result-driven C2S frame is emitted via another code path at runtime is unconfirmed. Breakpoint plan: monitor the C2S send path during live equip operations to check for any send triggered by receipt of a 4/12/4/16/4/22 result.
+- **4/16 `+0x0A` gate byte and `+0x0B` slot sub-byte deeper semantics (R-CAP, debugger-pending)** — `+0x0A` gates the visual refresh (refresh runs when `== 0`); `+0x0B` carries the slot index tested `== 15`. The confirmed reading is the gate condition and the `== 15` trigger. What a non-zero `+0x0A` value signifies to the server and whether `+0x0B` carries any sub-byte meaning beyond the slot index are debugger-pending.
 - **4/149 header gap bytes** (+0x01..+0x03, +0x0B) — the load-bearing header offsets (guard +0x00,
   id key +0x04, chunk_type +0x08, start_index +0x09, count +0x0A) and the 16-byte record-run framing
   are now control-flow confirmed; only the unmapped gap bytes need a capture.

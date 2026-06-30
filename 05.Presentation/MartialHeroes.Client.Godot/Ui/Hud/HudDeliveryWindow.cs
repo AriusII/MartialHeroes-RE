@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -37,12 +38,14 @@ public sealed partial class HudDeliveryWindow : Control
     private const float PanelH = 550f;
 
 
+    private ClientContext? _ctx;
     private bool _open;
     private int _selectedCell = -1;
 
 
-    public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
+    public void Build(HudAtlasLibrary atlas, HudTextLibrary text, ClientContext ctx)
     {
+        _ctx = ctx;
         Name = "HudDeliveryWindow";
 
         AnchorLeft = 0.5f;
@@ -261,14 +264,12 @@ public sealed partial class HudDeliveryWindow : Control
     {
         if (_selectedCell < 0)
         {
-            GD.PrintErr($"[HudDeliveryWindow] No cell selected for claim. msg.xdb {Msg16005}. spec: §8.21.5.");
+            GD.PrintErr($"[HudDeliveryWindow] No cell selected for claim (msg.xdb {Msg16005}).");
             return;
         }
 
-        GD.Print($"[HudDeliveryWindow] Claim intent: cell={_selectedCell}. " +
-                 "TODO(world-campaign): C2S 2/71 CmsgDeliveryClaim (4B). " +
-                 $"No-bag-slot caption: msg.xdb {Msg55016}. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.21.5 CODE-CONFIRMED.");
+        if (_ctx is not null)
+            _ = _ctx.UseCases.ClaimDeliveryAsync(_selectedCell);
     }
 
 

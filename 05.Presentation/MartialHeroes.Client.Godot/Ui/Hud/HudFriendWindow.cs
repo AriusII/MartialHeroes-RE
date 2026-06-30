@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -40,6 +41,7 @@ public sealed partial class HudFriendWindow : Control
     private double _lastRefreshTime = -RefreshThrottleSecs;
 
 
+    private ClientContext? _ctx;
     private bool _open;
     private Control? _tabAContent;
     private Control? _tabBContent;
@@ -48,8 +50,9 @@ public sealed partial class HudFriendWindow : Control
     private LineEdit? _textboxCut;
 
 
-    public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
+    public void Build(HudAtlasLibrary atlas, HudTextLibrary text, ClientContext? ctx)
     {
+        _ctx = ctx;
         Name = "HudFriendWindow";
 
         AnchorLeft = 1f;
@@ -280,8 +283,7 @@ public sealed partial class HudFriendWindow : Control
     {
         if (string.IsNullOrWhiteSpace(name)) return;
         var trimmed = name.Length > TbMaxLen ? name[..TbMaxLen] : name;
-        GD.Print($"[HudFriendWindow] Add friend '{trimmed}' → TODO(world-campaign): C2S 2/49 tag=0. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.14.");
+        if (_ctx is not null) _ = _ctx.UseCases.AddFriendAsync(trimmed);
         if (_textboxAdd is not null) _textboxAdd.Text = "";
     }
 
@@ -289,24 +291,16 @@ public sealed partial class HudFriendWindow : Control
     {
         if (string.IsNullOrWhiteSpace(name)) return;
         var trimmed = name.Length > TbMaxLen ? name[..TbMaxLen] : name;
-        GD.Print($"[HudFriendWindow] Cut friend '{trimmed}' → TODO(world-campaign): C2S 2/49 tag=1. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.14.");
+        if (_ctx is not null) _ = _ctx.UseCases.RemoveFriendAsync(trimmed);
         if (_textboxCut is not null) _textboxCut.Text = "";
     }
 
     private void OnRefresh()
     {
-        var now = Time.GetTicksMsec() / 1000.0;
-        if (now - _lastRefreshTime < RefreshThrottleSecs)
-        {
-            GD.Print("[HudFriendWindow] Refresh throttled (3-min cooldown). " +
-                     "spec: Docs/RE/specs/ui_system.md §8.14.");
-            return;
-        }
-
+        var now = global::Godot.Time.GetTicksMsec() / 1000.0;
+        if (now - _lastRefreshTime < RefreshThrottleSecs) return;
         _lastRefreshTime = now;
-        GD.Print("[HudFriendWindow] action 18 = refresh → TODO(world-campaign): C2S 2/54. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.14.");
+        if (_ctx is not null) _ = _ctx.UseCases.RefreshFriendListAsync();
     }
 
     private void OnConfirm()

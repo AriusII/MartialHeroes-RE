@@ -23,7 +23,10 @@ public sealed partial class GamePacketHandler
     private const int GuildMemberPointsOffset = 1212;
     private const int GuildMemberContribOffset = 1412;
     private const int GuildMemberLoginOffset = 1612;
-    private const byte GuildLeaveGate = 1;
+    private const byte GuildFullSyncGate = 1;
+    private const byte GuildActionLeave = 0;
+    private const byte GuildActionJoin = 1;
+    private const byte GuildActionPositionChange = 4;
 
     public void Handle(in SmsgGuildInfoFullSync packet)
     {
@@ -35,7 +38,7 @@ public sealed partial class GamePacketHandler
         var guildName = DecodeFixedText(body.Slice(GuildNameOffset, GuildNameLength));
         var guildId = BinaryPrimitives.ReadInt16LittleEndian(body.Slice(GuildIdOffset, sizeof(short)));
 
-        if (gate == GuildLeaveGate)
+        if (gate != GuildFullSyncGate)
         {
             Guild.Clear();
             _eventBus.Publish(new GuildRosterEvent(guildId, guildName, gate, ImmutableArray<GuildMember>.Empty));
@@ -78,5 +81,32 @@ public sealed partial class GamePacketHandler
         var name = present ? DecodeFixedText(nameSpan) : string.Empty;
 
         _eventBus.Publish(new GuildMemberPatchEvent(key, present, name, packet.ByteC, packet.ByteD));
+    }
+
+    public void Handle(in SmsgGuildStateChangeResult packet)
+    {
+        var action = packet.Action;
+        if (Guild.HasGuild && action == GuildActionJoin)
+        {
+            action = GuildActionPositionChange;
+        }
+
+        if (packet.ApplyGate != 0)
+        {
+            switch (action)
+            {
+                case GuildActionLeave:
+                    Guild.Clear();
+                    break;
+                case GuildActionJoin:
+                {
+                    ReadOnlySpan<byte> nameSpan = packet.GuildName;
+                    Guild.SetGuild(unchecked((short)packet.GuildId), DecodeFixedText(nameSpan), Guild.MemberCount);
+                    break;
+                }
+            }
+        }
+
+        _eventBus.Publish(new GuildStateChangedEvent(packet.ApplyGate, action, packet.Result));
     }
 }

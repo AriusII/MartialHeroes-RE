@@ -420,3 +420,60 @@ public sealed record QuestCompletedEvent(
     bool Applied,
     byte RewardState,
     bool Granted) : IClientEvent;
+
+public sealed record BillingBalanceUpdatedEvent(long BillingBalance) : IClientEvent;
+
+public sealed record ActorDeathStateEvent(
+    uint Sort,
+    uint ActorId,
+    uint Op,
+    uint SubIndex,
+    uint LinkedId) : IClientEvent;
+
+public sealed record CubeGambleResultEvent(
+    byte SubKind,
+    byte ResultCode,
+    byte BetType,
+    uint Wager) : IClientEvent;
+
+public sealed record CraftingResultEvent(
+    bool Success,
+    byte ErrorCode,
+    byte ResultSubtype,
+    uint ResultValueA,
+    uint ResultValueB,
+    uint ResultValueC,
+    byte ProducedSlot,
+    uint ProducedItem0,
+    uint ProducedItem1,
+    uint ProducedItem2,
+    uint ProducedItem3) : IClientEvent;
+
+public sealed record PvpDeathFxEvent(
+    uint Sort,
+    uint ActorId) : IClientEvent;
+
+public sealed record GuildStateChangedEvent(
+    byte ApplyGate,
+    byte Action,
+    byte Result) : IClientEvent;
+
+public sealed record StealthToggleEvent(uint ActorId, bool Stealthed) : IClientEvent;
+
+public sealed record MailLetterArrivedEvent(
+    uint LetterId,
+    string Sender,
+    uint LetterType,
+    uint AttachmentGold,
+    uint AttachmentItemId,
+    uint StatusFlags,
+    string Date,
+    string Subject,
+    string Body) : IClientEvent;
+
+public sealed record DeliveryRecordUpdatedEvent(
+    byte ResultCode,
+    byte SubAction,
+    string Sender,
+    long Money,
+    int EntryKey) : IClientEvent;

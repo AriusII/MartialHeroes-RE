@@ -1,3 +1,4 @@
+using MartialHeroes.Network.Protocol.Packets;
 using MartialHeroes.Network.Protocol.Packets.Login.Packets;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 
@@ -206,6 +207,18 @@ public interface IPacketHandler
     void Handle(in SmsgCharStatusBytesByName packet);
 
     void Handle(in SmsgCharActionResult packet);
+
+    void Handle(in SmsgBillingBalanceUpdate packet);
+
+    void Handle(in SmsgCubeGambleResult packet);
+
+    void Handle(in SmsgCraftingResult packet);
+
+    void Handle(in SmsgActorDeathState packet);
+
+    void Handle(in SmsgPvpDeathFx packet);
+
+    void Handle(in SmsgShopPageUpdate packet);
 
     void Handle(in SmsgLocalPlayerRelationSlot packet)
     {
