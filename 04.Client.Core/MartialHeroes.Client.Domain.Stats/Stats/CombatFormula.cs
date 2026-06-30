@@ -47,14 +47,9 @@ public static class CombatFormula
 
     public static int WeaponProficiencyPenaltyPercent(int proficiencyKey)
     {
-        return WeaponProficiencyPenaltyPercent(proficiencyKey, 0);
-    }
+        if (proficiencyKey >= 76) return 100;
 
-    public static int WeaponProficiencyPenaltyPercent(int proficiencyKey, int midBandPenalty)
-    {
-        if (proficiencyKey >= 75) return 100;
-
-        if (proficiencyKey >= 31) return midBandPenalty;
+        if (proficiencyKey >= 31) return 75;
 
         if (proficiencyKey >= 11) return 50;
 
@@ -71,9 +66,10 @@ public static class CombatFormula
     public static int AttackRating(in AttackRatingInputs inputs)
     {
         double total =
-            inputs.Slot15 +
+            (double)inputs.Slot15 + inputs.Slot15 +
             inputs.Slot94 +
-            inputs.Slot5;
+            inputs.Slot5 + inputs.Slot5 +
+            inputs.Slot223;
 
         var stats = inputs.Stats;
         total += inputs.WeaponTerm;
@@ -93,7 +89,9 @@ public static class CombatFormula
 
     public static int HitRating(in HitRatingInputs inputs)
     {
-        double total = inputs.Slot16 + inputs.Slot20;
+        double total =
+            (double)inputs.Slot16 + inputs.Slot16 + inputs.Slot20 + inputs.Slot16 +
+            inputs.Slot223;
 
         var stats = inputs.Stats;
         total += inputs.WeaponTerm;
@@ -101,7 +99,6 @@ public static class CombatFormula
         total += inputs.WeaponGrade * WeaponGradeScale;
         total += inputs.AccuracyEquipSum;
         total += inputs.LevelTerm * LevelTermScale;
-        total += HitAccuracyBaseline;
 
         if (inputs.RankProgressGate) total += HitAccuracyBaseline;
 

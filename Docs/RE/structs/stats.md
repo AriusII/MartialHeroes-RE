@@ -250,6 +250,58 @@ hard-coded here — they come from item definitions.
 
 ---
 
+## Recovered 2026-06-30 — vitals getters re-witnessed; class table indexing; max-stamina base
+
+The two vitals getters (max HP, max MP) were re-read end-to-end on anchor `f61f66a9` this pass. The
+constants previously flagged **static-residual / not re-witnessed** are now **re-witnessed bit-exact**:
+
+- **Max HP** stat weights `STR×2.2, DEX×2.5, AGI×2.4, CON×1.5, INT×1.6` and the `+30.0` constant are
+  present in the getter exactly as tabled. The **per-class HP growth table is the four floats
+  `0.3, 0.2, 0.15, 0.1`** preceded by a `0.0` sentinel at index 0 — confirmed.
+- **Max MP** stat weights `STR×1.4, DEX×1.5, AGI×1.7, CON×1.5, INT×3.5` and `+30.0` are present
+  exactly; the MP multiplier starts at `1.0` with no class table.
+- **HP-aura kind = 1, MP-aura kind = 2**, the two aura slots, and the `/100.0` percentage math are all
+  re-witnessed; each aura reads a kind byte (aura-actor offset `+542`) and a percent value (`+520`).
+- The HP flat-add stat-slot keys are **7 and 2**; the **MP flat-add stat-slot keys are 9 and 3**
+  (newly pinned — the MP keys were not previously listed). Each of these keys is read **twice** (once
+  by the linear-scan slot accessor and once by the direct-index accessor) and both reads are summed,
+  matching the "read this slot" convention.
+
+**Soft-divergence resolved (was the §"Current-vitals" / Section-13.3 open item): the class-HP table is
+indexed by the local-player LEVEL byte on this build, not by class id.** The max-HP getter loads
+`CLASS_HP_TABLE[ (u8) local_player_level ]`. With the four-entry table `{0, 0.3, 0.2, 0.15, 0.1}`, this
+means only levels 1..4 hit the populated slots and levels ≥ 5 read **past the table into adjacent
+zero-initialised stack**, yielding a `0.0` multiplier (and therefore a computed max HP of 0) for the
+common case. This strongly implies the table is **meant** to be keyed by **class id** (values 1..4 =
+the four classes) and that indexing it by level is a **latent bug or a build artifact** — but on this
+binary the index is unambiguously the level byte. **Do not silently "fix" this in the port without a
+capture**; carry the question to a known-class / known-level debugger read as already noted.
+
+### Newly recovered — a third stat-weighted base (max stamina / third vital)
+
+A third stat-weighted getter of the same three-stage shape as HP/MP was recovered (consumed by the
+status panel, the actor-manager per-actor update, and the `5/53` vitals handler — i.e. it produces a
+displayed/derived vital, almost certainly **max stamina**, the third bar):
+
+```
+score_third = STR*0.9 + DEX*1.5 + AGI*1.3 + CON*1.3 + INT*1.7 + 30.0
+max_third   = floor(score_third) + third_equip_set_buff_sum
+```
+
+| Stat   | Weight | Exact 32-bit-literal value |
+|--------|--------|----------------------------|
+| STR    | 0.9    | 0.8999999761581421 |
+| DEX    | 1.5    | 1.5 |
+| AGI    | 1.3    | 1.299999952316284 |
+| CON    | 1.3    | 1.299999952316284 |
+| INT    | 1.7    | 1.700000047683716 |
+| (const)| +30.0  | 30.0 |
+
+It has **no class multiplier table and no percentage-multiplier stage** — it is `floor(score) + a flat
+equipment/set/buff sum` only (the equip sum reuses the same slot-iteration + set-bonus-distributor
+machinery as HP/MP). The exact in-game meaning of this bar (max stamina vs. another secondary vital)
+is **PLAUSIBLE / capture-pending**; the formula itself is bit-exact and implementable now.
+
 ## Implementation guidance for the domain engineer
 
 1. Model the formula as a pure function of: five effective stats, the per-quantity flat bonuses

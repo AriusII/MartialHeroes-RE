@@ -219,6 +219,22 @@ in Section 1 can receive a buff contribution. Buff floats (`HitRate`, `DefenceRa
 `OrderSpecial` bucket for a given buff is chosen by that buff's element discriminator (observed
 discriminator values: 0, 1, 2, 3, 5).
 
+**OrderSpecial bucket-selection map (recovered 2026-06-30, control-flow-confirmed).** The accumulator
+reads a per-slot element discriminator (per-slot stride field, record-relative position `+35`) and a
+per-slot value (record-relative `+38`); the contribution is always `value / 100.0`. The discriminator
+selects the bucket as follows:
+
+| Discriminator | Effect |
+|---|---|
+| `0` | `OrderSpecial[0] += value/100` |
+| `1` | `OrderSpecial[1] += value/100` |
+| `2` | `OrderSpecial[2] += value/100` |
+| `3` | `OrderSpecial[3] += value/100` |
+| `5` | adds `value/100` to **all four** buckets `[0..3]` |
+
+So discriminator `5` is an "all-element" contribution. The **index → element/school** meaning is still
+UNVERIFIED (only the selection mechanism is pinned); discriminator `4` was not observed in this path.
+
 **UNVERIFIED:** the precise per-item source column for the attack pair and the exact stamina field
 (see Section 7). The set of *which* fields exist is solid; binding each to a single `items.csv`
 column should be confirmed against a capture or a parsed item sample.
@@ -327,20 +343,107 @@ accuracy/hit-rating formula (a big base that gear/level/penalty modulate), not a
 **CONFIRMED shape; UNVERIFIED:** the individual role of each `300.0` term (base accuracy vs. UI
 offset) and the exact source of the `weapon_term` per-weapon lookup (see Section 7).
 
+### 3.5 Recovered exact order of operations (recovered 2026-06-30)
+
+Both rating getters were re-read end-to-end on anchor `f61f66a9` and the §3.1/§3.2 base coefficients
+are **re-witnessed bit-exact** this pass (the AGI attack-weight, the DEX/CON/INT secondary-weights,
+and the shared `×0.2` scale all match the literals tabled above). The composition order each getter
+applies is now pinned; implement it in exactly this sequence so float rounding matches.
+
+**Stat-base helpers (return float).** The attack base (§3.1) is built as
+`STR×2.5 + DEX×2.0 + AGI×2.3 + CON×1.0 + INT×1.0`, then `×0.2`, with the **DEX term realised as two
+additions of the effective DEX value** (i.e. `+DEX +DEX`, not a single `×2.0` multiply) — numerically
+identical, noted for parity. The secondary base (§3.2) is
+`STR×1.4 + DEX×2.65 + AGI×1.5 + CON×2.1 + INT×1.1`, then `×0.2`. Both consume the **effective**
+primary stats (§2: per-stat slot key + shared all-stats slot 93 + server base + equipment/set/buff
+sum). The effective-STR accessor, for example, sums stat-slot key 70, stat-slot key 93, a per-stat
+server-base global, and the equipment/set/buff aggregate — confirming the §2 assembly.
+
+**`weapon_term` is a per-level curve coefficient, not a per-weapon item lookup (resolves UNVERIFIED #9).**
+The integer that §3.3/§3.4 previously called `weapon_term` is read from the **`userpoint.scr`
+per-level grid keyed by the local-player level**: the attack getter reads grid field **+24** (the
+per-level **derived-stat-A** contribution) and the hit getter reads grid field **+28** (the per-level
+**derived-stat-B** contribution). These are the same `userpoint.scr +24 / +28` per-level coefficients
+documented in `structs/stats.md` ("Stat-curve table family"); they are **not** an `items.csv`
+`weapon_stat_*` column. Rename the term to **per-level derived-stat coefficient** in the model.
+
+**Attack-rating getter — exact sequence (returns int, truncated):**
+
+```
+running  = 0.0
+running += stat_slot[15]   (linear scan)  + stat_slot[15] (direct index)
+running += stat_slot[94]   only if its value is nonzero
+running += stat_slot[5]    (linear scan)  + stat_slot[5]  (direct index)
+running += equip-derived value from the actor-visual global's slot 223, when that lookup succeeds
+running += userpoint.scr[level] field +24            (per-level derived-stat-A coefficient)
+running += attack_base                                (§3.1)
+running += weapon_grade_helper() * 0.1                (the helper returns 1.0 -> contributes +0.1)
+running += attack/damage equipment sum                (§2.3; see field note below)
+running += level * 0.5                                (local-player level word)
+running += 2.0   if the class/grade word >= 8
+if stat_slot[83] != 0:  running += (stat_slot[83] - 100) * (running * 0.01)   (percent adjust)
+if stat_slot[61] != 0:  return floor(running + stat_slot[61])
+else                    return floor(running)
+```
+
+**Hit/accuracy-rating getter — exact sequence (returns int, truncated):**
+
+```
+running  = 0.0
+running += stat_slot[16]   (linear scan)  + stat_slot[16] (direct index)
+running += stat_slot[20]   (linear scan)  + stat_slot[16] (direct index, a second time)
+running += equip-derived value from the actor-visual global's slot 223, when that lookup succeeds
+running += userpoint.scr[level] field +28            (per-level derived-stat-B coefficient)
+running += secondary_base                             (§3.2)
+running += weapon_grade_helper() * 0.1                (+0.1)
+running += accuracy equipment sum                     (§2.3; see field note below)
+running += level * 0.5
+running += 300.0   if the rank-progress gate is set
+running += 2.0     if the class/grade word >= 8
+proficiency penalty p (§4):  if p > 0:  running = (1.0 - p/100.0) * running
+return floor(running + 300.0)                         (final flat baseline, applied AFTER the penalty)
+```
+
+**Correction to §3.4 — there are exactly TWO `+300.0` terms, not three.** One `+300.0` is **gated by
+the rank-progress gate** (and is therefore *inside* the proficiency-penalty multiply); the other is an
+**unconditional `+300.0` applied as the very last step, AFTER the penalty**, so the final baseline is
+**not** reduced by the proficiency penalty. The earlier "three +300" description is superseded.
+
+**Equipment-sum field note (the §2.3 two-field attack accumulator, re-pinned).** Each rating's
+equipment sum iterates the worn-equipment slot table (slot 8 skipped), sums per-item grant fields,
+adds the matching set-bonus distributor output, a flat per-stat global addend, and the buff aggregate:
+- **Attack/damage equip sum:** sums **two** per-item fields (worn-item record offsets `+396` and
+  `+420`) over the slots, confirming the "sum of two item attack fields" claim in §2.3.
+- **Accuracy equip sum:** sums **one** per-item field (worn-item record offset `+432`) over the slots.
+The set-bonus distributor (§2.4) skips **both** slot 8 and slot 15 and applies its per-piece columns
+(worn-item record offsets `+424 / +436 / +252 / +288 / +264 / +300 / +276 / +316 / +332 / +344(i16)`)
+always, then its set-complete columns (each `+4` higher: `+428 / +440 / +256 / +292 / +268 / +304 /
++280 / +320 / +336 / +346(i16)`) only when the matched set-piece count equals the required count
+(set-type id at worn-item offset `+244`, required count at `+516`). All offsets are object/record-
+relative interoperability facts, not addresses. `CODE-CONFIRMED` (recovered 2026-06-30).
+
+> **The weapon-grade helper is a stub returning `1.0` on this build** — so its `×0.1` term is a fixed
+> `+0.1` in both ratings. If a later build makes it data-driven, the `×0.1` scale is the hook.
+
 ---
 
 ## 4. Weapon-proficiency hit penalty (table)
 
 A percentage **reduction** is applied to hit rating, keyed on a weapon-proficiency / weapon-type byte
-carried on the local player's equipment/stat state. Higher proficiency bands impose larger
-penalties in the recovered banding (an unproficient weapon can zero out the hit bonus entirely):
+carried on a single local-player global (the same byte the move-speed-from-motion path, the
+equip-requirement check, and the actor state panel read). Higher proficiency bands impose larger
+penalties in the recovered banding (an unproficient weapon can zero out the hit bonus entirely).
+
+**Resolved banding (recovered 2026-06-30, control-flow-confirmed on anchor f61f66a9).** The penalty
+selector reads the proficiency byte through five ordered range tests and returns one fixed percentage:
 
 | Proficiency-key range | Penalty (%) |
 |---|---|
+| 0 .. 3 | 0 |
 | 4 .. 10 | 25 |
 | 11 .. 30 | 50 |
-| 31 .. 74 | 0 or 75 (see note) |
-| 75 and above | 100 |
+| 31 .. 75 | 75 |
+| 76 .. 255 | 100 |
 
 Applied as:
 
@@ -350,11 +453,13 @@ hit_rating *= (1.0 - penalty / 100.0)
 
 A 100 % penalty means an unproficient weapon contributes no hit bonus.
 
-**UNVERIFIED:** the `31..74` band has two recovered exit paths (one returns 0, one returns 75); the
-exact boundary semantics are not pinned. Also UNVERIFIED whether the keying byte is a *weapon mastery
-level* or a *weapon-type id*. Treat this whole table as MEDIUM confidence and confirm against a
-capture before binding penalties to specific weapon classes (`items.csv` weapon subtypes,
-`formats/config_tables.md` §4.6).
+**Resolution of the prior ambiguity.** Earlier drafts flagged the `31..74` band as "0 or 75" because
+two exit paths were seen. The control flow now reads cleanly: the **`0` exit belongs to the low band
+`0..3`** (a near-zero proficiency key takes no penalty), and the **`75` exit covers `31..75`**; the
+inclusive upper boundary is **75 (not 74)**, and **anything above 75 returns 100**. The
+boundary is therefore pinned. **Still UNVERIFIED:** whether the keying byte is a *weapon mastery
+level* or a *weapon-type id* — confirm against a capture before binding penalties to specific weapon
+classes (`items.csv` weapon subtypes, `formats/config_tables.md` §4.6).
 
 ---
 
@@ -473,8 +578,10 @@ position to a named stat is **UNVERIFIED** there and inherited here.
 2. `CriticalRate` vs. `CriticalHit` — which is "chance" vs. "multiplier/severity".
 3. `HuntDamageRate[0/1]` (PvE) vs. `PvpDamageRate[0/1]` (PvP) — the `[0]/[1]` index roles. The PvE/PvP
    split itself is CONFIRMED (separate named field pairs); only the index semantics are open.
-4. `OrderSpecial[0..3]` element buckets — which element/school each index maps to (selected by
-   per-buff discriminator values 0,1,2,3,5).
+4. `OrderSpecial[0..3]` element buckets — which element/school each index maps to. *(Partially
+   resolved 2026-06-30: the **bucket-selection mechanism** is now pinned — discriminator 0/1/2/3 select
+   buckets [0]/[1]/[2]/[3] and discriminator 5 adds to all four; see §2.3. Only the index→element
+   meaning remains open.)*
 5. Exact per-item source columns for the attack pair (§2.3) and the 16-bit stamina/set-name field;
    reconcile against `structs/item.md` and a parsed `items.csv` sample before treating any single
    column as authoritative.
@@ -484,10 +591,13 @@ position to a named stat is **UNVERIFIED** there and inherited here.
    `CmsgUseSkill` with skill-slot byte `0xFF`. See Section 10.
 8. Stat-slot **wire ordering** for `2:29` / `4:29` (§6.1) — the memory→wire permutation must be
    confirmed by capture.
-9. `weapon_term` (the per-equipped-weapon integer added inside §3.3/§3.4) — its source table was not
-   fully traced; likely a per-weapon column in `items.csv` (candidate: `weapon_stat_A/B/C`).
-10. Weapon-proficiency penalty `31..74` band boundary (Section 4): 0 vs. 75; and whether the keying
-    byte is mastery level or weapon-type id.
+9. ~~`weapon_term` (the per-equipped-weapon integer added inside §3.3/§3.4) — source table not traced.~~
+   **RESOLVED (2026-06-30):** it is **not** a per-weapon item lookup — it is the `userpoint.scr`
+   per-level grid keyed by the local-player level, field `+24` (attack) / `+28` (hit), i.e. the
+   per-level derived-stat-A / derived-stat-B coefficients of `structs/stats.md`. See §3.5.
+10. ~~Weapon-proficiency penalty `31..74` band boundary (Section 4): 0 vs. 75.~~ **RESOLVED
+    (2026-06-30):** the bands are `0..3 → 0`, `4..10 → 25`, `11..30 → 50`, `31..75 → 75`,
+    `76..255 → 100` (see §4). **Still open:** whether the keying byte is mastery level or weapon-type id.
 11. Set-bonus output-index → named-stat mapping for indices 1..9 (index 0 ≈ STR).
 12. All findings are **static** (no live capture). The stat-weight coefficients (Section 3) are
     bit-exact from the client; the **combination into a final damage number happens server-side** and

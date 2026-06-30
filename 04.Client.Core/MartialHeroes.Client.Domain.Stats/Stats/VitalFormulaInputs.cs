@@ -16,6 +16,7 @@ public readonly record struct VitalFormulaInputs
     public StatBaseCurve LevelBaseMpCurve { get; init; }
     public long ServerBaseHp { get; init; }
     public long ServerBaseMp { get; init; }
+    public long ThirdBarFlat { get; init; }
     public int HpPercentBuffPercent { get; init; }
     public AuraTerm Aura0 { get; init; }
     public AuraTerm Aura1 { get; init; }
