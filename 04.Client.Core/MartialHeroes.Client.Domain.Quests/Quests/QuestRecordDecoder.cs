@@ -19,7 +19,7 @@ public static class QuestRecordDecoder
     private const int OffMinLevel = 0x1350;
     private const int OffMaxLevel = 0x1352;
     private const int OffAcceptedFlags = 0x1354;
-    private const int OffClassRaceMask = 0x1359;
+    private const int OffStanceJobGate = 0x1359;
     private const int OffSecondaryStatMin = 0x135A;
     private const int OffSecondaryStatMax = 0x135B;
     private const int OffTertiaryStatBound = 0x135C;
@@ -52,7 +52,7 @@ public static class QuestRecordDecoder
             BinaryPrimitives.ReadUInt16LittleEndian(record.Slice(OffMinLevel, 2)),
             BinaryPrimitives.ReadUInt16LittleEndian(record.Slice(OffMaxLevel, 2)),
             acceptedFlags,
-            record[OffClassRaceMask],
+            record[OffStanceJobGate],
             record[OffSecondaryStatMin],
             record[OffSecondaryStatMax],
             record[OffTertiaryStatBound]);

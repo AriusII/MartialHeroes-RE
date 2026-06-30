@@ -19,16 +19,37 @@ public enum CubeGambleWinLines : uint
     LineSeven = 1u << 5,
     LineHigh = 1u << 6,
     Odd = 1u << 7,
-    Even = 1u << 8
+    Even = 1u << 8,
+    Doubles = 1u << 9
 }
 
-public readonly record struct CubeGambleSettlement(CubeGambleOutcome Outcome, long Delta);
+public readonly record struct CubeGambleSettlement(CubeGambleOutcome Outcome, long Delta)
+{
+    public byte LabelAlign => Outcome switch
+    {
+        CubeGambleOutcome.Win => (byte)0,
+        CubeGambleOutcome.Loss => (byte)1,
+        _ => (byte)2
+    };
+}
 
-public readonly record struct CubeGambleReelMatch(CubeGambleWinLines Lines, sbyte SpecialSlot);
+public readonly record struct CubeGamblePayout(
+    CubeGambleOutcome Outcome,
+    long Delta,
+    byte LabelAlign,
+    long DisplayedTotal,
+    bool RaiseWinBanner,
+    bool IncrementDailyPlay);
+
+public readonly record struct CubeGambleReelMatch(
+    CubeGambleWinLines Lines,
+    sbyte SpecialSlot,
+    byte DoublesFace);
 
 public static class CubeGambleEvaluator
 {
     public const sbyte NoSpecialSlot = -1;
+    public const byte NoDoublesFace = 0;
 
     public static CubeGambleSettlement Settle(long oldMoney, long newMoney)
     {
@@ -43,6 +64,19 @@ public static class CubeGambleEvaluator
         return new CubeGambleSettlement(outcome, delta);
     }
 
+    public static CubeGamblePayout SettleWithStake(long oldMoney, long newMoney, long stake)
+    {
+        var settlement = Settle(oldMoney, newMoney);
+
+        return new CubeGamblePayout(
+            settlement.Outcome,
+            settlement.Delta,
+            settlement.LabelAlign,
+            newMoney + stake - oldMoney,
+            settlement.Outcome == CubeGambleOutcome.Win && newMoney != oldMoney,
+            stake > 0L);
+    }
+
     public static CubeGambleReelMatch EvaluateReels(byte d5a, byte d5b, byte d4a, byte d4b)
     {
         var f5a = d5a + 1;
@@ -54,6 +88,14 @@ public static class CubeGambleEvaluator
         var pairB = f4a + f4b;
 
         var lines = CubeGambleWinLines.None;
+
+        byte doublesFace = NoDoublesFace;
+
+        if (d5a == d5b)
+        {
+            lines |= CubeGambleWinLines.Doubles;
+            doublesFace = (byte)f5a;
+        }
 
         if (d5a == d5b && d5b == d4a && d4a == d4b)
             lines |= CubeGambleWinLines.Jackpot;
@@ -78,7 +120,7 @@ public static class CubeGambleEvaluator
         if ((f5a & 1) == 0 && (f5b & 1) == 0)
             lines |= CubeGambleWinLines.Even;
 
-        return new CubeGambleReelMatch(lines, MatchSpecialCombo(f5a, f5b));
+        return new CubeGambleReelMatch(lines, MatchSpecialCombo(f5a, f5b), doublesFace);
     }
 
     private static sbyte MatchSpecialCombo(int f5a, int f5b)

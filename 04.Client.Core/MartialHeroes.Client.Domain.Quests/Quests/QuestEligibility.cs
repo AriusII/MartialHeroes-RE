@@ -10,25 +10,25 @@ public static class QuestEligibility
     {
         if (record.IsEmpty) return QuestGateResult.RecordNotFound;
 
-        if (character.Level < record.MinLevel) return QuestGateResult.LevelTooLow;
+        if (record.MinLevel != 0 && record.MinLevel > character.Level) return QuestGateResult.LevelTooLow;
 
-        if (character.Level > record.MaxLevel) return QuestGateResult.LevelTooHigh;
+        if (record.MaxLevel != 0 && record.MaxLevel < character.Level) return QuestGateResult.LevelTooHigh;
 
-        if (record.AcceptedFlag(character.AcceptedSlotIndex) == 0) return QuestGateResult.NotAcceptedForSlot;
+        if (record.AcceptedFlag(character.ClassIndex) == 0) return QuestGateResult.NotAcceptedForClass;
 
-        if ((record.ClassRaceMask & character.ClassRaceMask) == 0) return QuestGateResult.WrongClassRace;
+        if (record.StanceJobGate != 0 && record.StanceJobGate != character.PlayerStance) return QuestGateResult.WrongStance;
 
-        if (character.SecondaryStat < record.SecondaryStatMin) return QuestGateResult.SecondaryStatTooLow;
+        if (record.SecondaryStatMin != 0 && record.SecondaryStatMin > character.SecondaryStat) return QuestGateResult.SecondaryStatTooLow;
 
-        if (character.SecondaryStat > record.SecondaryStatMax) return QuestGateResult.SecondaryStatTooHigh;
+        if (record.SecondaryStatMax != 0 && record.SecondaryStatMax < character.SecondaryStat) return QuestGateResult.SecondaryStatTooHigh;
 
-        if (character.TertiaryStat < record.TertiaryStatBound) return QuestGateResult.TertiaryStatFailed;
+        if (record.TertiaryStatBound != 0 && record.TertiaryStatBound > character.TertiaryStat) return QuestGateResult.TertiaryStatFailed;
 
         if (activeCategories.IndexOf(record.Category) >= 0) return QuestGateResult.SameCategoryActive;
 
         if (activeQuestIds.IndexOf(record.QuestId) >= 0) return QuestGateResult.SameIdActive;
 
-        if (!character.PrerequisiteChainSatisfied) return QuestGateResult.PrerequisiteNotMet;
+        if (record.PrereqChainId != 0 && record.PrereqChainId <= character.ChapterProgress) return QuestGateResult.InChain;
 
         return QuestGateResult.Available;
     }
