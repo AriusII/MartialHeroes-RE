@@ -65,12 +65,6 @@
     <Folder Name="/05.Presentation/">
         <Project Path="05.Presentation/MartialHeroes.Client.Godot/MartialHeroes.Client.Godot.csproj"/>
     </Folder>
-    <Folder Name="/Tests/">
-        <Project Path="tests/MartialHeroes.Network.Protocol.Packets.World.Tests/MartialHeroes.Network.Protocol.Packets.World.Tests.csproj"/>
-        <Project Path="tests/MartialHeroes.Client.Domain.Simulation.Tests/MartialHeroes.Client.Domain.Simulation.Tests.csproj"/>
-        <Project Path="tests/MartialHeroes.Client.Domain.Stats.Tests/MartialHeroes.Client.Domain.Stats.Tests.csproj"/>
-        <Project Path="tests/MartialHeroes.Client.Domain.Inventory.Tests/MartialHeroes.Client.Domain.Inventory.Tests.csproj"/>
-    </Folder>
     <Folder Name="/Docs/"/>
     <Folder Name="/Explorer/">
         <Project Path="Explorer/MartialHeroes.Explorer.Files/MartialHeroes.Explorer.Files.csproj"/>

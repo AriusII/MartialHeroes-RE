@@ -171,10 +171,11 @@ public sealed partial class CameraController : Camera3D
 
     public override void _Ready()
     {
-        KeepAspect = KeepAspectEnum.Width;
-        Fov = GameFov;
+        KeepAspect = KeepAspectEnum.Height;
         Near = GameNear;
         Far = GameFar;
+        ApplyGameProjection();
+        GetViewport().SizeChanged += ApplyGameProjection;
 
         _elevation = DefaultElevationRad;
         _yaw = 0f;
@@ -184,7 +185,7 @@ public sealed partial class CameraController : Camera3D
         ApplyCurrentModeTransform();
 
         GD.Print(
-            "[Camera] mode=Third | FOV=65deg HORIZONTAL (KeepAspect=Width, spec: Docs/RE/structs/perspective_camera.md) near=5 far=15000 | " +
+            $"[Camera] mode=Third | vertical FOV={Fov:F1}deg = 65deg/aspect (KeepAspect=Height; DX9 D3DXMatrixPerspectiveOffCenterRH fovy=(pi*65/180)/aspect, spec: Docs/RE/structs/perspective_camera.md) near=5 far=15000 | " +
             $"eyeSeed=({EyeOffsetSeedLegacyX},{EyeOffsetSeedLegacyY},{EyeOffsetSeedGodotZ}) Godot | " +
             $"radius={OrbitRadius:F1}u | elev_default={Mathf.RadToDeg(DefaultElevationRad):F1}deg | " +
             $"elev_clamp=[{Mathf.RadToDeg(ElevationMinRad):F0}deg,{Mathf.RadToDeg(ElevationMaxRad):F0}deg] | " +
@@ -194,8 +195,17 @@ public sealed partial class CameraController : Camera3D
             "spec: Docs/RE/specs/camera_movement.md §A.2.2/§A.8.");
     }
 
+    private void ApplyGameProjection()
+    {
+        var size = GetViewport().GetVisibleRect().Size;
+        var aspect = size.Y > 0f ? size.X / size.Y : 4f / 3f;
+        Fov = GameFov / aspect;
+    }
+
     public override void _ExitTree()
     {
+        var vp = GetViewport();
+        if (vp is not null) vp.SizeChanged -= ApplyGameProjection;
         ReleaseMouse();
     }
 

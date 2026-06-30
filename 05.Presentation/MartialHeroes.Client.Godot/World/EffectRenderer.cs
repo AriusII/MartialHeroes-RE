@@ -17,6 +17,10 @@ public sealed partial class EffectRenderer : Node3D
 
     private const float UvScrollPeriodMs = 5000f;
 
+    private const float EffectBrightnessFloor = 0.05f;
+
+    private const float EffectBrightnessOption = 100f;
+
     private const string XeffectLstPath = "data/effect/xeffect.lst";
 
     private const string ParticleEmitterEffPath = "data/effect/particle/particleemitter.eff";
@@ -125,6 +129,14 @@ public sealed partial class EffectRenderer : Node3D
         foreach (var live in _live.Values)
             TeardownLiveEffect(live);
         _live.Clear();
+    }
+
+
+    private static float EffectBrightnessFactor()
+    {
+        var opt = EffectBrightnessOption;
+        if (opt == 1f) return 0f;
+        return EffectBrightnessFloor + (1f - EffectBrightnessFloor) * (opt / 100f);
     }
 
 

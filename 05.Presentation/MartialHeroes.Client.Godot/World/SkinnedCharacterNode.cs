@@ -16,6 +16,8 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
     private const bool RenormalizeAlpha = false;
 
+    private const float BlendWindowSeconds = 0f;
+
     public const int DefaultHandBoneId = 0;
 
     public const int HandColumnAltMain = 902;
@@ -71,6 +73,10 @@ public sealed partial class SkinnedCharacterNode : Node3D
     private Vector2[] _uvs = [];
 
     private SkinningMath.BoneTransform[] _world = [];
+
+    private SkinningMath.BoneTransform[] _blendFromWorld = [];
+    private bool _blendActive;
+    private float _blendRemaining;
 
     internal static bool AnimAsDelta { get; set; } = true;
 
@@ -134,6 +140,9 @@ public sealed partial class SkinnedCharacterNode : Node3D
         }
 
         _world = new SkinningMath.BoneTransform[boneCount];
+        _blendFromWorld = new SkinningMath.BoneTransform[boneCount];
+        _blendActive = false;
+        _blendRemaining = 0f;
         _noTracks = new AnimationTrack?[boneCount];
         _deformedPos = new Vec3[vertexCount];
         _deformedNrm = new Vec3[vertexCount];
@@ -157,6 +166,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
             var stdMat = new StandardMaterial3D
             {
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                DisableFog = true,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps
             };
             if (albedo is not null)
@@ -223,6 +233,8 @@ public sealed partial class SkinnedCharacterNode : Node3D
         if (!_ready || clip is null || clip.FrameCount == 0)
             return false;
 
+        TriggerBlend("idle/locomotion -> action");
+
         var boneCount = _bones.Length;
         _actionTrackByBoneIndex = BindClipTracks(clip, _idToIndex, boneCount, _baseId, $"action:{clip.IdB}");
         _actionClip = clip;
@@ -240,6 +252,8 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
     public void StopAction()
     {
+        if (IsActionPlaying)
+            TriggerBlend("action -> idle/locomotion");
         IsActionPlaying = false;
         _actionClip = null;
         _actionTime = 0f;
@@ -255,6 +269,9 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
         if (ReferenceEquals(clip, _locomotionClip) && IsLocomotionPlaying)
             return true;
+
+        if (!IsActionPlaying)
+            TriggerBlend("idle/locomotion -> locomotion");
 
         _locomotionTrackByBoneIndex =
             BindClipTracks(clip, _idToIndex, _bones.Length, _baseId, $"locomotion:{clip.IdB}");
@@ -272,6 +289,8 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
     public void StopLocomotion()
     {
+        if (IsLocomotionPlaying && !IsActionPlaying)
+            TriggerBlend("locomotion -> idle");
         IsLocomotionPlaying = false;
         _locomotionClip = null;
         _locomotionTime = 0f;
@@ -363,6 +382,16 @@ public sealed partial class SkinnedCharacterNode : Node3D
     {
         if (!_ready || _arrayMesh is null) return;
 
+        if (_blendActive)
+        {
+            _blendRemaining -= dtSeconds;
+            if (_blendRemaining <= 0f)
+            {
+                _blendActive = false;
+                _blendRemaining = 0f;
+            }
+        }
+
         if (IsActionPlaying && _actionDuration > 0f)
         {
             _actionTime += dtSeconds;
@@ -400,6 +429,13 @@ public sealed partial class SkinnedCharacterNode : Node3D
         if (_arrayMesh is null || _meshInstance is null) return;
 
         ComputeWorldPoses(t, restPose);
+
+        if (!restPose && _blendActive && _blendFromWorld.Length == _world.Length)
+        {
+            var factor = BlendWindowSeconds <= 0f ? 1f : 1f - _blendRemaining / BlendWindowSeconds;
+            factor = factor < 0f ? 0f : factor > 1f ? 1f : factor;
+            SkinningMath.BlendPoses(_blendFromWorld, _world, factor, _world);
+        }
 
         for (var v = 0; v < _deformedPos.Length; v++)
             (_deformedPos[v], _deformedNrm[v]) = SkinningMath.DeformVertex(_perVertex[v], _world);
@@ -618,6 +654,24 @@ public sealed partial class SkinnedCharacterNode : Node3D
             if (w.VisualScale != 1.0f) basis = basis.Scaled(Vector3.One * w.VisualScale);
             w.Node.Transform = new Transform3D(basis, new Vector3(tx, ty, tz) * w.VisualScale);
         }
+    }
+
+    private void TriggerBlend(string reason)
+    {
+        if (!_ready || _world.Length == 0 || BlendWindowSeconds <= 0f) return;
+
+        if (_blendFromWorld.Length != _world.Length)
+            _blendFromWorld = new SkinningMath.BoneTransform[_world.Length];
+
+        global::System.Array.Copy(_world, _blendFromWorld, _world.Length);
+        _blendActive = true;
+        _blendRemaining = BlendWindowSeconds;
+
+        GD.Print($"[Skinning] Cross-fade opened ({reason}, {BlendWindowSeconds:F2}s): outgoing pose " +
+                 "frozen at the last rendered world pose, incoming clip blended in per-bone via the " +
+                 "recovered accumulate (first assign, then f=wNew/(wAcc+wNew); LERP translation, SLERP " +
+                 "rotation). Shipped data passes 0-duration (hard 0<->1 switch); this adds a bounded, " +
+                 "reversible fade and reverts to the single-clip path once the window closes.");
     }
 
     private void ComputeWorldPoses(float t, bool restPose)

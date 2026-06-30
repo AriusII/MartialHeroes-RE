@@ -71,7 +71,6 @@ public static class BudMeshBuilder
         var maxY = float.MinValue;
         var minZ = float.MaxValue;
         var maxZ = float.MinValue;
-        var normalSum = Vector3.Zero;
 
         for (var v = 0; v < vertCount; v++)
         {
@@ -82,7 +81,6 @@ public static class BudMeshBuilder
 
             var n = new Vector3(bv.NormalX, bv.NormalY, -bv.NormalZ).Normalized();
             normals[v] = n;
-            normalSum += n;
 
             uvs[v] = new Vector2(bv.UvU, bv.UvV);
 
@@ -127,9 +125,11 @@ public static class BudMeshBuilder
             swayAmp = ComputeSmallSwayAmplitude(obj, kind, minY, maxY);
             if (swayAmp != 0f)
             {
-                var horizontal = new Vector2(normalSum.X, normalSum.Z);
-                if (horizontal.Length() > 1e-4f)
-                    swayDir = horizontal.Normalized() * 0.5f;
+                if (vertCount >= 3)
+                {
+                    var centroid = 0.5f * (normals[0] + normals[2]);
+                    swayDir = new Vector2(centroid.X, centroid.Z);
+                }
 
                 bendColors = BuildBendWeights(obj, vertCount, minY, maxY);
             }
@@ -165,7 +165,8 @@ public static class BudMeshBuilder
         var inst = new MeshInstance3D
         {
             Mesh = mesh,
-            Name = $"BudObject_{objIndex}_tex{obj.TexId}_k{kind:X2}"
+            Name = $"BudObject_{objIndex}_tex{obj.TexId}_k{kind:X2}",
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
         };
 
         ApplyDistanceCull(inst, minX, maxX, minY, maxY, minZ, maxZ);

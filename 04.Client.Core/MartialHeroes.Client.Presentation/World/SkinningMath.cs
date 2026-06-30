@@ -264,7 +264,7 @@ public static class SkinningMath
         var n = (int)MathF.Floor(t * MotFps);
         if (n < 0) n = 0;
         if (n > keyCount - 1) n = keyCount - 1;
-        var nNext = n < keyCount - 1 ? n + 1 : n;
+        var nNext = n < keyCount - 1 ? n + 1 : 0;
 
         var alpha = t - n * MotSecondsPerFrame;
         if (renormalizeAlpha) alpha *= MotFps;
@@ -325,6 +325,35 @@ public static class SkinningMath
                 outWorld[i] = new BoneTransform(wt, wq);
             }
         }
+    }
+
+
+    public static float AccumulateWeight(float accumWeight, float newWeight)
+    {
+        var sum = accumWeight + newWeight;
+        if (MathF.Log(sum) < 0.001f) return newWeight / 0.001f;
+        return newWeight / sum;
+    }
+
+    public static BoneTransform BlendBone(in BoneTransform from, in BoneTransform to, float progress)
+    {
+        var p = progress < 0f ? 0f : progress > 1f ? 1f : progress;
+        var wOut = 2f * (1f - p);
+        var wIn = 2f * p;
+        if (wOut <= 0f) return to;
+        if (wIn <= 0f) return from;
+        var f = AccumulateWeight(wOut, wIn);
+        var trans = Lerp(from.Trans, to.Trans, f);
+        var rot = Slerp(from.Quat, to.Quat, f);
+        return new BoneTransform(trans, rot);
+    }
+
+    public static void BlendPoses(BoneTransform[] from, BoneTransform[] to, float progress, BoneTransform[] outWorld)
+    {
+        var n = outWorld.Length;
+        if (from.Length < n || to.Length < n) return;
+        for (var i = 0; i < n; i++)
+            outWorld[i] = BlendBone(from[i], to[i], progress);
     }
 
 

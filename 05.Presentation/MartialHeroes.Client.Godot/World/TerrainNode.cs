@@ -68,6 +68,7 @@ public sealed partial class TerrainNode : Node3D
         meshInst.Mesh = mesh;
         meshInst.Position = new Vector3(godotX, 0f, godotZ);
         meshInst.Name = $"Sector_{evt.MapX}_{evt.MapZ}";
+        meshInst.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
 
         AddChild(meshInst);
         _meshNodes[(evt.MapX, evt.MapZ)] = meshInst;

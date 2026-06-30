@@ -19,15 +19,31 @@ public sealed partial class SkyDomeNode : Node3D
 
     private const float DomeRadius = 13_000f;
 
-    private const int DomeSectors = 16;
+    private const int CloudRings = 4;
 
-    private const int CloudDomeStacks = 15;
+    private const int CloudSegments = 12;
+
+    private const float CloudRingRadiusStep = 750f;
+
+    private const float CloudRingHeightStep = 333.3f;
+
+    private const float CloudSkirtHeight = -200f;
+
+    private const float CloudUvSpan = 0.25f;
+
+    private const int CloudVertexCount = CloudDomeBin.VerticesPerKeyframe;
 
     private const int StarCount = StarDomeBin.StarsPerKeyframe;
 
-    private const float StarDomeRadius = DomeRadius * 0.99f;
+    private const int StarDomeRings = 6;
 
-    private const float StarSpriteSize = 240f;
+    private const int StarDomeSegments = 12;
+
+    private const int StarDomeVertexCount = StarDomeRings * StarDomeSegments;
+
+    private const float StarDomeVerticalRatio = 3500f / 4000f;
+
+    private const float StarDomeRadius = DomeRadius * 0.99f;
 
     private const float StarVisibilityCutoff = 0.1f;
 
@@ -37,8 +53,6 @@ public sealed partial class SkyDomeNode : Node3D
 
     private const float SunTiltDeg = 45f;
 
-    private static readonly StringName CloudTintParam = "tint_color";
-    private static readonly StringName CloudOpacityParam = "opacity";
     private static readonly StringName CloudUvScrollParam = "uv_scroll";
     private static readonly StringName CloudTexAParam = "cloud_tex_a";
     private static readonly StringName CloudTexBParam = "cloud_tex_b";
@@ -49,6 +63,14 @@ public sealed partial class SkyDomeNode : Node3D
     private CloudDomeBin? _cloudDome;
     private MeshInstance3D? _cloudDomeMesh1;
     private MeshInstance3D? _cloudDomeMesh2;
+    private ArrayMesh? _cloudMesh1;
+    private ArrayMesh? _cloudMesh2;
+    private Array? _cloud1BaseArrays;
+    private Array? _cloud2BaseArrays;
+    private int[]? _cloud1ColorIndex;
+    private int[]? _cloud2ColorIndex;
+    private Color[]? _cloud1ColorBuffer;
+    private Color[]? _cloud2ColorBuffer;
     private ShaderMaterial? _cloudMaterial1;
     private ShaderMaterial? _cloudMaterial2;
 
@@ -69,8 +91,11 @@ public sealed partial class SkyDomeNode : Node3D
 
     private StarDomeBin? _starDome;
     private ShaderMaterial? _starMaterial;
-    private MultiMesh? _starMultiMesh;
-    private MultiMeshInstance3D? _starPoints;
+    private ArrayMesh? _starMesh;
+    private MeshInstance3D? _starDomeMesh;
+    private Array? _starBaseArrays;
+    private int[]? _starColorIndex;
+    private Color[]? _starColorBuffer;
     private ImageTexture? _starTexture;
     private MeshInstance3D? _sunBillboard;
     private bool _sunVisible = true;
@@ -94,20 +119,22 @@ public sealed partial class SkyDomeNode : Node3D
         BuildSunBillboard();
 
         if (starDome is not null)
-            BuildStarPoints();
+            BuildStarDome();
 
         if (cloudDome is not null)
             BuildCloudDome();
 
         BuildMoonBillboard();
 
-        var starStatus = starDome is not null ? $"built({StarCount} point sprites)" : "absent(no-op)";
+        var starStatus = starDome is not null
+            ? $"built({StarDomeVertexCount}-vtx opaque tinted dome, {StarDomeRings}x{StarDomeSegments})"
+            : "absent(no-op)";
         var cloudStatus = cloudDome is not null ? "built(textured scroll)" : "absent(no-op)";
         var cycleStatus = cloudCycle is not null
             ? $"speed={_activeCycleRow.Speed} cloud1Id={_activeCycleRow.Cloud1Id0To12H}"
             : "absent";
         GD.Print($"[SkyDome] star={starStatus} cloud={cloudStatus} cloudCycle={cycleStatus} " +
-                 $"sun=billboard moon=billboard radius={DomeRadius:F0}wu sectors={DomeSectors}. " +
+                 $"sun=billboard moon=billboard starRadius={DomeRadius:F0}wu cloud=flat-zenith-cap({CloudVertexCount}v). " +
                  "spec: Docs/RE/formats/sky.md D (sun/moon billboard orbit), C (48-slot 1800ms cadence).");
     }
 
@@ -201,7 +228,7 @@ public sealed partial class SkyDomeNode : Node3D
         var slotNext = (slot + 1) % SlotCount;
         var frac = (float)(tWrapped % SlotMs / SlotMs);
 
-        UpdateStarPoints(slot, slotNext, frac);
+        UpdateStarDome(slot, slotNext, frac);
         UpdateCloudDomes(slot, slotNext, frac, clockMs);
 
         UpdateBillboards(clockMs);
@@ -215,9 +242,10 @@ public sealed partial class SkyDomeNode : Node3D
         Position = new Vector3(eye.X, 0f, eye.Z);
     }
 
-    private void UpdateStarPoints(int slot, int slotNext, float frac)
+    private void UpdateStarDome(int slot, int slotNext, float frac)
     {
-        if (_starMultiMesh is null || _starDome is null) return;
+        if (_starMesh is null || _starDome is null || _starDomeMesh is null
+            || _starBaseArrays is null || _starColorIndex is null || _starColorBuffer is null) return;
 
         var curve = _starBrightness;
         float brightness;
@@ -232,21 +260,31 @@ public sealed partial class SkyDomeNode : Node3D
             brightness = 1f;
         }
 
-        var visible = brightness >= StarVisibilityCutoff;
-        var alpha = visible ? 1f : 0f;
+        if (brightness < StarVisibilityCutoff)
+        {
+            _starDomeMesh.Visible = false;
+            return;
+        }
+
+        _starDomeMesh.Visible = true;
 
         var colorsA = _starDome.StarColors[Math.Clamp(slot, 0, _starDome.StarColors.Length - 1)];
         var colorsB = _starDome.StarColors[Math.Clamp(slotNext, 0, _starDome.StarColors.Length - 1)];
 
-        for (var i = 0; i < StarCount; i++)
+        for (var v = 0; v < StarDomeVertexCount; v++)
         {
+            var i = _starColorIndex[v];
             var ca = colorsA[Math.Clamp(i, 0, colorsA.Length - 1)];
             var cb = colorsB[Math.Clamp(i, 0, colorsB.Length - 1)];
             var r = (ca.R + (cb.R - ca.R) * frac) / 255f * brightness;
             var gv = (ca.G + (cb.G - ca.G) * frac) / 255f * brightness;
             var bv = (ca.B + (cb.B - ca.B) * frac) / 255f * brightness;
-            _starMultiMesh.SetInstanceColor(i, new Color(r, gv, bv, alpha));
+            _starColorBuffer[v] = new Color(r, gv, bv, 1f);
         }
+
+        _starBaseArrays[(int)Mesh.ArrayType.Color] = _starColorBuffer;
+        _starMesh.ClearSurfaces();
+        _starMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, _starBaseArrays);
     }
 
     private void UpdateCloudDomes(int slot, int slotNext, float frac, double clockMs)
@@ -262,8 +300,10 @@ public sealed partial class SkyDomeNode : Node3D
 
         UpdateCloudPingPong(tod, speed);
 
-        UpdateCloudLayer(_cloudMaterial1, _cloudDome.Layer1Colors, slot, slotNext, frac, offA);
-        UpdateCloudLayer(_cloudMaterial2, _cloudDome.Layer2Colors, slot, slotNext, frac, offB);
+        UpdateCloudLayer(_cloudMaterial1, _cloudMesh1, _cloud1BaseArrays, _cloud1ColorIndex,
+            _cloud1ColorBuffer, _cloudDome.Layer1Colors, slot, slotNext, frac, offA);
+        UpdateCloudLayer(_cloudMaterial2, _cloudMesh2, _cloud2BaseArrays, _cloud2ColorIndex,
+            _cloud2ColorBuffer, _cloudDome.Layer2Colors, slot, slotNext, frac, offB);
     }
 
     private void UpdateCloudPingPong(double tod, float speed)
@@ -335,200 +375,220 @@ public sealed partial class SkyDomeNode : Node3D
 
     private static void UpdateCloudLayer(
         ShaderMaterial? mat,
+        ArrayMesh? mesh,
+        Array? baseArrays,
+        int[]? colorIndex,
+        Color[]? colorBuffer,
         BgraColor[][] layerColors,
         int slot, int slotNext, float frac,
         float scrollV)
     {
-        if (mat is null) return;
+        if (mat is null || mesh is null || baseArrays is null || colorIndex is null || colorBuffer is null) return;
 
-        var a = AverageTint(layerColors[slot]);
-        var b = AverageTint(layerColors[slotNext]);
-        var tint = a.Lerp(b, frac);
+        var a = layerColors[Math.Clamp(slot, 0, layerColors.Length - 1)];
+        var b = layerColors[Math.Clamp(slotNext, 0, layerColors.Length - 1)];
 
-        var opacity = 0.2126f * tint.R + 0.7152f * tint.G + 0.0722f * tint.B;
+        for (var v = 0; v < colorBuffer.Length; v++)
+        {
+            var gi = colorIndex[v];
+            var ca = a[Math.Clamp(gi, 0, a.Length - 1)];
+            var cb = b[Math.Clamp(gi, 0, b.Length - 1)];
+            var r = (ca.R + (cb.R - ca.R) * frac) / 255f;
+            var gv = (ca.G + (cb.G - ca.G) * frac) / 255f;
+            var bv = (ca.B + (cb.B - ca.B) * frac) / 255f;
+            var av = (ca.A + (cb.A - ca.A) * frac) / 255f;
+            colorBuffer[v] = new Color(r, gv, bv, av);
+        }
 
-        mat.SetShaderParameter(CloudTintParam, new Color(tint.R, tint.G, tint.B));
-        mat.SetShaderParameter(CloudOpacityParam, opacity);
+        baseArrays[(int)Mesh.ArrayType.Color] = colorBuffer;
+        mesh.ClearSurfaces();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, baseArrays);
+
         mat.SetShaderParameter(CloudUvScrollParam, new Vector2(0f, scrollV));
     }
 
-    private void BuildStarPoints()
+    private void BuildStarDome()
     {
         _starMaterial = BuildStarMaterial();
 
-        var quad = BuildStarQuadMesh(StarSpriteSize);
+        const float hRadius = StarDomeRadius;
+        const float vRadius = StarDomeRadius * StarDomeVerticalRatio;
 
-        _starMultiMesh = new MultiMesh
-        {
-            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
-            UseColors = true
-        };
-        _starMultiMesh.InstanceCount = StarCount;
-        _starMultiMesh.Mesh = quad;
+        var vertices = new Vector3[StarDomeVertexCount];
+        var uvs = new Vector2[StarDomeVertexCount];
+        _starColorIndex = new int[StarDomeVertexCount];
+        _starColorBuffer = new Color[StarDomeVertexCount];
 
-        var goldenAngle = MathF.PI * (3f - MathF.Sqrt(5f));
-        for (var i = 0; i < StarCount; i++)
+        for (var ring = 0; ring < StarDomeRings; ring++)
         {
-            var y = (i + 0.5f) / StarCount;
-            var r = MathF.Sqrt(MathF.Max(0f, 1f - y * y));
-            var theta = i * goldenAngle;
-            var x = MathF.Cos(theta) * r;
-            var z = MathF.Sin(theta) * r;
-            var pos = new Vector3(x, y, z) * StarDomeRadius;
-            _starMultiMesh.SetInstanceTransform(i, new Transform3D(Basis.Identity, pos));
-            _starMultiMesh.SetInstanceColor(i, new Color(0f, 0f, 0f, 0f));
+            var elev = ring * 30f * (MathF.PI / 180f);
+            var sinE = MathF.Sin(elev);
+            var cosE = MathF.Cos(elev);
+            for (var seg = 0; seg < StarDomeSegments; seg++)
+            {
+                var segAngle = seg * 30f * (MathF.PI / 180f);
+                var cosS = MathF.Cos(segAngle);
+                var sinS = MathF.Sin(segAngle);
+                var vi = ring * StarDomeSegments + seg;
+                vertices[vi] = new Vector3(hRadius * sinE * cosS, vRadius * cosE, hRadius * sinE * sinS);
+                uvs[vi] = new Vector2(cosS * (ring / 6f) + 8f, sinS * (ring / 6f) + 8f);
+                _starColorIndex[vi] = vi < StarCount ? vi : vi - StarCount;
+                _starColorBuffer[vi] = new Color(0f, 0f, 0f, 1f);
+            }
         }
 
-        _starPoints = new MultiMeshInstance3D
+        var indices = new int[(StarDomeRings - 1) * StarDomeSegments * 6];
+        var idx = 0;
+        for (var ring = 0; ring < StarDomeRings - 1; ring++)
+        for (var seg = 0; seg < StarDomeSegments; seg++)
         {
-            Name = "StarPoints",
-            Multimesh = _starMultiMesh,
+            var a = ring * StarDomeSegments + seg;
+            var b = ring * StarDomeSegments + (seg + 1) % StarDomeSegments;
+            var c = (ring + 1) * StarDomeSegments + seg;
+            var d = (ring + 1) * StarDomeSegments + (seg + 1) % StarDomeSegments;
+            indices[idx++] = a;
+            indices[idx++] = b;
+            indices[idx++] = c;
+            indices[idx++] = b;
+            indices[idx++] = d;
+            indices[idx++] = c;
+        }
+
+        _starBaseArrays = new Array();
+        _starBaseArrays.Resize((int)Mesh.ArrayType.Max);
+        _starBaseArrays[(int)Mesh.ArrayType.Vertex] = vertices;
+        _starBaseArrays[(int)Mesh.ArrayType.TexUV] = uvs;
+        _starBaseArrays[(int)Mesh.ArrayType.Color] = _starColorBuffer;
+        _starBaseArrays[(int)Mesh.ArrayType.Index] = indices;
+
+        _starMesh = new ArrayMesh();
+        _starMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, _starBaseArrays);
+
+        _starDomeMesh = new MeshInstance3D
+        {
+            Name = "StarDome",
+            Mesh = _starMesh,
             MaterialOverride = _starMaterial,
             ExtraCullMargin = StarDomeRadius,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             Layers = 1
         };
-        AddChild(_starPoints);
+        AddChild(_starDomeMesh);
 
         GD.Print(
-            $"[SkyDome] StarPoints built: {StarCount} textured point sprites (Fibonacci hemisphere placement is aesthetic; dome tessellation not spec-pinned). spec: Docs/RE/formats/sky.md 4.3.");
+            $"[SkyDome] StarDome built: {StarDomeVertexCount}-vertex OPAQUE textured triangle mesh " +
+            $"({StarDomeRings} rings x {StarDomeSegments} segments = {(StarDomeRings - 1) * StarDomeSegments * 2} tris, " +
+            $"radii {hRadius:F0}:{vRadius:F0} preserving 4000:3500 ratio), fisheye WRAP UVs (u=cos*ring/6+8, v=sin*ring/6+8), " +
+            $"per-vertex BGR tint on {StarCount} primary + {StarDomeVertexCount - StarCount} derived copies, " +
+            $"global brightness as vertex-colour scale with {StarVisibilityCutoff} hide cutoff. " +
+            "spec: Docs/RE/structs/skybox.md §6.1 (was 48 additive point sprites).");
     }
 
     private void BuildCloudDome()
     {
-        var mesh1 = BuildHemisphereMesh(DomeRadius * 0.97f, CloudDomeStacks, DomeSectors, true);
+        _cloudMesh1 = BuildCloudFlatDome(0.997f,
+            out _cloud1BaseArrays, out _cloud1ColorIndex, out _cloud1ColorBuffer);
         _cloudMaterial1 = BuildCloudMaterial();
-        var mi1 = new MeshInstance3D
+        _cloudDomeMesh1 = new MeshInstance3D
         {
             Name = "CloudDomeInner",
-            Mesh = mesh1,
+            Mesh = _cloudMesh1,
             MaterialOverride = _cloudMaterial1,
             ExtraCullMargin = 0f,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             Layers = 1
         };
-        AddChild(mi1);
-        _cloudDomeMesh1 = mi1;
+        AddChild(_cloudDomeMesh1);
 
-        var mesh2 = BuildHemisphereMesh(DomeRadius, CloudDomeStacks, DomeSectors, true);
+        _cloudMesh2 = BuildCloudFlatDome(1.0f,
+            out _cloud2BaseArrays, out _cloud2ColorIndex, out _cloud2ColorBuffer);
         _cloudMaterial2 = BuildCloudMaterial();
-        var mi2 = new MeshInstance3D
+        _cloudDomeMesh2 = new MeshInstance3D
         {
             Name = "CloudDomeOuter",
-            Mesh = mesh2,
+            Mesh = _cloudMesh2,
             MaterialOverride = _cloudMaterial2,
             ExtraCullMargin = 0f,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             Layers = 1
         };
-        AddChild(mi2);
-        _cloudDomeMesh2 = mi2;
+        AddChild(_cloudDomeMesh2);
+
+        GD.Print(
+            $"[SkyDome] cloud domes REBUILT as flat zenith caps: each layer {CloudVertexCount}v = {CloudRings} rings x {CloudSegments} " +
+            $"(ring radius=ringIndex*{CloudRingRadiusStep:F0}, height=(3-ringIndex)*{CloudRingHeightStep:F1}) + {CloudSegments}-vtx skirt at h={CloudSkirtHeight:F0}; " +
+            $"horizRadius~{(CloudRings - 1) * CloudRingRadiusStep:F0} height~{(CloudRings - 1) * CloudRingHeightStep:F0}; " +
+            $"the {CloudVertexCount}-entry BGRA day-tint grid now maps 1:1 (colorIndex[v]=v, was a lossy stack->row/sector->col grid on a UV-sphere). " +
+            "Fisheye UV centred (0.5,0.25), only V scrolled; V-scroll + ping-pong + per-vertex tint + colour-key preserved (geometry-independent). " +
+            "ENGINEERING NOTE: the fisheye radial UV span (0.25) is not pinned by spec (only the centre is) — chosen so the 4 rings fan out from the centre. " +
+            "spec: Docs/RE/structs/skybox.md §7 (60-vtx dome: 4 rings x 12 + 12 skirt) / formats/sky.md §F.");
     }
 
-    private static ArrayMesh BuildHemisphereMesh(float radius, int stacks, int sectors, bool inverted)
+    private static ArrayMesh BuildCloudFlatDome(float radiusScale,
+        out Array baseArrays, out int[] colorIndex, out Color[] colorBuffer)
     {
-        var stride = sectors + 1;
-        var vertCount = (stacks + 1) * stride;
-        var indexCount = stacks * sectors * 6;
+        const int rings = CloudRings + 1;
+        const int segs = CloudSegments;
+        const int vertCount = CloudVertexCount;
+        const int indexCount = CloudRings * segs * 6;
 
         var vertices = new Vector3[vertCount];
         var normals = new Vector3[vertCount];
         var uvs = new Vector2[vertCount];
         var indices = new int[indexCount];
+        colorIndex = new int[vertCount];
+        colorBuffer = new Color[vertCount];
 
-        for (var stack = 0; stack <= stacks; stack++)
+        for (var ring = 0; ring < rings; ring++)
         {
-            var theta = MathF.PI / 2f + stack * (MathF.PI / 2f) / stacks;
-            var sinTheta = MathF.Sin(theta);
-            var cosTheta = MathF.Cos(theta);
+            var dome = ring < CloudRings;
+            var radius = (dome ? ring : CloudRings - 1) * CloudRingRadiusStep * radiusScale;
+            var height = (dome ? (CloudRings - 1 - ring) * CloudRingHeightStep : CloudSkirtHeight) * radiusScale;
+            var norm = dome ? (float)ring / (CloudRings - 1) : 1f;
 
-            for (var sec = 0; sec <= sectors; sec++)
+            for (var seg = 0; seg < segs; seg++)
             {
-                var phi = sec * (2f * MathF.PI) / sectors;
-                var sinPhi = MathF.Sin(phi);
-                var cosPhi = MathF.Cos(phi);
+                var angle = seg * (2f * MathF.PI / segs);
+                var cosA = MathF.Cos(angle);
+                var sinA = MathF.Sin(angle);
 
-                var x = radius * sinTheta * cosPhi;
-                var y = radius * -cosTheta;
-                var z = radius * sinTheta * sinPhi;
-
-                Vector3 pos = new(x, y, z);
-                var outward = pos.Normalized();
-                var vi = stack * stride + sec;
+                var vi = ring * segs + seg;
+                Vector3 pos = new(radius * cosA, height, radius * sinA);
                 vertices[vi] = pos;
-                normals[vi] = inverted ? -outward : outward;
-                uvs[vi] = new Vector2((float)sec / sectors, (float)stack / stacks);
+                normals[vi] = pos.LengthSquared() > 1e-6f ? -pos.Normalized() : Vector3.Down;
+                uvs[vi] = new Vector2(0.5f + cosA * norm * CloudUvSpan, 0.25f + sinA * norm * CloudUvSpan);
+                colorIndex[vi] = vi;
+                colorBuffer[vi] = new Color(1f, 1f, 1f, 1f);
             }
         }
 
         var idx = 0;
-        for (var stack = 0; stack < stacks; stack++)
-        for (var sec = 0; sec < sectors; sec++)
+        for (var ring = 0; ring < CloudRings; ring++)
+        for (var seg = 0; seg < segs; seg++)
         {
-            var tl = stack * stride + sec;
-            var tr = tl + 1;
-            var bl = tl + stride;
-            var br = bl + 1;
-
-            if (inverted)
-            {
-                indices[idx++] = tl;
-                indices[idx++] = bl;
-                indices[idx++] = tr;
-                indices[idx++] = tr;
-                indices[idx++] = bl;
-                indices[idx++] = br;
-            }
-            else
-            {
-                indices[idx++] = tl;
-                indices[idx++] = tr;
-                indices[idx++] = bl;
-                indices[idx++] = tr;
-                indices[idx++] = br;
-                indices[idx++] = bl;
-            }
+            var next = (seg + 1) % segs;
+            var tl = (ring + 1) * segs + seg;
+            var tr = (ring + 1) * segs + next;
+            var bl = ring * segs + seg;
+            var br = ring * segs + next;
+            indices[idx++] = tl;
+            indices[idx++] = bl;
+            indices[idx++] = tr;
+            indices[idx++] = tr;
+            indices[idx++] = bl;
+            indices[idx++] = br;
         }
 
-        var arrays = new Array();
-        arrays.Resize((int)Mesh.ArrayType.Max);
-        arrays[(int)Mesh.ArrayType.Vertex] = vertices;
-        arrays[(int)Mesh.ArrayType.Normal] = normals;
-        arrays[(int)Mesh.ArrayType.TexUV] = uvs;
-        arrays[(int)Mesh.ArrayType.Index] = indices;
+        baseArrays = new Array();
+        baseArrays.Resize((int)Mesh.ArrayType.Max);
+        baseArrays[(int)Mesh.ArrayType.Vertex] = vertices;
+        baseArrays[(int)Mesh.ArrayType.Normal] = normals;
+        baseArrays[(int)Mesh.ArrayType.TexUV] = uvs;
+        baseArrays[(int)Mesh.ArrayType.Color] = colorBuffer;
+        baseArrays[(int)Mesh.ArrayType.Index] = indices;
 
         var mesh = new ArrayMesh();
-        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
-        return mesh;
-    }
-
-    private static ArrayMesh BuildStarQuadMesh(float size)
-    {
-        var half = size / 2f;
-        Vector3[] verts =
-        [
-            new(-half, -half, 0f),
-            new(half, -half, 0f),
-            new(half, half, 0f),
-            new(-half, half, 0f)
-        ];
-        Vector2[] uvs =
-        [
-            new(0f, 1f),
-            new(1f, 1f),
-            new(1f, 0f),
-            new(0f, 0f)
-        ];
-        int[] indices = [0, 1, 2, 0, 2, 3];
-
-        var arrays = new Array();
-        arrays.Resize((int)Mesh.ArrayType.Max);
-        arrays[(int)Mesh.ArrayType.Vertex] = verts;
-        arrays[(int)Mesh.ArrayType.TexUV] = uvs;
-        arrays[(int)Mesh.ArrayType.Index] = indices;
-
-        var mesh = new ArrayMesh();
-        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, baseArrays);
         return mesh;
     }
 
@@ -537,22 +597,13 @@ public sealed partial class SkyDomeNode : Node3D
         const string ShaderSrc =
             """
             shader_type spatial;
-            render_mode unshaded, fog_disabled, blend_add, depth_draw_never, cull_disabled;
+            render_mode unshaded, fog_disabled, depth_draw_never, cull_disabled;
 
-            uniform sampler2D star_tex : source_color, hint_default_white;
-
-            void vertex() {
-                MODELVIEW_MATRIX = VIEW_MATRIX * mat4(
-                    INV_VIEW_MATRIX[0],
-                    INV_VIEW_MATRIX[1],
-                    INV_VIEW_MATRIX[2],
-                    MODEL_MATRIX[3]);
-            }
+            uniform sampler2D star_tex : source_color, repeat_enable, hint_default_white;
 
             void fragment() {
                 vec4 t = texture(star_tex, UV);
                 ALBEDO = t.rgb * COLOR.rgb;
-                ALPHA  = t.a * COLOR.a;
             }
             """;
 
@@ -572,8 +623,6 @@ public sealed partial class SkyDomeNode : Node3D
             uniform sampler2D cloud_tex_a : source_color, hint_default_white;
             uniform sampler2D cloud_tex_b : source_color, hint_default_white;
             uniform float cloud_blend = 0.0;
-            uniform vec4 tint_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
-            uniform float opacity = 1.0;
             uniform vec2 uv_scroll = vec2(0.0, 0.0);
 
             void fragment() {
@@ -582,16 +631,14 @@ public sealed partial class SkyDomeNode : Node3D
                 vec4 tb = texture(cloud_tex_b, uv);
                 vec4 t = mix(ta, tb, clamp(cloud_blend, 0.0, 1.0));
                 float key = smoothstep(0.0, 0.05, max(t.r, max(t.g, t.b)));
-                ALBEDO = t.rgb * tint_color.rgb;
-                ALPHA  = t.a * opacity * key;
+                ALBEDO = t.rgb * COLOR.rgb;
+                ALPHA  = t.a * COLOR.a * key;
             }
             """;
 
         var shader = new Shader { Code = ShaderSrc };
         var mat = new ShaderMaterial { Shader = shader };
         mat.RenderPriority = -127;
-        mat.SetShaderParameter(CloudTintParam, new Color(1f, 1f, 1f));
-        mat.SetShaderParameter(CloudOpacityParam, 0f);
         mat.SetShaderParameter(CloudUvScrollParam, new Vector2(0f, 0f));
         mat.SetShaderParameter(CloudBlendParam, 0f);
         return mat;
@@ -628,7 +675,7 @@ public sealed partial class SkyDomeNode : Node3D
         const string BillboardShader =
             """
             shader_type spatial;
-            render_mode unshaded, fog_disabled, blend_mix, depth_draw_never, cull_disabled;
+            render_mode unshaded, fog_disabled, blend_add, depth_draw_never, cull_disabled;
 
             uniform vec4 albedo_color : source_color = vec4(1.0, 0.95, 0.7, 1.0);
             uniform sampler2D albedo_tex : source_color, hint_default_white;
@@ -702,7 +749,7 @@ public sealed partial class SkyDomeNode : Node3D
         const string BillboardShader =
             """
             shader_type spatial;
-            render_mode unshaded, fog_disabled, blend_mix, depth_draw_never, cull_disabled;
+            render_mode unshaded, fog_disabled, blend_add, depth_draw_never, cull_disabled;
 
             uniform vec4 albedo_color : source_color = vec4(0.85, 0.9, 1.0, 1.0);
             uniform sampler2D albedo_tex : source_color, hint_default_white;
@@ -785,19 +832,4 @@ public sealed partial class SkyDomeNode : Node3D
         }
     }
 
-    private static Color AverageTint(BgraColor[] colors)
-    {
-        var rs = 0f;
-        var gs = 0f;
-        var bs = 0f;
-        for (var i = 0; i < colors.Length; i++)
-        {
-            rs += colors[i].R;
-            gs += colors[i].G;
-            bs += colors[i].B;
-        }
-
-        var inv = 1f / (colors.Length * 255f);
-        return new Color(rs * inv, gs * inv, bs * inv);
-    }
 }

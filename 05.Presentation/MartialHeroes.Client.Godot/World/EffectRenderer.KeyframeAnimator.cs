@@ -86,8 +86,11 @@ public sealed partial class EffectRenderer
             ? elapsedMs % se.TotalTime
             : elapsedMs % (stride * texCount);
 
-        var frameIdx = (int)(phase / stride);
-        var frac = (float)(phase % stride / stride);
+        var basePhase = phase - se.AnimBaseTime;
+        if (basePhase < 0) basePhase = 0;
+
+        var frameIdx = (int)(basePhase / stride);
+        var frac = (float)(basePhase % stride / stride);
 
         var kfCount = se.Keyframes.Length;
 
@@ -115,7 +118,7 @@ public sealed partial class EffectRenderer
         var sy = (kA.SizeY + (kB.SizeY - kA.SizeY) * frac) * scale;
         var sz = (kA.SizeZ + (kB.SizeZ - kA.SizeZ) * frac) * scale;
 
-        var alpha = SampleCurveAt(se.Opacity, activeKf, nextKf, frac);
+        var alpha = SampleCurveAt(se.Opacity, activeKf, nextKf, frac) * EffectBrightnessFactor();
         var diffR = SampleCurveAt(se.DiffuseR, activeKf, nextKf, frac);
         var diffG = SampleCurveAt(se.DiffuseG, activeKf, nextKf, frac);
         var diffB = SampleCurveAt(se.DiffuseB, activeKf, nextKf, frac);
@@ -149,7 +152,8 @@ public sealed partial class EffectRenderer
                 mesh = BuildMeshParticle(se, sx, sy, sz, tint, uOff, vOff);
                 if (mesh is not null)
                 {
-                    meshOrient = (instQ * preRot90Y * kfQ).Normalized();
+                    var camQ = ActiveCameraQuat();
+                    meshOrient = (camQ * preRot90Y * kfQ).Normalized();
                     billboardMat = false;
                 }
                 else
@@ -209,6 +213,8 @@ public sealed partial class EffectRenderer
             var mat = new StandardMaterial3D
             {
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                DisableFog = true,
                 AlbedoColor = tint,
                 Transparency = transparency,
                 BlendMode = blend,
@@ -239,5 +245,14 @@ public sealed partial class EffectRenderer
         a = Math.Min(a, keys.Length - 1);
         b = Math.Min(b, keys.Length - 1);
         return keys[a] + (keys[b] - keys[a]) * frac;
+    }
+
+
+    private Quaternion ActiveCameraQuat()
+    {
+        var cam = GetViewport()?.GetCamera3D();
+        if (cam is null) return Quaternion.Identity;
+        var q = cam.GlobalBasis.GetRotationQuaternion();
+        return q.LengthSquared() > 0.0001f ? q.Normalized() : Quaternion.Identity;
     }
 }

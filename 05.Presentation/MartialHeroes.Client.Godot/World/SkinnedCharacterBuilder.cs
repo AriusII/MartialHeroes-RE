@@ -208,6 +208,7 @@ public static class SkinnedCharacterBuilder
             {
                 var std = new StandardMaterial3D
                 {
+                    DisableFog = true,
                     TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
                     CullMode = BaseMaterial3D.CullModeEnum.Disabled
                 };
@@ -220,6 +221,7 @@ public static class SkinnedCharacterBuilder
         {
             var std = new StandardMaterial3D
             {
+                DisableFog = true,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled
             };

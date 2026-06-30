@@ -189,10 +189,10 @@ public sealed partial class EffectRenderer
             {
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                BlendMode = BaseMaterial3D.BlendModeEnum.Add,
+                BlendMode = BaseMaterial3D.BlendModeEnum.Mix,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
                 VertexColorUseAsAlbedo = true,
-                AlbedoColor = new Color(1f, 1f, 1f),
+                AlbedoColor = new Color(2f, 2f, 2f),
                 AlbedoTexture = texture,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps
             };
