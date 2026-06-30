@@ -86,8 +86,13 @@ public sealed partial class HudErrorPanel : Control
         GD.Print("[HudErrorPanel] Built — timed notice/error modal slot 168 (§8.25.2). " +
                  "Countdown label + OK button. Default timeout 5000 ms. " +
                  "Delegates banner to AnnouncePanel (slot 221) when present. " +
-                 "TODO(world-campaign): wire 4/500 popup-by-code sink. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.25.2 CODE-CONFIRMED.");
+                 "Inbound WIRED: 4/81 ActionErrorResult rides the single-consumer IClientEventBus " +
+                 "(drained only by GameLoop) -> HudMaster.OnActionError -> ShowActionError(status,error); " +
+                 "4/500 popup-by-code rides PopupCodeEvent -> HudMaster.OnPopupCode -> " +
+                 "AnnouncePanel.ShowPopupCode (global notice sink). " +
+                 "OK/Esc dismiss the modal locally — no C2S intent exists for closing an error popup. " +
+                 "spec: Docs/RE/specs/net_contracts.md §A.3/§A.5 (4/81 error-code->string-id); " +
+                 "Docs/RE/specs/ui_system.md §8.25.2 CODE-CONFIRMED.");
     }
 
     public void SetAnnounceDelegate(HudAnnouncePanel? announcePanel)

@@ -23,6 +23,14 @@ public sealed class HudEventHub : IHudEventHub
 
     private readonly Channel<QuestLogChangedEvent> _questLog = CreateBounded<QuestLogChangedEvent>(LatestWinsCapacity);
 
+    private readonly Channel<MailLetterArrivedEvent> _mailLetters = CreateBounded<MailLetterArrivedEvent>(AppendCapacity);
+
+    private readonly Channel<DeliveryRecordUpdatedEvent> _deliveryRecords =
+        CreateBounded<DeliveryRecordUpdatedEvent>(AppendCapacity);
+
+    private readonly Channel<SkillHotbarSlotSetEvent> _skillHotbarSlots =
+        CreateBounded<SkillHotbarSlotSetEvent>(AppendCapacity);
+
     private readonly Channel<StatAllocationView> _statAllocations =
         CreateBounded<StatAllocationView>(LatestWinsCapacity);
 
@@ -95,6 +103,30 @@ public sealed class HudEventHub : IHudEventHub
 
     public ChannelReader<QuestCompletedEvent> QuestCompleted => _questCompleted.Reader;
 
+    public ChannelReader<MailLetterArrivedEvent> MailLetters => _mailLetters.Reader;
+
+    public ChannelReader<DeliveryRecordUpdatedEvent> DeliveryRecords => _deliveryRecords.Reader;
+
+    public ChannelReader<SkillHotbarSlotSetEvent> SkillHotbarSlots => _skillHotbarSlots.Reader;
+
+    public bool PublishMailLetter(MailLetterArrivedEvent letter)
+    {
+        ArgumentNullException.ThrowIfNull(letter);
+        return _mailLetters.Writer.TryWrite(letter);
+    }
+
+    public bool PublishDeliveryRecord(DeliveryRecordUpdatedEvent record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return _deliveryRecords.Writer.TryWrite(record);
+    }
+
+    public bool PublishSkillHotbarSlot(SkillHotbarSlotSetEvent slot)
+    {
+        ArgumentNullException.ThrowIfNull(slot);
+        return _skillHotbarSlots.Writer.TryWrite(slot);
+    }
+
     public bool PublishInventorySlots(InventorySlotsChangedEvent slots)
     {
         ArgumentNullException.ThrowIfNull(slots);
@@ -127,6 +159,9 @@ public sealed class HudEventHub : IHudEventHub
         _inventorySlots.Writer.TryComplete();
         _questLog.Writer.TryComplete();
         _questCompleted.Writer.TryComplete();
+        _mailLetters.Writer.TryComplete();
+        _deliveryRecords.Writer.TryComplete();
+        _skillHotbarSlots.Writer.TryComplete();
     }
 
     public bool PublishTargetChanged(TargetChangedEvent target)

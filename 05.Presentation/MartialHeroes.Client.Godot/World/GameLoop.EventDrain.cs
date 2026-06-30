@@ -313,7 +313,16 @@ public sealed partial class GameLoop
                 _hudHub?.PublishQuestCompleted(questDone);
                 break;
 
-            case SkillHotbarSlotSetEvent:
+            case SkillHotbarSlotSetEvent skillHotbarSlot:
+                _hudHub?.PublishSkillHotbarSlot(skillHotbarSlot);
+                break;
+
+            case MailLetterArrivedEvent mailLetter:
+                _hudHub?.PublishMailLetter(mailLetter);
+                break;
+
+            case DeliveryRecordUpdatedEvent deliveryRecord:
+                _hudHub?.PublishDeliveryRecord(deliveryRecord);
                 break;
 
             case ChatBroadcastEvent:

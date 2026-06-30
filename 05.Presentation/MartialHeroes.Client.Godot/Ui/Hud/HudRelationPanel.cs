@@ -369,14 +369,13 @@ public sealed partial class HudRelationPanel : Control
                 break;
 
             case 9:
-                GD.Print("[HudRelationPanel] Name submit (action 9). " +
-                         "spec: Docs/RE/specs/ui_system.md §8.28.4.");
+                GD.Print("[HudRelationPanel] Name submit (action 9 = Enter) — commit via chat-emit path, " +
+                         "mirrors OK button (action 10). spec: Docs/RE/specs/ui_system.md §8.28.4.");
+                CommitRelationName();
                 break;
 
             case 10:
-                var name = _nameTextbox?.Text.Trim() ?? "";
-                if (!string.IsNullOrEmpty(name) && _ctx is not null)
-                    _ = _ctx.UseCases.SendChatAsync(0, name);
+                CommitRelationName();
                 break;
 
             case 11:
@@ -435,6 +434,13 @@ public sealed partial class HudRelationPanel : Control
                          "spec: Docs/RE/specs/ui_system.md §8.28.4.");
                 break;
         }
+    }
+
+    private void CommitRelationName()
+    {
+        var name = _nameTextbox?.Text.Trim() ?? "";
+        if (string.IsNullOrEmpty(name) || _ctx is null) return;
+        _ = _ctx.UseCases.SendChatAsync(0, name);
     }
 
     private void UpdatePageIndicator()

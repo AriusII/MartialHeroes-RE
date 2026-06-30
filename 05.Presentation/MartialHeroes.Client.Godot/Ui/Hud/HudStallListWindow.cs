@@ -263,9 +263,13 @@ public sealed partial class HudStallListWindow : Control
                  "10 col-sort btns (17..26) + wide sort (27); page prev/next (15/16); " +
                  "big enter (11) + close (10). " +
                  "Atlas: literal data/ui/stalllist.dds (VFS-pending). " +
-                 "Inbound: TODO(capture): S2C 4/74 SmsgStallListRefill. " +
-                 "Outbound: TODO(world-campaign): C2S 2/74 (search) + 2/56 (enter). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.29 CODE-CONFIRMED.");
+                 "Inbound list BLOCKED: S2C 4/74 SmsgStallListRefill handler is an empty stub in " +
+                 "GamePacketHandler.Stubs.cs — no IClientEvent, no IHudEventHub channel, no GameLoop dispatch — " +
+                 "so rows never populate (no mock data). " +
+                 "Outbound BLOCKED: IApplicationUseCases has no stall method; CmsgStallEnter (2/56) and " +
+                 "CmsgStallListRequest (2/74) exist in the Network layer but no use-case sends them. " +
+                 "Wiring needs an Application-layer event+hub channel+use-cases (outside this file). " +
+                 "spec: Docs/RE/specs/ui_system.md §8.29 / inventory_trade.md CODE-CONFIRMED.");
     }
 
 
@@ -288,7 +292,8 @@ public sealed partial class HudStallListWindow : Control
     private void OnRowSelect(int row)
     {
         _selectedRow = row;
-        GD.Print($"[HudStallListWindow] Row {row} selected. TODO(capture): S2C 4/74 populate. " +
+        GD.Print($"[HudStallListWindow] Row {row} selected — no stall id to act on: inbound 4/74 feed is BLOCKED " +
+                 "(SmsgStallListRefill handler stub publishes no event/channel), so rows carry no payload. " +
                  "spec: Docs/RE/specs/ui_system.md §8.29.4.");
     }
 
@@ -301,8 +306,8 @@ public sealed partial class HudStallListWindow : Control
             return;
         }
 
-        GD.Print($"[HudStallListWindow] Enter stall row {_selectedRow}: " +
-                 "TODO(world-campaign): C2S 2/56 CmsgStallEnter. " +
+        GD.Print($"[HudStallListWindow] Enter stall row {_selectedRow} BLOCKED: " +
+                 "no IApplicationUseCases intent sends C2S 2/56 CmsgStallEnter (packet exists, use-case missing). " +
                  "spec: Docs/RE/specs/ui_system.md §8.29.4/§8.29.6.");
         Toggle(false);
     }
@@ -324,8 +329,8 @@ public sealed partial class HudStallListWindow : Control
 
         var filter = _searchBox?.Text.Trim() ?? "";
         _lastSearchTime = now;
-        GD.Print($"[HudStallListWindow] Search submit filter='{filter}' → " +
-                 "TODO(world-campaign): C2S 2/74 CmsgStallListRequest. " +
+        GD.Print($"[HudStallListWindow] Search submit filter='{filter}' BLOCKED: " +
+                 "no IApplicationUseCases intent sends C2S 2/74 CmsgStallListRequest (packet exists, use-case missing). " +
                  "spec: Docs/RE/specs/ui_system.md §8.29.4/§8.29.6.");
     }
 
@@ -333,15 +338,15 @@ public sealed partial class HudStallListWindow : Control
     {
         if (_searchBox is not null) _searchBox.Text = "";
         _selectedRow = -1;
-        GD.Print("[HudStallListWindow] Reset/All (action 30). " +
-                 "TODO(world-campaign): C2S 2/74 empty filter. " +
+        GD.Print("[HudStallListWindow] Reset/All (action 30) BLOCKED: " +
+                 "C2S 2/74 empty-filter request needs an IApplicationUseCases intent that does not exist. " +
                  "spec: Docs/RE/specs/ui_system.md §8.29.4.");
     }
 
     private void OnRefreshOwnList()
     {
-        GD.Print("[HudStallListWindow] Refresh own-list (action 12). " +
-                 "TODO(world-campaign): fetch player own-stall list. " +
+        GD.Print("[HudStallListWindow] Refresh own-list (action 12) BLOCKED: " +
+                 "fetch-own-stall-list needs an IApplicationUseCases intent (C2S 2/74 family) that does not exist. " +
                  "spec: Docs/RE/specs/ui_system.md §8.29.4.");
     }
 

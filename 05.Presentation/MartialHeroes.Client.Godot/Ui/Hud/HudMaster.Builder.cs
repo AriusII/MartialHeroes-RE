@@ -173,7 +173,18 @@ public sealed partial class HudMaster
         _targetFrame?.BindHub(hub);
         _partyWindow?.BindHub(hub);
         _guildWindow?.BindHub(hub);
+        _questWindow?.BindHub(hub);
+        _skillHotbar?.BindHub(hub);
+        _mailWindow?.BindHub(hub);
+        _deliveryWindow?.BindHub(hub);
 
+        GD.Print(
+            "[HudMaster] BindHub: QuestWindow now bound (QuestLog/QuestCompleted channels exist on IHudEventHub). "
+            + "spec: Docs/RE/specs/quests.md §6/§7.");
+        GD.Print(
+            "[HudMaster] BindHub: SkillHotbar(SkillHotbarSlots) + MailWindow(MailLetters) + DeliveryWindow(DeliveryRecords) "
+            + "now bound — inbound channel seam completed for the carrier-pigeon read inbox, delivery box list, and "
+            + "live hotbar slot binds. spec: Docs/RE/specs/mail.md §3/§5; ui_system.md §8.21.2/§8.21.5.");
         GD.Print(
             "[HudMaster] BindHub: ~34 panels connected. " +
             "Guild roster wired (OnGuildRoster/OnGuildMemberPatch/OnGuildStateChanged → direct dispatch). " +

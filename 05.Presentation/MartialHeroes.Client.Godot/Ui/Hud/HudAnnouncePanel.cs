@@ -50,10 +50,14 @@ public sealed partial class HudAnnouncePanel : Control
         Visible = false;
 
         GD.Print("[HudAnnouncePanel] Built — scrolling announce banner slot 221 (8×110×12 labels, " +
-                 "two batches 3+5, no atlas, non-interactive). " +
-                 "Caller: HudErrorPanel delegation via notice sink. " +
-                 "TODO(world-campaign): wire global notice sink (§8.25.3 4/500/4/132/4/138 → ErrorPanel → here). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.25.1 CODE-CONFIRMED.");
+                 "two batches 3+5, no atlas, non-interactive; no buttons/close per §8.25.1). " +
+                 "Global notice sink (§8.25.3) wired upstream — this is the leaf banner delegate fed by method call " +
+                 "(same pattern as HudErrorPanel; no self-subscribe, no input to route): " +
+                 "4/500 SmsgShowPopupByCode → PopupCodeEvent → GameLoop drain → HudMaster.OnPopupCode → ShowPopupCode (caption via text library); " +
+                 "4/132/4/138 notice family → ActionErrorEvent → HudMaster.OnActionError → HudErrorPanel.ShowActionError/ShowError → ShowAnnounce; " +
+                 "HudMaster.ShowAnnounce → ShowAnnounce. " +
+                 "No direct IHudEventHub sub: no dedicated notice channel exists and ChatLines is SingleReader (owned by HudChatPanel). " +
+                 "spec: Docs/RE/specs/ui_system.md §8.25.1/§8.25.3 / chat.md / social.md CODE-CONFIRMED.");
     }
 
 

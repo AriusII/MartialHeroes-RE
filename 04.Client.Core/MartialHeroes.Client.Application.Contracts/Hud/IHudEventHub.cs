@@ -29,6 +29,12 @@ public interface IHudEventHub
 
     ChannelReader<QuestCompletedEvent> QuestCompleted { get; }
 
+    ChannelReader<MailLetterArrivedEvent> MailLetters { get; }
+
+    ChannelReader<DeliveryRecordUpdatedEvent> DeliveryRecords { get; }
+
+    ChannelReader<SkillHotbarSlotSetEvent> SkillHotbarSlots { get; }
+
     bool PublishChatLine(ChatLineEvent line);
 
     bool PublishBuffState(BuffStateEvent buffs);
@@ -50,6 +56,12 @@ public interface IHudEventHub
     bool PublishQuestLog(QuestLogChangedEvent log);
 
     bool PublishQuestCompleted(QuestCompletedEvent completed);
+
+    bool PublishMailLetter(MailLetterArrivedEvent letter);
+
+    bool PublishDeliveryRecord(DeliveryRecordUpdatedEvent record);
+
+    bool PublishSkillHotbarSlot(SkillHotbarSlotSetEvent slot);
 
     void Complete();
 }
