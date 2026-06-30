@@ -1083,6 +1083,117 @@ pushed position by **distance band**:
   small drift is absorbed as interpolation, drift past ~200 units triggers a fast catch-up, and drift
   past ~300 units is a hard teleport. [CONFIRMED]
 
+### 18.5 The deterministic per-frame movement model — recovered 2026-06-30
+
+> **Recovered 2026-06-30 (anchor `f61f66a9`, static-ida).** This subsection pins the exact
+> deterministic client-side locomotion that §18.1–18.4 described at the protocol level: the per-frame
+> step formula, the speed source and units, the (absent) turn rate, the arrival / snap thresholds as
+> exact squared-distance compares, and the idle/walk/run state machine. Every constant below is a
+> code immediate or a struct-field read confirmed by control flow on this build; **server-authored
+> per-map walk/run rate magnitudes and the on-wire target VALUES stay capture-pending** (the formula
+> and constants are static facts, the numbers they multiply are data/wire). All offsets are
+> in-memory struct offsets (Actor object / motion record), never binary addresses.
+
+**Forward-integration step (dead-reckoning, not a position lerp).** Every actor (the local player
+*and* every remote actor) is advanced each frame by **forward integration along its own facing**, not
+by lerping between two absolute endpoints. The per-frame update:
+
+1. Resolves the actor's ground **speed** (see below) into `speed`.
+2. Computes a per-frame forward distance `step = speed × dt × moveScale ÷ 1.5`, where `dt` is the
+   frame's elapsed time in **seconds** (the same millisecond→second conversion the camera uses,
+   §A.4) and `moveScale` is the per-actor scalar at **Actor +0x3FC** (the field §18.4 and the actor
+   struct call the animation/interpolation speed multiplier).
+3. Builds the displacement vector **(0, 0, step)** in the actor's local frame and **rotates it by the
+   actor's facing quaternion**, then adds the result to the live position. Movement is therefore
+   always straight along the facing direction (consistent with the no-pathfinder model of §18.3).
+
+The **`÷ 1.5` normalisation** is the key to the reconciliation mechanism: the *default* `moveScale`
+written for an in-band actor is **1.5**, so the default net advance is exactly `speed × dt` (unit
+speed). Larger `moveScale` values (set by the reconciliation bands and the motion-end path below)
+scale the catch-up rate proportionally. [CONFIRMED]
+
+**Speed source and units.** Base ground speed is **data-driven**, read from the actor's
+animation/motion-catalogue record (keyed by the actor's model/motion class id): the **walk rate at
+motion-record +0x30** or the **run rate at +0x34**, selected by the actor's run flag (**Actor
++0x414**). The resolved speed is then taken as the **maximum** of that base rate and several
+buff/aura speed fields on the actor, and of a speed value on a linked registry entity when present;
+the whole result is scaled by `(1 − slowFraction)`. `slowFraction` comes from a small global
+movement-modifier table indexed by a global state byte — index ≤ 1 yields no slow (factor **1.0**),
+i.e. the default is unmodified speed. The rate values are **world units per second** (they multiply
+`dt`-in-seconds directly); their per-map magnitudes are server/asset data and stay RUNTIME/data-driven.
+[CONFIRMED that the source is motion-record +0x30/+0x34 gated by the run flag, max-combined with the
+buff/registry speed fields, and slow-scaled; the numeric rates are data]
+
+**Turn / yaw rate — there is none (instantaneous facing).** The actor's facing is **snapped**, not
+turned at a rate. The face-toward helper computes a heading as `atan2` of the **(target − current)**
+XZ delta and writes the facing quaternion directly from that angle every time the move target is set.
+There is **no angular velocity, no slerp, and no max-turn-rate clamp on the actor body** — the body
+points at its destination immediately. (The smoothed yaw integrator described in `camera_movement.md`
+§A.3–A.4 is the **camera's** orbit yaw, a separate concern; the followed actor's body facing is
+instantaneous.) [CONFIRMED]
+
+**Arrival / overshoot test (exact thresholds).** All distance compares are **squared XZ distance**
+(`(Δx² + Δz²)`, world Y ignored). A move segment is considered **arrived** when **either**:
+
+- squared distance from the live position to the move target is **< 4.0** (i.e. within **2.0 units**),
+  **or**
+- the actor has **overshot** — squared distance(position → segment-start scratch) is **≥** squared
+  distance(move target → segment-start scratch).
+
+A separate click-to-move follow advances/recenters the pending destination when the local player is
+**≥ 20.0 units** from the published click target (squared threshold **400.0**). On arrival the local
+player runs the motion-end path (emits `2/13`, §18.1) and drops back to idle motion. [CONFIRMED]
+
+**Server reconciliation (`5/13`) — exact bands and the multiplier they set.** The authoritative-push
+handler reads yaw, the server's current position XZ, the server's move-target XZ, the run flag, a
+motion-code byte, and a stance byte; it sets the facing quaternion from yaw and stores the target XZ
+into the actor's move-target. It then compares the **squared XZ divergence** between the actor's
+stored position and the server value and reacts by band (the §18.4 200/300-unit bands, now pinned to
+exact squared compares and to the `moveScale` they write at Actor +0x3FC):
+
+| Squared divergence | Linear | Reaction | `moveScale` written |
+|---|---|---|---|
+| `< 0.5` | ≈ 0.71 units | set position **exactly** (no interpolation) | — |
+| `≤ 40000.0` | ≤ **200 units** | normal interpolation toward the target | **1.5** (→ net unit speed) |
+| `> 40000.0` and `≤ 90000.0` | **200–300 units** | **fast catch-up**; also copies the server target into the live world-X/Z mirror | **3.0** (→ net ≈ 2× speed) |
+| `> 90000.0` | **> 300 units** | **hard teleport** — set position to the target, reset to idle motion | — |
+| motion-code `== 5` | — | **cell relocation / teleport** — recompute the spatial cell from the new XZ; no interpolation | — |
+
+After applying a band, the handler re-binds the interpolation target + facing, refreshes weapon/joint
+visuals, and runs the walk/run state machine below. So the "smooth interpolation vs catch-up vs
+teleport" of §18.4 is implemented as **the same forward-integration step run at a higher `moveScale`**
+for the catch-up band, and as a direct position write for the teleport / exact-set cases — not as a
+distinct lerp routine. [CONFIRMED — squared thresholds 0.5 / 40000 / 90000, multipliers 1.5 / 3.0,
+and the motion-code-5 cell-relocation branch]
+
+**Motion-end emit and remote catch-up multipliers.** When an actor reaches the end of its current
+motion segment while still flagged in-motion: the **local player** emits `2/13` carrying its current
+position XZ (with the heading toward the move target) and returns to idle; a **remote** actor instead
+has its `moveScale` (Actor +0x3FC) bumped so it finishes the segment faster between the server's
+sparse position pushes — **4.5** for a remote PC (sort 1) and **2.5** for a non-PC remote. [CONFIRMED]
+
+**Idle / walk / run state machine.** The motion applier is gated first by the death state
+(`lifecycle_state` / Actor +0x58C `== 8` → no motion). Otherwise the **run flag (Actor +0x414**, fed
+by the `5/13` run flag) selects the locomotion clip and state:
+
+- run flag **≠ 1** → set `lifecycle_state = 2` (**walk**) and play the **walk clip** (motion record
+  **+0x48**);
+- run flag **== 1** → play the **run clip** (motion record **+0x4C**) and set `lifecycle_state = 3`
+  (**run**).
+
+The same run flag selects the walk-rate (+0x30) vs run-rate (+0x34) speed source above, so speed and
+clip stay consistent. The set of states treated as **motion-active** (the gate the emit / footstep /
+combat paths test) is **{2 walk, 3 run, 4 motion, 17 special}**; idle is state 1 and is the
+non-motion default. [CONFIRMED]
+
+> **What stays capture/RUNTIME-pending.** The per-map numeric walk/run rates (motion-record +0x30 /
+> +0x34 values), the on-wire target/position VALUES the `5/13` and `2/13` bodies carry, the move
+> heartbeat's wall-clock cadence (§18.1), and the global slow-modifier table's runtime contents are
+> data/wire, not static constants — do not hard-code them. The **step formula, the `÷1.5`
+> normalisation, the `moveScale` band values (1.5 / 3.0 / 4.5 / 2.5), the squared thresholds
+> (0.5 / 4.0 / 400 / 40000 / 90000), the instantaneous facing, and the {idle 1 / walk 2 / run 3}
+> state mapping are static facts** and are safe to implement.
+
 | Opcode | Dir | Size | Role |
 |---|---|---|---|
 | `2/13` | C2S | 16 | `CmsgMoveRequest` — movement-intent emitter (heading + dest + tag=3 + runState). |
